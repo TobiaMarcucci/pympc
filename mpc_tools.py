@@ -106,14 +106,16 @@ def linear_program(f, A, b, x_bound=None, toll= 1e-9):
     cost_min = f.T.dot(x_min)
     return [x_min, cost_min]
 
-def quadratic_program(H, f, A, b, x_bound=None):
+def quadratic_program(H, f, A, b, C=None, d=None, x_bound=None):
     """
-    solves the quadratic program min x^t * H * x + f^T * x s.t. A * x <= b
+    solves the quadratic program min x^t * H * x + f^T * x s.t. A * x <= b, C * x = d
     INPUTS:
     H -> Hessian of the cost function
     f -> linear term of the cost function
-    A -> left hand side of the constraints
-    b -> right hand side of the constraints
+    A -> left hand side of the inequality constraints
+    b -> right hand side of the inequality constraints
+    C -> left hand side of the equality constraints
+    d -> right hand side of the equality constraints
     OUTPUTS:
     x_min -> argument which minimizes
     cost_min -> minimum of the cost function
@@ -125,7 +127,10 @@ def quadratic_program(H, f, A, b, x_bound=None):
     prog = mp.MathematicalProgram()
     x = prog.NewContinuousVariables(n, "x")
     for i in range(0, m):
-        prog.AddLinearConstraint((A[i,:] + 1e-15).dot(x) <= b[i])
+        prog.AddLinearConstraint(A[i,:].dot(x) <= b[i])
+    if C is not None:
+        for i in range(C.shape[0]):
+            prog.AddLinearConstraint(C[i, :].dot(x) == d[i])
     prog.AddQuadraticCost(H, f, x)
     # set bounds to the solution
     if x_bound is not None:
@@ -182,7 +187,7 @@ class Polytope:
     """
     polytope lhs * x <= rhs
     """
-    
+
     def __init__(self, lhs, rhs):
         self.lhs = lhs
         self.rhs = rhs
@@ -216,7 +221,7 @@ class Polytope:
             self.bounded = False
         elif self.n_variables == 1:
             self.assemble_1D()
-        elif self.n_variables > 1: 
+        elif self.n_variables > 1:
             self.assemble_multiD()
         if self.empty:
             print('Empty polytope')
@@ -612,10 +617,10 @@ class MPCController:
                             tested_active_sets.append(active_set)
                             # check LICQ for the given active set
                             licq_flag = licq_check(self.G, active_set)
-                            # if LICQ holds  
+                            # if LICQ holds
                             if licq_flag:
                                 cr_to_be_explored.append(CriticalRegion(active_set, self.H, self.G, self.W, self.S))
-                            # correct active set if LICQ doesn't hold 
+                            # correct active set if LICQ doesn't hold
                             else:
                                 print('LICQ does not hold for the active set ' + str(active_set))
                                 active_set = active_set_if_not_licq(active_set, facet_index, cr, self.H, self.G, self.W, self.S)
@@ -641,7 +646,7 @@ class MPCController:
         u = z - np.linalg.inv(self.H).dot(self.F.T.dot(x))
         lam = cr.lambda_optimal(x)
         cost_to_go = u.T.dot(self.H.dot(u)) + x.T.dot(self.F).dot(u)
-        return [u, cost_to_go, lam] 
+        return [u, cost_to_go, lam]
 
 class CriticalRegion:
     # this is from:
@@ -652,7 +657,7 @@ class CriticalRegion:
         self.active_set = active_set
         self.inactive_set = list(set(range(0, G.shape[0])) - set(active_set))
         self.boundaries(H, G, W, S)
-        # if the critical region is empty return 
+        # if the critical region is empty return
         if self.polytope.empty:
             return
         self.candidate_active_sets()
@@ -671,7 +676,7 @@ class CriticalRegion:
         H_A = np.linalg.inv(G_A.dot(H_inv.dot(G_A.T)))
         self.lambda_A_constant = - H_A.dot(W_A)
         self.lambda_A_linear = - H_A.dot(S_A)
-        # primal variable explicit solution 
+        # primal variable explicit solution
         self.z_constant = - H_inv.dot(G_A.T.dot(self.lambda_A_constant))
         self.z_linear = - H_inv.dot(G_A.T.dot(self.lambda_A_linear))
         # equation (12) (revised, only inactive indices...)
