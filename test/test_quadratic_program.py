@@ -8,7 +8,6 @@ import mpc_tools.mpcqp as mqp
 
 class TestQuadraticProgram(unittest.TestCase):
     def test_round_trip(self):
-
         np.random.seed(0)
         for i in range(20):
             x_goal = np.random.rand(3) * 20 - 10
@@ -86,7 +85,7 @@ class TestQuadraticProgram(unittest.TestCase):
             zstar = simple_z.solve()
             self.assertTrue(np.allclose(zstar, xstar))
 
-    def test_elimination(self):
+    def test_equality_elimination(self):
         m = 1.
         l = 1.
         g = 10.
@@ -142,6 +141,24 @@ class TestQuadraticProgram(unittest.TestCase):
             self.assertEqual(simple_eliminated.C.shape[0], 0)
             self.assertEqual(simple_eliminated.d.shape[0], 0)
             self.assertTrue(np.allclose(simple.solve(), simple_eliminated.solve()))
+
+    def test_inequality_elimination(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] >= 0)
+        prog.AddLinearConstraint(x[1] >= 0)
+        prog.AddLinearConstraint(x[0] + x[1] <= 1)
+        prog.AddLinearConstraint(x[0] + x[1] <= 2)
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        reduced = qp.eliminate_redundant_inequalities()
+
+        # Sort the rows of A. Kind of gross.
+        order = sorted(range(reduced.A.shape[0]), key=lambda i: tuple(reduced.A[i, :]))
+        self.assertTrue(np.allclose(reduced.A[order, :],
+                                    np.array([[-1, 0],
+                                              [0, -1],
+                                              [1 / np.sqrt(2), 1 / np.sqrt(2)]])))
+        self.assertTrue(np.allclose(reduced.b[order], np.array([0, 0, 1 / np.sqrt(2)])))
 
     def test_mpc_order(self):
         m = 1.

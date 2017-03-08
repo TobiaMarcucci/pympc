@@ -1,6 +1,7 @@
 import itertools
 import numpy as np
 import pydrake.solvers.mathematicalprogram as mp
+from mpc_tools import Polytope
 
 
 def extract_linear_equalities(prog):
@@ -295,6 +296,23 @@ class SimpleQuadraticProgram(object):
                 mask[i] = False
         new_program.C = new_program.C[mask, :]
         new_program.d = new_program.d[mask]
+        return new_program
+
+    def eliminate_redundant_inequalities(self):
+        """
+        Returns a new quadratic program with all redundant inequality
+        constraints removed.
+        """
+        p = Polytope(self.A.copy(), self.b.copy().reshape((-1, 1)))
+        p.assemble()
+        A = p.lhs_min
+        b = p.rhs_min.reshape((-1))
+        assert A.shape[1] == self.A.shape[1]
+        assert A.shape[0] == b.size
+        new_program = SimpleQuadraticProgram(self.H, self.f,
+                                             A, b,
+                                             self.C, self.d,
+                                             self.T)
         return new_program
 
     def permute_variables(self, new_order):
