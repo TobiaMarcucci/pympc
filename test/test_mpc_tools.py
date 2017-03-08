@@ -3,7 +3,7 @@ from __future__ import absolute_import
 import unittest
 import numpy as np
 
-from .. import mpc_tools as mpc
+import mpc_tools as mpc
 
 # https://docs.python.org/2/library/unittest.html
 
