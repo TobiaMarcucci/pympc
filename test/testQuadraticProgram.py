@@ -1,8 +1,11 @@
+from __future__ import absolute_import
+
 import unittest
 import numpy as np
-import mpc.symbolic as sym
-from mpc.mpc_tools import quadratic_program, DTLinearSystem
 import pydrake.solvers.mathematicalprogram as mp
+
+from .. import symbolic as sym
+from ..mpc_tools import quadratic_program, DTLinearSystem
 
 
 class TestQuadraticProgram(unittest.TestCase):
