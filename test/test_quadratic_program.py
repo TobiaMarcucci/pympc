@@ -291,7 +291,7 @@ class TestQuadraticProgram(unittest.TestCase):
             assert prog.Solve() == mp.SolutionResult.kSolutionFound
             qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
             mpc_qp = mqp.CanonicalMPCQP.from_mathematicalprogram(prog, u, x)
-            self.assertTrue(np.allclose(qp.solve(), mpc_qp.solve(), atol=1e-7))
+            self.assertTrue(np.allclose(qp.solve(), mpc_qp.solve(), atol=1e-4))
 
 if __name__ == '__main__':
     unittest.main()

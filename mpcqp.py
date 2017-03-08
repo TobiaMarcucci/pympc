@@ -372,6 +372,7 @@ class CanonicalMPCQP(object):
         preserve[:(nu + x.shape[0])] = True
         qp = qp.eliminate_equality_constrained_variables(preserve)
         qp = qp.transform_goal_to_origin()
+        qp = qp.eliminate_redundant_inequalities()
 
         assert np.allclose(qp.f, 0)
         assert np.allclose(qp.C, 0)
