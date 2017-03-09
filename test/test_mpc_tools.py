@@ -10,7 +10,79 @@ import mpc_tools as mpc
 
 class TestMPCTools(unittest.TestCase):
 
-    def test_polytope(self):
+    def test_linear_program(self):
+
+        # trivial lp
+        f = np.ones((2,1))
+        A = np.array([[1.,0.],[-1.,0.],[0.,1.],[0.,-1.]])
+        b = np.array([[5.],[5.],[1.],[1.]])
+        true_x_min = np.array([[-5.],[-1.]])
+        true_cost_min = -6.
+        [x_min, cost_min, status] = mpc.linear_program(f, A, b)
+        self.assertTrue(np.isclose(cost_min, true_cost_min))
+        self.assertTrue(all(np.isclose(x_min, true_x_min)))
+        self.assertEqual(status, 0)
+
+        # unfeasible lp
+        f = np.ones(2)
+        A = np.array([[0.,1.],[0.,-1.]])
+        b = np.array([[0.],[-1.]])
+        [x_min, cost_min, status] = mpc.linear_program(f, A, b)
+        self.assertTrue(np.isnan(cost_min))
+        self.assertTrue(all(np.isnan(x_min)))
+        self.assertEqual(status, 1)
+
+        # unbounded lp
+        f = np.ones((2,1))
+        A = np.array([[1.,0.],[0.,1.],[0.,-1.]])
+        b = np.array([[0.],[1.],[1.]])
+        true_x_min = np.array([[-np.inf], [-1.]])
+        true_cost_min = -np.inf
+        [x_min, cost_min, status] = mpc.linear_program(f, A, b)
+        self.assertTrue(np.isclose(cost_min, true_cost_min))
+        self.assertTrue(all(np.isclose(x_min, true_x_min)))
+        self.assertEqual(status, 2)
+
+        # bounded lp with unbounded domain
+        f = np.array([[0.],[1.]])
+        A = np.array([[0.,-1.]])
+        b = np.zeros((1,1))
+        true_cost_min = 0.
+        true_x1_min = np.zeros((1,1))
+        [x_min, cost_min, status] = mpc.linear_program(f, A, b)
+        self.assertTrue(np.isclose(cost_min, true_cost_min))
+        self.assertTrue(np.isclose(x_min[1], true_x1_min))
+        self.assertEqual(status, 0)
+
+
+
+    def test_linear_program(self):
+
+        # trivial qp
+        H = np.eye(2)
+        f = np.zeros((2,1))
+        A = np.array([[1.,0.],[0.,1.]])
+        b = np.array([[-1.],[-1.]])
+        true_x_min = np.array([[-1.],[-1.]])
+        true_cost_min = 1.
+        [x_min, cost_min, status] = mpc.quadratic_program(H, f, A, b)
+        self.assertTrue(np.isclose(cost_min, true_cost_min))
+        self.assertTrue(all(np.isclose(x_min, true_x_min)))
+        self.assertEqual(status, 0)
+
+        # unfeasible qp
+        H = np.eye(2)
+        f = np.zeros((2,1))
+        A = np.array([[0.,1.],[0.,-1.]])
+        b = np.array([[0.],[-1.]])
+        [x_min, cost_min, status] = mpc.quadratic_program(H, f, A, b)
+        self.assertTrue(np.isnan(cost_min))
+        self.assertTrue(all(np.isnan(x_min)))
+        self.assertEqual(status, 1)
+
+
+
+    def test_Polytope(self):
 
         # unbounded 1d
         lhs = np.array([[1.]])
@@ -22,7 +94,7 @@ class TestMPCTools(unittest.TestCase):
         # unbounded 2d
         lhs = np.array([[1.,0.],[-1.,0.],[0.,1.]])
         rhs = np.array([[1.],[1.],[0.]])
-        p = mpc.Polytope(lhs,rhs)
+        p = mpc.Polytope(lhs, rhs)
         with self.assertRaises(ValueError):
             p.assemble()
 
@@ -104,7 +176,6 @@ class TestMPCTools(unittest.TestCase):
         e = [(p.lhs_min[i,:]*p.facet_centers[i] - p.rhs_min[i])[0] for i in range(0,len(true_minimal_facets))]
         self.assertTrue(np.isclose(np.linalg.norm(e),0.))
 
-
         # add_ functions 2d
         x_max = np.ones((2,1))
         x_min = -x_max
@@ -130,6 +201,85 @@ class TestMPCTools(unittest.TestCase):
         self.assertEqual(p.minimal_facets, true_minimal_facets)
         e = [(p.lhs_min[i,:].dot(p.facet_centers[i]) - p.rhs_min[i])[0] for i in range(0,len(true_minimal_facets))]
         self.assertTrue(np.isclose(np.linalg.norm(e),0.))
+
+        return
+
+
+
+    def test_DTLinearSystem(self):
+
+        # constinuous time double integrator
+        A = np.array([[0., 1.],[0., 0.]])
+        B = np.array([[0.],[1.]])
+        t_s = 1.
+
+        # discrete time from continuous
+        sys = mpc.DTLinearSystem.from_continuous(t_s, A, B)
+        A_discrete = np.eye(2) + A*t_s
+        B_discrete = B*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(B)
+        self.assertTrue(all(np.isclose(sys.A.flatten(), A_discrete.flatten())))
+        self.assertTrue(all(np.isclose(sys.B.flatten(), B_discrete.flatten())))
+
+        # simulation free dynamics
+        x0 = np.array([[0.],[1.]])
+        N = 10
+        x_trajectory = sys.simulate(x0, N)
+        real_x_trajectory = [[x0[0] + x0[1]*i*t_s, x0[1]] for i in range(0,N+1)]
+        self.assertTrue(all(np.isclose(x_trajectory, real_x_trajectory).flatten()))
+
+        # simulation forced dynamics
+        u = np.array([[1.]])
+        u_sequence = [u] * N
+        x_trajectory = sys.simulate(x0, N, u_sequence)
+        real_x_trajectory = [[x0[0] + x0[1]*i*t_s + u[0,0]*(i*t_s)**2/2., x0[1] + u*i*t_s] for i in range(0,N+1)]
+        self.assertTrue(all(np.isclose(x_trajectory, real_x_trajectory).flatten()))
+
+    def test_MPCController(self):
+
+        # double integrator
+        A = np.array([[0., 1.],[0., 0.]])
+        B = np.array([[0.],[1.]])
+        t_s = 1.
+        sys = mpc.DTLinearSystem.from_continuous(t_s, A, B)
+
+        # mpc controller
+        N = 5
+        Q = np.eye(A.shape[0])
+        R = np.eye(B.shape[1])
+        terminal_cost = 'dare'
+        controller = mpc.MPCController(sys, N, Q, R, terminal_cost)
+        x_max = np.array([[1.], [1.]])
+        x_min = -x_max
+        controller.add_state_bound(x_max, x_min)
+        u_max = np.array([[1.]])
+        u_min = -u_max
+        controller.add_input_bound(u_max, u_min)
+        terminal_constraint = 'moas'
+        controller.set_terminal_constraint(terminal_constraint)
+        controller.assemble()
+
+        # explicit vs implicit solution
+        controller.compute_explicit_solution()
+        print controller.critical_regions
+        n_test = 10
+        for i in range(0, n_test):
+            #x0 = np.random.rand(2,1)
+            x0 = np.ones((2,1))*10000.
+            u_explicit = controller.evaluate_explicit_solution(x0)[0]
+            #u_implicit = controller.feedforward(x0)
+            print u_explicit
+            #print u_implicit
+
+
+
+
+
+
+
+
+
+
+
 
 if __name__ == '__main__':
     unittest.main()

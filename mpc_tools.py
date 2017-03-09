@@ -10,28 +10,40 @@ from pyhull.halfspace import HalfspaceIntersection
 import time
 
 
+
 def plot_input_sequence(u_sequence, t_s, N, u_max=None, u_min=None):
     """
-    plots the input sequence "u_sequence" and its bounds "u_max" and "u_min" as functions of time
+    Plots the input sequence and its bounds as functions of time.
+
     INPUTS:
-    t_s -> sampling time
-    N -> number of steps
-    u_sequence -> input sequence, list of dimension (number of steps = N)
-    u_max -> upper bound on the inputs of dimension (number of inputs)
-    u_min -> lower bound on the inputs of dimension (number of inputs)
-    OUTPUTS:
-    none
+        u_sequence: list with N inputs (2D numpy vectors) of dimension (n_u,1) each
+        t_s: sampling time
+        N: number of steps
+        u_max: upper bound on the input (2D numpy vectors of dimension (n_u,1))
+        u_min: lower bound on the input (2D numpy vectors of dimension (n_u,1))
     """
+
+    # dimension of the input
     n_u = u_sequence[0].shape[0]
+
+    # time axis
     t = np.linspace(0,N*t_s,N+1)
+
+    # plot each input element separately
     for i in range(0, n_u):
         plt.subplot(n_u, 1, i+1)
+
+        # plot input sequence
         u_i_sequence = [u_sequence[j][i] for j in range(0,N)]
         input_plot, = plt.step(t, [u_i_sequence[0]] + u_i_sequence, 'b')
+
+        # plot bounds iff provided
         if u_max is not None:
             bound_plot, = plt.step(t, u_max[i,0]*np.ones(t.shape), 'r')
         if u_min is not None:
             bound_plot, = plt.step(t, u_min[i,0]*np.ones(t.shape), 'r')
+
+        # miscellaneous options
         plt.ylabel(r'$u_{' + str(i+1) + '}$')
         plt.xlim((0.,N*t_s))
         if i == 0:
@@ -41,28 +53,43 @@ def plot_input_sequence(u_sequence, t_s, N, u_max=None, u_min=None):
                 plt.legend([input_plot], ['Optimal control'], loc=1)
     plt.xlabel(r'$t$')
 
+    return
+
+
+
 def plot_state_trajectory(x_trajectory, t_s, N, x_max=None, x_min=None):
     """
-    plots the state trajectory "x_trajectory" and its bounds "x_max" and "x_min" as functions of time
+    Plots the state trajectory and its bounds as functions of time.
+
     INPUTS:
-    x_trajectory -> state trajectory, list of dimension (number of steps + 1= N + 1)
-    t_s -> sampling time
-    N -> number of steps
-    x_max -> upper bound on the states of dimension (number of states)
-    x_min -> lower bound on the states of dimension (number of states)
-    OUTPUTS:
-    none
+        x_trajectory: list with N+1 states (2D numpy vectors) of dimension (n_x,1) each
+        t_s: sampling time
+        N: number of steps
+        x_max: upper bound on the state (2D numpy vectors of dimension (n_x,1))
+        x_min: lower bound on the state (2D numpy vectors of dimension (n_x,1))
     """
+ 
+    # dimension of the state
     n_x = x_trajectory[0].shape[0]
+
+    # time axis
     t = np.linspace(0,N*t_s,N+1)
+
+    # plot each state element separately
     for i in range(0, n_x):
         plt.subplot(n_x, 1, i+1)
+
+        # plot state trajectory
         x_i_trajectory = [x_trajectory[j][i] for j in range(0,N+1)]
         state_plot, = plt.plot(t, x_i_trajectory, 'b')
+
+        # plot bounds iff provided
         if x_max is not None:
             bound_plot, = plt.step(t, x_max[i,0]*np.ones(t.shape),'r')
         if x_min is not None:
             bound_plot, = plt.step(t, x_min[i,0]*np.ones(t.shape),'r')
+
+        # miscellaneous options
         plt.ylabel(r'$x_{' + str(i+1) + '}$')
         plt.xlim((0.,N*t_s))
         if i == 0:
@@ -72,120 +99,218 @@ def plot_state_trajectory(x_trajectory, t_s, N, x_max=None, x_min=None):
                 plt.legend([state_plot], ['Optimal trajectory'], loc=1)
     plt.xlabel(r'$t$')
 
-def linear_program(f, A, b, x_bound=None, toll= 1e-9):
+    return
+
+
+
+def linear_program(f, A, b, x_bound=1.e9, toll=1.e-3):
     """
-    solves the linear program min f^T * x s.t. { A * x <= b , ||x||_inf <= x_bound }
+    Solves the linear program
+    minimize f^T * x
+    s. t.    A * x <= b
+             ||x||_inf <= x_bound
+
     INPUTS:
-    f -> gradient of the cost function
-    A -> left hand side of the constraints
-    b -> right hand side of the constraints
-    x_bound -> bound on the infinity norm of the solution
+        f: gradient of the cost function (2D numpy array)
+        A: left hand side of the constraints (2D numpy array)
+        b: right hand side of the constraints (2D numpy array)
+        x_bound: bound on the infinity norm of the solution (used to detect unbounded solutions!)
+        toll: tollerance in the detection of unbounded solutions
+    
     OUTPUTS:
-    x_min -> argument which minimizes
-    cost_min -> minimum of the cost function
+        x_min: argument which minimizes the cost (its elements are nan if unfeasible and inf if unbounded)
+        cost_min: minimum of the cost function (nan if unfeasible and inf if unbounded)
+        status: status of the solution (=0 if solved, =1 if unfeasible, =2 if unbounded)
     """
+
     # program dimensions
-    n = f.shape[0]
-    m = A.shape[0]
+    n_variables = f.shape[0]
+    n_constraints = A.shape[0]
+
     # build program
     prog = mp.MathematicalProgram()
-    x = prog.NewContinuousVariables(n, "x")
-    for i in range(0, m):
+    x = prog.NewContinuousVariables(n_variables, "x")
+    for i in range(0, n_constraints):
         prog.AddLinearConstraint((A[i,:] + 1e-15).dot(x) <= b[i])
-    prog.AddLinearCost((f + 1e-15).T.dot(x))
+    prog.AddLinearCost((f.flatten() + 1e-15).dot(x))
+
     # set bounds to the solution
     if x_bound is not None:
-        for i in range(0, n):
+        for i in range(0, n_variables):
                 prog.AddLinearConstraint(x[i] <= x_bound)
                 prog.AddLinearConstraint(x[i] >= -x_bound)
+
     # solve
     solver = GurobiSolver()
     result = solver.Solve(prog)
-    x_min = prog.GetSolution(x).reshape(n,1)
-    # retrieve solution
+    x_min = np.reshape(prog.GetSolution(x), (n_variables,1))
     cost_min = f.T.dot(x_min)
-    return [x_min, cost_min]
+    status = 0
 
-def quadratic_program(H, f, A, b, C=None, d=None, x_bound=None):
+    # unfeasible
+    if any(np.isnan(x_min)) or np.isnan(cost_min):
+        status = 1
+        return [x_min, cost_min, status]
+
+    # unbounded
+    x_min[np.where(x_min > x_bound - toll)] = np.inf
+    x_min[np.where(x_min < - x_bound + toll)] = -np.inf
+    if any(f[np.where(np.isinf(x_min))] != 0.):
+        cost_min = -np.inf
+        status = 2
+
+    return [x_min, cost_min, status]
+
+
+
+def quadratic_program(H, f, A, b, C=None, d=None):
     """
-    solves the quadratic program min x^t * H * x + f^T * x s.t. A * x <= b, C * x = d
+    Solves the convex (i.e., H > 0) quadratic program
+    minimize x^T * H * x + f^T * x
+    s. t.    A * x <= b
+             C * x = d
+
     INPUTS:
-    H -> Hessian of the cost function
-    f -> linear term of the cost function
-    A -> left hand side of the inequality constraints
-    b -> right hand side of the inequality constraints
-    C -> left hand side of the equality constraints
-    d -> right hand side of the equality constraints
+        H: Hessian of the cost function (bidimensional numpy array)
+        f: linear term of the cost function (monodimensional numpy array)
+        A: left hand side of the inequalities (bidimensional numpy array)
+        b: right hand side of the inequalities (monodimensional numpy array)
+        C: left hand side of the equalities (bidimensional numpy array)
+        d: right hand side of the equalities (monodimensional numpy array)
+
     OUTPUTS:
-    x_min -> argument which minimizes
-    cost_min -> minimum of the cost function
+        x_min: argument which minimizes the cost (its elements are nan if unfeasible and inf if unbounded)
+        cost_min: minimum of the cost function (nan if unfeasible and inf if unbounded)
+        status: status of the solution (=0 if solved, =1 if unfeasible)
     """
+
     # program dimensions
-    n = f.shape[0]
-    m = A.shape[0]
+    n_variables = f.shape[0]
+    n_constraints = A.shape[0]
+
     # build program
     prog = mp.MathematicalProgram()
-    x = prog.NewContinuousVariables(n, "x")
-    for i in range(0, m):
-        prog.AddLinearConstraint(A[i,:].dot(x) <= b[i])
+    x = prog.NewContinuousVariables(n_variables, "x")
+    for i in range(0, n_constraints):
+        prog.AddLinearConstraint((A[i,:] + 1e-15).dot(x) <= b[i])
     if C is not None:
         for i in range(C.shape[0]):
             prog.AddLinearConstraint(C[i, :].dot(x) == d[i])
     prog.AddQuadraticCost(H, f, x)
-    # set bounds to the solution
-    if x_bound is not None:
-        for i in range(0, n):
-            prog.AddLinearConstraint(x[i] <= x_bound)
-            prog.AddLinearConstraint(x[i] >= -x_bound)
+
     # solve
     solver = GurobiSolver()
     result = solver.Solve(prog)
-    x_min = prog.GetSolution(x).reshape(n,1)
+    x_min = np.reshape(prog.GetSolution(x), (n_variables,1))
     cost_min = .5*x_min.T.dot(H.dot(x_min)) + f.T.dot(x_min)
-    return [x_min, cost_min]
+    status = 0
 
-def maximum_output_admissible_set(A, lhs_x, rhs_x):
-    if np.max(np.absolute(np.linalg.eig(A)[0])) > 1:
+    # unfeasible
+    if any(np.isnan(x_min)) or np.isnan(cost_min):
+        status = 1
+
+    return [x_min, cost_min, status]
+
+
+
+def maximum_output_admissible_set(A, lhs, rhs):
+    """
+    Returns the maximum output admissible set (see Gilbert, Tan - Linear Systems with State and
+    Control Constraints, The Theory and Application of Maximal Output Admissible Sets) for a
+    non-actuated linear system with state constraints (the output vector is supposed to be the
+    entire state of the system , i.e. y=x and C=I).
+
+    INPUTS:
+        A: state transition matrix
+        lhs: left-hand side of the constraints lhs * x <= rhs
+        rhs: right-hand side of the constraints lhs * x <= rhs
+
+    OUTPUTS:
+        moas: maximum output admissible set (instatiated as a polytope)
+        t: minimum number of steps in the future that define the moas
+    """
+
+    # ensure that the system is stable (otherwise the algorithm doesn't converge)
+    eig_max = np.max(np.absolute(np.linalg.eig(A)[0]))
+    if eig_max > 1:
         raise ValueError('Cannot compute MOAS for unstable systems')
+
+    # Gilber and Tan algorithm
+    [n_constraints, n_variables] = lhs.shape
     t = 0
     convergence = False
     while convergence == False:
-        # cost function jacobians for all i
-        J = lhs_x.dot(np.linalg.matrix_power(A,t+1))
+
+        # cost function gradients for all i
+        J = lhs.dot(np.linalg.matrix_power(A,t+1))
+
         # constraints to each LP
-        cons_lhs = np.vstack([lhs_x.dot(np.linalg.matrix_power(A,k)) for k in range(0,t+1)])
-        cons_rhs = np.vstack([rhs_x for k in range(0,t+1)])
+        cons_lhs = np.vstack([lhs.dot(np.linalg.matrix_power(A,k)) for k in range(0,t+1)])
+        cons_rhs = np.vstack([rhs for k in range(0,t+1)])
+
         # list of all minima
-        s = rhs_x.shape[0]
-        J_sol = [(-linear_program(-J[i,:].T, cons_lhs, cons_rhs)[1] - rhs_x[i]) for i in range(0,s)]
+        J_sol = [] 
+        for i in range(0, n_constraints):
+            J_sol_i = linear_program(np.reshape(-J[i,:], (n_variables,1)), cons_lhs, cons_rhs)[1]
+            J_sol.append(-J_sol_i - rhs[i])
+
+        # convergence check
         if np.max(J_sol) < 0:
             convergence = True
         else:
             t += 1
-    # remove redundant constraints
+
+    # define polytope
     moas = Polytope(cons_lhs, cons_rhs)
     moas.assemble()
+
     return [moas, t]
+
+
 
 def licq_check(G, active_set, max_cond=1e9):
     """
-    checks if licq holds
+    Checks if LICQ holds for the given active set
+
     INPUTS:
-    G -> gradient of the constraints
-    active_set -> active set
+        G: gradient of the constraints
+        active_set: active set
+        max_cond: maximum condition number of the squared active constraints
+    
     OUTPUTS:
-    licq -> flag, = True if licq holds, = False otherwise
+        licq -> flag (True if licq holds, False if licq doesn't hold)
     """
+    
+    # select active constraints
     G_A = G[active_set,:]
+
+    # check condion number of the squared active constraints
     licq = True
     cond = np.linalg.cond(G_A.dot(G_A.T))
     if cond > max_cond:
         licq = False
+
     return licq
+
+
 
 class Polytope:
     """
-    polytope lhs * x <= rhs
+    Defines a polytope as {x | lhs * x <= rhs}.
+
+    VARIABLES:
+        lhs: left-hand side of redundant description of the polytope {x | lhs * x <= rhs}
+        rhs: right-hand side of redundant description of the polytope {x | lhs * x <= rhs}
+        assembled: flag that determines when it isn't possible to add constraints
+        empty: flag that determines if the polytope is empty
+        bounded: flag that determines if the polytope is bounded (if not a ValueError is thrown)
+        coincident_facets: list of of lists of coincident facets (one list for each facet)
+        vertices: list of vertices of the polytope (each one is a 1D array)
+        minimal_facets: list of indices of the non-redundant facets
+        lhs_min: left-hand side of non-redundant facets
+        rhs_min: right-hand side of non-redundant facets
+        facet_centers: list of centers of each non-redundant facet
+            (i.e.: lhs_min[i,:].dot(facet_centers[i]) = rhs_min[i])
     """
 
     def __init__(self, lhs, rhs):
@@ -229,7 +354,7 @@ class Polytope:
             raise ValueError('Unbounded polyhedron: only polytopes allowed')
         return
 
-    def normalize(self, toll=1e-6):
+    def normalize(self, toll=1e-8):
         for i in range(0, self.n_facets):
             norm_factor = np.linalg.norm(self.lhs[i,:])
             if norm_factor > toll:
@@ -270,10 +395,10 @@ class Polytope:
 
     def assemble_multiD(self):
         interior_point = self.interior_point()
-        if interior_point is None:
+        if any(np.isnan(interior_point)):
             self.empty = True
             return
-        if any(np.isnan(interior_point).flatten()):
+        if any(np.isinf(interior_point).flatten()):
             self.bounded = False
             return
         halfspaces = []
@@ -281,7 +406,7 @@ class Polytope:
             halfspace = Halfspace(self.lhs[i,:].tolist(), (-self.rhs[i,0]).tolist())
             halfspaces.append(halfspace)
         polyhedron_qhull = HalfspaceIntersection(halfspaces, interior_point.flatten().tolist())
-        self.vertices = np.vstack(polyhedron_qhull.vertices)
+        self.vertices = polyhedron_qhull.vertices
         if any(np.isinf(self.vertices).flatten()):
             self.bounded = False
             return
@@ -299,19 +424,19 @@ class Polytope:
         self.coincident_facets()
         return
 
-    def interior_point(self, min_penetration=-1.e-6):
+    def interior_point(self):
         """
-        minimizes y s.t. lhs x - rhs <= y
+        Finds an interior point solving the linear program
+        minimize y
+        s.t.     lhs * x - rhs <= y
         """
-        cost_gradient_ip = np.zeros(self.n_variables+1)
+        cost_gradient_ip = np.zeros((self.n_variables+1, 1))
         cost_gradient_ip[-1] = 1.
         lhs_ip = np.hstack((self.lhs, -np.ones((self.n_facets, 1))))
-        [interior_point, penetration] = linear_program(cost_gradient_ip, lhs_ip, self.rhs)
+        [interior_point, penetration] = linear_program(cost_gradient_ip, lhs_ip, self.rhs)[0:2]
         interior_point = interior_point[0:-1]
         if penetration > 0:
-            interior_point = None
-        elif penetration > min_penetration:
-            raise ValueError('Polytope too small! numeric precision cannot be guaranteed...')
+            interior_point[:] = np.nan
         return interior_point
 
     def coincident_facets(self, toll=1e-8):
@@ -327,12 +452,13 @@ class Polytope:
 
     def plot(self, dim_proj=[0,1], **kwargs):
         """
-        plots a 2d projection of the polytope
+        Plots a 2d projection of the polytope.
+
         INPUTS:
-        line_style -> line style
-        dim_proj -> dimensions in which to project the polytope
+            dim_proj: dimensions in which to project the polytope
+
         OUTPUTS:
-        polytope_plot -> figure handle
+            polytope_plot: figure handle
         """
         if self.empty:
             raise ValueError('Empty polytope!')
@@ -355,15 +481,14 @@ class Polytope:
         p = Polytope(lhs, rhs)
         return p
 
+
+
 class DTLinearSystem:
 
-    def __init__(self, A, B=None):
+    def __init__(self, A, B):
         self.A = A
-        self.n_x = np.shape(A)[0]
-        if B is None:
-            B = np.array([]).reshape(self.n_x, 0)
         self.B = B
-        self.n_u = np.shape(B)[1]
+        [self.n_x, self.n_u] = np.shape(B)
         return
 
     def evolution_matrices(self, N):
@@ -377,24 +502,25 @@ class DTLinearSystem:
         return [free_evolution, forced_evolution]
 
     def simulate(self, x0, N, u_sequence=None):
-        u_sequence = np.vstack(u_sequence)
         if u_sequence is None:
-            u_sequence = np.array([]).reshape(self.n_u*N, 0)
+            u_sequence = np.zeros((self.n_u*N, 1))
+        else:
+            u_sequence = np.vstack(u_sequence)
         [free_evolution, forced_evolution] = self.evolution_matrices(N)
         # state trajectory
+        if x0.ndim == 1:
+            x0 = np.reshape(x0, (x0.shape[0],1))
         x = free_evolution.dot(x0) + forced_evolution.dot(u_sequence)
         x_trajectory = [x0]
         [x_trajectory.append(x[self.n_x*i:self.n_x*(i+1)]) for i in range(0,N)]
         return x_trajectory
 
     @staticmethod
-    def from_continuous(t_s, A, B=None):
+    def from_continuous(t_s, A, B):
         n_x = np.shape(A)[0]
-        if B is None:
-            B = np.array([]).reshape(n_x, 0)
         n_u = np.shape(B)[1]
         mat_c = np.zeros((n_x+n_u, n_x+n_u))
-        mat_c[0:n_x,:] = np.hstack((A,B))
+        mat_c[0:n_x,:] = np.hstack((A, B))
         mat_d = linalg.expm(mat_c*t_s)
         A_d = mat_d[0:n_x, 0:n_x]
         B_d = mat_d[0:n_x, n_x:n_x+n_u]
@@ -581,7 +707,6 @@ class MPCController:
         u_feedforward = quadratic_program(self.H, (x0.T.dot(self.F)).T, self.G, self.W + self.E.dot(x0))[0]
         if any(np.isnan(u_feedforward).flatten()):
             raise ValueError('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
-
         return u_feedforward
 
     def feedback(self, x0):
@@ -635,12 +760,14 @@ class MPCController:
         print('parameter space partitioned in ' + str(len(self.critical_regions)) + ' critical regions.')
 
     def evaluate_explicit_solution(self, x):
+        print('bug')
         if self.critical_regions is None:
             raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution() ...')
         # find the CR to which the test point belongs
         for cr in self.critical_regions:
             if np.max(cr.polytope.lhs_min.dot(x) - cr.polytope.rhs_min) <= 0:
                 break
+                print('bug')
         # derive explicit solution
         z = cr.z_optimal(x)
         u = z - np.linalg.inv(self.H).dot(self.F.T.dot(x))
@@ -839,7 +966,7 @@ def active_set_if_not_licq(candidate_active_set, ind, parent, H, G, W, S, dist=1
         # solve lp from theorem 4
         G_A = G[candidate_active_set,:]
         n_lam = G_A.shape[0]
-        cost = np.zeros(n_lam)
+        cost = np.zeros((n_lam,1))
         cost[candidate_active_set.index(active_set_change[0])] = -1.
         cons_lhs = np.vstack((G_A.T, -G_A.T, -np.eye(n_lam)))
 
@@ -851,7 +978,7 @@ def active_set_if_not_licq(candidate_active_set, ind, parent, H, G, W, S, dist=1
         # if the solution in bounded look at the indices of the solution
         else:
             active_set_child = []
-            for i in range(0,n_lam):
-                if lambda_sol[i,0] > toll:
+            for i in range(0, n_lam):
+                if lambda_sol[i] > toll:
                     active_set_child += [candidate_active_set[i]]
     return active_set_child
