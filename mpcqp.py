@@ -169,10 +169,19 @@ class SimpleQuadraticProgram(object):
         MathematicalProgram. Note that this destroys the sparsity pattern of
         the MathematicalProgram's constraints and costs.
         """
+        assert SimpleQuadraticProgram.check_form(prog)
         C, d = extract_linear_equalities(prog)
         A, b = extract_linear_inequalities(prog)
         Q, q = extract_objective(prog)
         return SimpleQuadraticProgram(Q, q, A, b, C, d)
+
+    @staticmethod
+    def check_form(prog):
+        # TODO:
+        # * verify that all variables are continuous
+        # * verify that all constraints are linear
+        # * verify that all costs are linear or quadratic
+        return True
 
     def to_mathematicalprogram(self):
         prog = mp.MathematicalProgram()
