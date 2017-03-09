@@ -1,8 +1,9 @@
 import unittest
 import numpy as np
-import mpc.symbolic as sym
-from mpc.mpc_tools import quadratic_program, DTLinearSystem
 import pydrake.solvers.mathematicalprogram as mp
+
+from mpc_tools import quadratic_program, DTLinearSystem
+import mpc_tools.symbolic as sym
 
 
 class TestQuadraticProgram(unittest.TestCase):

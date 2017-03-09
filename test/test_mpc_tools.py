@@ -1,9 +1,6 @@
 import unittest
 import numpy as np
 
-import sys
-sys.path.append('..')
-
 import mpc_tools as mpc
 
 # https://docs.python.org/2/library/unittest.html
@@ -169,7 +166,7 @@ class TestMPCTools(unittest.TestCase):
         # facet centers 1d
         true_facet_centers = true_vertices
         self.assertTrue(all([any(np.all(np.isclose(facet_center, true_facet_centers),axis=1)) for facet_center in p.facet_centers]))
-        
+
         # minimal facets 1d
         true_minimal_facets = [3, 4]
         self.assertEqual(p.minimal_facets, true_minimal_facets)
@@ -191,7 +188,7 @@ class TestMPCTools(unittest.TestCase):
         # vertices 2d
         true_vertices = [[.1,.5],[-.2,.5],[.1,-.2],[-.2,-.2]]
         self.assertTrue(all([any(np.all(np.isclose(vertex, true_vertices),axis=1)) for vertex in p.vertices]))
-        
+
         # facet centers 2d
         true_facet_centers = [[-.05,.5],[-.2,.15],[-.05,-.2],[.1,.15]]
         self.assertTrue(all([any(np.all(np.isclose(facet_center, true_facet_centers),axis=1)) for facet_center in p.facet_centers]))
