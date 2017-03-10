@@ -1,6 +1,7 @@
 import itertools
 import numpy as np
 import pydrake.solvers.mathematicalprogram as mp
+from mpc_tools import Polytope
 
 
 def extract_linear_equalities(prog):
@@ -168,10 +169,19 @@ class SimpleQuadraticProgram(object):
         MathematicalProgram. Note that this destroys the sparsity pattern of
         the MathematicalProgram's constraints and costs.
         """
+        assert SimpleQuadraticProgram.check_form(prog)
         C, d = extract_linear_equalities(prog)
         A, b = extract_linear_inequalities(prog)
         Q, q = extract_objective(prog)
         return SimpleQuadraticProgram(Q, q, A, b, C, d)
+
+    @staticmethod
+    def check_form(prog):
+        # TODO:
+        # * verify that all variables are continuous
+        # * verify that all constraints are linear
+        # * verify that all costs are linear or quadratic
+        return True
 
     def to_mathematicalprogram(self):
         prog = mp.MathematicalProgram()
@@ -297,6 +307,23 @@ class SimpleQuadraticProgram(object):
         new_program.d = new_program.d[mask]
         return new_program
 
+    def eliminate_redundant_inequalities(self):
+        """
+        Returns a new quadratic program with all redundant inequality
+        constraints removed.
+        """
+        p = Polytope(self.A.copy(), self.b.copy().reshape((-1, 1)))
+        p.assemble()
+        A = p.lhs_min
+        b = p.rhs_min.reshape((-1))
+        assert A.shape[1] == self.A.shape[1]
+        assert A.shape[0] == b.size
+        new_program = SimpleQuadraticProgram(self.H, self.f,
+                                             A, b,
+                                             self.C, self.d,
+                                             self.T)
+        return new_program
+
     def permute_variables(self, new_order):
         """
         Given:
@@ -354,6 +381,7 @@ class CanonicalMPCQP(object):
         preserve[:(nu + x.shape[0])] = True
         qp = qp.eliminate_equality_constrained_variables(preserve)
         qp = qp.transform_goal_to_origin()
+        qp = qp.eliminate_redundant_inequalities()
 
         assert np.allclose(qp.f, 0)
         assert np.allclose(qp.C, 0)
