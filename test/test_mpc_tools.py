@@ -1,9 +1,10 @@
 import unittest
 import numpy as np
-
+import sys
 import mpc_tools as mpc
 
 # https://docs.python.org/2/library/unittest.html
+
 
 class TestMPCTools(unittest.TestCase):
 
@@ -231,6 +232,31 @@ class TestMPCTools(unittest.TestCase):
         real_x_trajectory = [[x0[0] + x0[1]*i*t_s + u[0,0]*(i*t_s)**2/2., x0[1] + u*i*t_s] for i in range(0,N+1)]
         self.assertTrue(all(np.isclose(x_trajectory, real_x_trajectory).flatten()))
 
+
+
+    def test_CriticalRegion(self):
+
+        # test candidate_active_sets method
+        active_set = [0,3,4]
+        minimal_facets = [0,1,2]
+        coincident_facets = [[0],[1],[2,3],[2,3],[4]]
+        minimal_coincident_facets = [coincident_facets[i] for i in minimal_facets]
+        candidate_active_sets = mpc.CriticalRegion.candidate_active_sets(active_set, minimal_coincident_facets)
+        true_candidate_active_sets = [[[3,4]],[[0,1,3,4]],[[0,2,4]]]
+        self.assertEqual(true_candidate_active_sets, candidate_active_sets)
+
+        # test candidate_active_sets method
+        weakly_active_constraints = [0,4]
+        candidate_active_sets = mpc.CriticalRegion.expand_candidate_active_sets(candidate_active_sets, weakly_active_constraints)
+        true_candidate_active_sets = [
+        [[3, 4], [0, 3, 4], [3], [0, 3]],
+        [[0, 1, 3, 4], [1, 3, 4], [0, 1, 3], [1, 3]],
+        [[0, 2, 4], [2, 4], [0, 2], [2]]
+        ]
+        self.assertEqual(true_candidate_active_sets, candidate_active_sets)
+
+
+
     def test_MPCController(self):
 
         # double integrator
@@ -258,22 +284,17 @@ class TestMPCTools(unittest.TestCase):
         # explicit vs implicit solution
         controller.compute_explicit_solution()
         print controller.critical_regions
-        n_test = 10
+        n_test = 100
         for i in range(0, n_test):
-            #x0 = np.random.rand(2,1)
-            x0 = np.ones((2,1))*10000.
-            u_explicit = controller.evaluate_explicit_solution(x0)[0]
-            #u_implicit = controller.feedforward(x0)
-            print u_explicit
-            #print u_implicit
-
-
-
-
-
-
-
-
+            x0 = np.random.rand(2,1)
+            u_explicit = controller.feedforward_explicit(x0)
+            u_implicit = controller.feedforward(x0)
+            if any(np.isnan(u_explicit)) or any(np.isnan(u_implicit)):
+                self.assertTrue(all(np.isnan(u_explicit)))
+                self.assertTrue(all(np.isnan(u_implicit)))
+            else:
+                rel_toll = 5.e-2
+                self.assertTrue(all(np.isclose(u_explicit, u_implicit, rel_toll).flatten()))
 
 
 

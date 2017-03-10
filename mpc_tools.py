@@ -8,6 +8,7 @@ import itertools
 from pyhull.halfspace import Halfspace
 from pyhull.halfspace import HalfspaceIntersection
 import time
+#from utils.ndpiecewise import NDPiecewise
 
 
 
@@ -429,6 +430,8 @@ class Polytope:
         Finds an interior point solving the linear program
         minimize y
         s.t.     lhs * x - rhs <= y
+        Returns nan if the polyhedron is empty
+        Might return inf if the polyhedron is unbounded
         """
         cost_gradient_ip = np.zeros((self.n_variables+1, 1))
         cost_gradient_ip[-1] = 1.
@@ -543,6 +546,8 @@ class DTLinearSystem:
  #        # if facet_i = - facet_j -> remove facets
  #        return
 
+
+
 class MPCController:
 
     def __init__(self, sys, N, Q, R, terminal_cost=None, terminal_constraint=None, state_constraints=None, input_constraints=None):
@@ -643,7 +648,7 @@ class MPCController:
         else:
             G_u = linalg.block_diag(*[self.input_constraints.lhs_min for i in range(0, self.N)])
             W_u = np.vstack([self.input_constraints.rhs_min for i in range(0, self.N)])
-            E_u = np.zeros((W_u.shape[0],self.sys.n_x))
+            E_u = np.zeros((W_u.shape[0], self.sys.n_x))
         return [G_u, W_u, E_u]
 
     def state_constraint_blocks(self):
@@ -706,7 +711,7 @@ class MPCController:
     def feedforward(self, x0):
         u_feedforward = quadratic_program(self.H, (x0.T.dot(self.F)).T, self.G, self.W + self.E.dot(x0))[0]
         if any(np.isnan(u_feedforward).flatten()):
-            raise ValueError('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+            print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
         return u_feedforward
 
     def feedback(self, x0):
@@ -714,271 +719,396 @@ class MPCController:
         return u_feedback
 
     def compute_explicit_solution(self):
-        tic = time.clock()
+
         # change variable for exeplicit MPC (z := u_seq + H^-1 F^T x0)
+        tic = time.clock()
         H_inv = np.linalg.inv(self.H)
         self.S = self.E + self.G.dot(H_inv.dot(self.F.T))
-        # start from the origin
+
+        # initialize the search with the origin (to which the empty AS is associated)
         active_set = []
         cr0 = CriticalRegion(active_set, self.H, self.G, self.W, self.S)
         cr_to_be_explored = [cr0]
         explored_cr = []
         tested_active_sets =[cr0.active_set]
+
         # explore the state space
         while cr_to_be_explored:
+
             # choose the first candidate in the list and remove it
             cr = cr_to_be_explored[0]
             cr_to_be_explored = cr_to_be_explored[1:]
+
+            # if the CR is not empty, find all the potential neighbors
             if cr.polytope.empty:
                 print('Empty critical region detected')
             else:
-                # explore CR
+                [cr_to_be_explored, tested_active_sets] = self.spread_critical_region(cr, cr_to_be_explored, tested_active_sets)
                 explored_cr.append(cr)
-                # for all the facets of the CR
-                for facet_index in range(0, len(cr.polytope.minimal_facets)):
-                    # for all the candidate active sets across each facet
-                    for active_set in cr.candidate_active_sets[facet_index]:
-                        if active_set not in tested_active_sets:
-                            tested_active_sets.append(active_set)
-                            # check LICQ for the given active set
-                            licq_flag = licq_check(self.G, active_set)
-                            # if LICQ holds
-                            if licq_flag:
-                                cr_to_be_explored.append(CriticalRegion(active_set, self.H, self.G, self.W, self.S))
-                            # correct active set if LICQ doesn't hold
-                            else:
-                                print('LICQ does not hold for the active set ' + str(active_set))
-                                active_set = active_set_if_not_licq(active_set, facet_index, cr, self.H, self.G, self.W, self.S)
-                                if active_set:
-                                    print('    corrected active set ' + str(active_set))
-                                    cr_to_be_explored.append(CriticalRegion(active_set, self.H, self.G, self.W, self.S))
-                                else:
-                                    print('    unfeasible critical region detected')
-        self.critical_regions = explored_cr
+
+        # collect all the critical regions and report the result
+        self.critical_regions = NDPiecewise(explored_cr)
         toc = time.clock()
         print('\nExplicit solution successfully computed in ' + str(toc-tic) + ' s:')
         print('parameter space partitioned in ' + str(len(self.critical_regions)) + ' critical regions.')
 
-    def evaluate_explicit_solution(self, x):
-        print('bug')
+    def spread_critical_region(self, cr, cr_to_be_explored, tested_active_sets):
+
+        # for all the facets of the CR and all candidate active sets across each facet
+        for facet_index in range(0, len(cr.polytope.minimal_facets)):
+            for active_set in cr.candidate_active_sets[facet_index]:
+
+                # add active set to the list of tested be sure to not explore an active set twice
+                if active_set not in tested_active_sets:
+                    tested_active_sets.append(active_set)
+
+                    # check LICQ for the given active set
+                    licq_flag = licq_check(self.G, active_set)
+
+                    # if LICQ holds, determine the critical region
+                    if licq_flag:
+                        cr_to_be_explored.append(CriticalRegion(active_set, self.H, self.G, self.W, self.S))
+                    
+                    # if LICQ doesn't hold, correct the active set and determine the critical region
+                    else:
+                        print('LICQ does not hold for the active set ' + str(active_set))
+                        active_set = self.active_set_if_not_licq(active_set, facet_index, cr)
+                        if active_set:
+                            print('    corrected active set ' + str(active_set))
+                            cr_to_be_explored.append(CriticalRegion(active_set, self.H, self.G, self.W, self.S))
+                        else:
+                            print('    unfeasible critical region detected')
+        return [cr_to_be_explored, tested_active_sets]
+
+    def active_set_if_not_licq(self, candidate_active_set, facet_index, cr, dist=1e-6, lambda_bound=1e6, toll=1e-6):
+        """
+        Returns the active set of a critical region in case that licq does not hold (Theorem 4 revisited)
+
+        INPUTS:
+            candidate_active_set: candidate active set for which LICQ doesn't hold
+            facet_index: index of this active set hypothesis in the parent's list of neighboring active sets
+            cr: critical region from which the new active set is generated
+
+        OUTPUTS:
+            active_set: real active set of the child critical region ([] if the region is unfeasible)
+        """
+
+        # differences between the active set of the parent and the candidate active set
+        active_set_change = list(set(cr.active_set).symmetric_difference(set(candidate_active_set)))
+
+        # if there is more than one change, nothing can be done...
+        if len(active_set_change) > 1:
+            print 'Cannot solve degeneracy with multiple active set changes! The solution of a QP is required...'
+            active_set = self.solve_qp_beyond_facet(facet_index, cr)
+
+        # if there is one change solve the lp from Theorem 4
+        else:
+            active_set = self.solve_lp_on_facet(candidate_active_set, facet_index, cr)
+            
+        return active_set
+
+    def solve_qp_beyond_facet(self, facet_index, cr, dist=1e-6, toll=1e-6):
+        """
+        Solves a QP a step of length "dist" beyond the facet wich index is "facet_index"
+        to determine the active set in that region.
+
+        INPUTS:
+            facet_index: index of this active set hypothesis in the parent's list of neighboring active sets
+            cr: critical region from which the new active set is generated
+
+        OUTPUTS:
+            active_set: real active set of the child critical region ([] if the region is unfeasible)
+        """
+
+        # center of the facet in the parameter space
+        x_center = cr.polytope.facet_centers[facet_index]
+
+        # solve the QP inside the new critical region to derive the active set
+        x_beyond = x_center + dist*cr.polytope.lhs_min[facet_index,:]
+        x_beyond = x_beyond.reshape(x_center.shape[0],1)
+        z = quadratic_program(self.H, np.zeros((self.H.shape[0],1)), self.G, self.W + self.S.dot(x_beyond))[0]
+        
+        # new active set for the child
+        constraints_residuals = self.G.dot(z) - self.W - self.S.dot(x_beyond)
+        active_set = [i for i in range(0,self.G.shape[0]) if constraints_residuals[i] > -toll]
+
+        return active_set
+
+    def solve_lp_on_facet(self, candidate_active_set, facet_index, cr, lambda_bound=1e6, toll=1e-6):
+        """
+        Solves a LP on the center of the facet wich index is "facet_index" to determine
+        the active set in that region (Theorem 4)
+
+        INPUTS:
+            candidate_active_set: candidate active set for which LICQ doesn't hold
+            facet_index: index of this active set hypothesis in the parent's list of neighboring active sets
+            cr: critical region from which the new active set is generated
+
+        OUTPUTS:
+            active_set: real active set of the child critical region ([] if the region is unfeasible)
+        """
+
+        # differences between the active set of the parent and the candidate active set
+        active_set_change = list(set(cr.active_set).symmetric_difference(set(candidate_active_set)))
+
+        # compute optimal solution in the center of the shared facet
+        x_center = cr.polytope.facet_centers[facet_index]
+        z_center = cr.z_optimal(x_center)
+
+        # solve lp from Theorem 4
+        G_A = self.G[candidate_active_set,:]
+        n_lam = G_A.shape[0]
+        cost = np.zeros((n_lam,1))
+        cost[candidate_active_set.index(active_set_change[0])] = -1.
+        cons_lhs = np.vstack((G_A.T, -G_A.T, -np.eye(n_lam)))
+        cons_rhs = np.vstack((-self.H.dot(z_center), self.H.dot(z_center), np.zeros((n_lam,1))))
+        lambda_sol = linear_program(cost, cons_lhs, cons_rhs, lambda_bound)[0]
+
+        # if the solution in unbounded the region is unfeasible
+        if np.max(lambda_sol) > lambda_bound - toll:
+            active_set = []
+
+        # if the solution in bounded look at the indices of the solution to derive the active set
+        else:
+            active_set = []
+            for i in range(0, n_lam):
+                if lambda_sol[i] > toll:
+                    active_set += [candidate_active_set[i]]
+
+        return active_set
+
+    def feedforward_explicit(self, x0):
+
+        # check that the explicit solution is available
         if self.critical_regions is None:
             raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution() ...')
-        # find the CR to which the test point belongs
-        for cr in self.critical_regions:
-            if np.max(cr.polytope.lhs_min.dot(x) - cr.polytope.rhs_min) <= 0:
-                break
-                print('bug')
+        
+        # find the CR to which the given state belongs
+        cr_where_x0 = self.critical_regions.lookup(x0)
+
         # derive explicit solution
-        z = cr.z_optimal(x)
-        u = z - np.linalg.inv(self.H).dot(self.F.T.dot(x))
-        lam = cr.lambda_optimal(x)
-        cost_to_go = u.T.dot(self.H.dot(u)) + x.T.dot(self.F).dot(u)
-        return [u, cost_to_go, lam]
+        if cr_where_x0 is not None:
+            z = cr_where_x0.z_optimal(x0)
+            u_feedforward = z - np.linalg.inv(self.H).dot(self.F.T.dot(x0))
+
+        # if unfeasible return nan
+        else:
+            print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+            u_feedforward = np.zeros((self.sys.n_u*self.N,1))
+            u_feedforward[:] = np.nan
+
+        return u_feedforward
+
+    def feedback_explicit(self, x0):
+
+        # select only the first control of the feedforward
+        u_feedback = self.feedforward_explicit(x0)[0:self.sys.n_u]
+
+        return u_feedback
+
+
 
 class CriticalRegion:
-    # this is from:
-    # Tondel, Johansen, Bemporad - An algorithm for multi-parametric quadratic programming and explicit MPC solutions
+    """
+    Implements the algorithm from Tondel et al. "An algorithm for multi-parametric quadratic programming and explicit MPC solutions"
+    """
 
     def __init__(self, active_set, H, G, W, S):
+
+        # store active set
         print 'Computing critical region for the active set ' + str(active_set)
+        [self.n_constraints, self.n_parameters] = S.shape
         self.active_set = active_set
-        self.inactive_set = list(set(range(0, G.shape[0])) - set(active_set))
-        self.boundaries(H, G, W, S)
-        # if the critical region is empty return
+        self.inactive_set = sorted(list(set(range(0, self.n_constraints)) - set(active_set)))
+
+        # find the polytope
+        self.polytope(H, G, W, S)
         if self.polytope.empty:
             return
-        self.candidate_active_sets()
 
-    def boundaries(self, H, G, W, S):
-        # optimal solution as a function of x
-        H_inv = np.linalg.inv(H)
-        # active and inactive constraints
-        G_A = G[self.active_set,:]
-        W_A = W[self.active_set,:]
-        S_A = S[self.active_set,:]
-        G_I = G[self.inactive_set,:]
-        W_I = W[self.inactive_set,:]
-        S_I = S[self.inactive_set,:]
+        # find candidate active sets for the neighboiring regions
+        minimal_coincident_facets = [self.polytope.coincident_facets[i] for i in self.polytope.minimal_facets]
+        self.candidate_active_sets = self.candidate_active_sets(active_set, minimal_coincident_facets)
+
+        # detect weakly active constraints
+        self.weakly_active_constraints()
+
+        # expand the candidates if there are weakly active constraints
+        if self.weakly_active_constraints:
+            self.candidate_active_set = self.expand_candidate_active_sets(self.candidate_active_set, self.weakly_active_constraints)
+
+        return
+
+    def polytope(self, H, G, W, S):
+        """
+        Stores a polytope that describes the critical region in the parameter space.
+        """
+
         # multipliers explicit solution
+        H_inv = np.linalg.inv(H)
+        [G_A, W_A, S_A] = [G[self.active_set,:], W[self.active_set,:], S[self.active_set,:]]
+        [G_I, W_I, S_I] = [G[self.inactive_set,:], W[self.inactive_set,:], S[self.inactive_set,:]]
         H_A = np.linalg.inv(G_A.dot(H_inv.dot(G_A.T)))
-        self.lambda_A_constant = - H_A.dot(W_A)
+        self.lambda_A_offset = - H_A.dot(W_A)
         self.lambda_A_linear = - H_A.dot(S_A)
-        # primal variable explicit solution
-        self.z_constant = - H_inv.dot(G_A.T.dot(self.lambda_A_constant))
+
+        # primal variables explicit solution
+        self.z_offset = - H_inv.dot(G_A.T.dot(self.lambda_A_offset))
         self.z_linear = - H_inv.dot(G_A.T.dot(self.lambda_A_linear))
-        # equation (12) (revised, only inactive indices...)
+
+        # equation (12) (modified: only inactive indices considered)
         lhs_type_1 = G_I.dot(self.z_linear) - S_I
-        rhs_type_1 = - G_I.dot(self.z_constant) + W_I
+        rhs_type_1 = - G_I.dot(self.z_offset) + W_I
+
         # equation (13)
         lhs_type_2 = - self.lambda_A_linear
-        rhs_type_2 = self.lambda_A_constant
-        # gather facets of type 1 and 2 to define the polytope
-        lhs = np.array([]).reshape((0,S.shape[1]))
-        rhs = np.array([]).reshape((0,1))
-        # gather the equations such that the ith facet is the one generated by the ith constraint
-        for i in range(G.shape[0]):
-            if i in self.active_set:
-                lhs = np.vstack((lhs, lhs_type_2[self.active_set.index(i),:]))
-                rhs = np.vstack((rhs, rhs_type_2[self.active_set.index(i),0]))
-            elif i in self.inactive_set:
-                lhs = np.vstack((lhs, lhs_type_1[self.inactive_set.index(i),:]))
-                rhs = np.vstack((rhs, rhs_type_1[self.inactive_set.index(i),0]))
+        rhs_type_2 = self.lambda_A_offset
+
+        # gather facets of type 1 and 2 to define the polytope (note the order: the ith facet of the cr is generated by the ith constraint)
+        lhs = np.zeros((self.n_constraints, self.n_parameters))
+        rhs = np.zeros((self.n_constraints, 1))
+        lhs[self.inactive_set + self.active_set, :] = np.vstack((lhs_type_1, lhs_type_2))
+        rhs[self.inactive_set + self.active_set] = np.vstack((rhs_type_1, rhs_type_2))
+
         # construct polytope
         self.polytope = Polytope(lhs, rhs)
         self.polytope.assemble()
+
         return
 
-    def candidate_active_sets(self):
-        # without considering weakly active constraints
-        candidate_active_sets = candidate_active_sets_generator(self.active_set, self.polytope)
-        # detect weakly active constraints
-        weakly_active_constraints = detect_weakly_active_constraints(self.active_set, - self.lambda_A_linear, self.lambda_A_constant)
-        # correct if any weakly active constraint has been detected
-        if weakly_active_constraints:
-            # add all the new candidate sets to the list
-            candidate_active_sets = expand_candidate_active_sets(weakly_active_constraints, candidate_active_sets)
-        self.candidate_active_sets = candidate_active_sets
+    def weakly_active_constraints(self, toll=1e-8):
+        """
+        Stores the list of constraints that are weakly active in the whole critical region
+        enumerated in the as in the equation G z <= W + S x ("original enumeration")
+        (by convention weakly active constraints are included among the active set,
+        so that only constraints of type 2 are anlyzed)
+        """
+
+        # equation (13), again...
+        lhs_type_2 = - self.lambda_A_linear
+        rhs_type_2 = self.lambda_A_offset
+
+        # weakly active constraints are included in the active set
+        self.weakly_active_constraints = []
+        for i in range(0, len(self.active_set)):
+
+            # to be weakly active in the whole region they can only be in the form 0^T x <= 0
+            if np.linalg.norm(lhs_type_2[i,:]) + np.absolute(rhs_type_2[i,:]) < toll:
+                print('Weakly active constraint detected!')
+                self.weakly_active_constraints.append(self.active_set[i])
+
         return
+
+    @staticmethod
+    def candidate_active_sets(active_set, minimal_coincident_facets):
+        """
+        Computes one candidate active set for each non-redundant facet of a critical region
+        (Theorem 2 and Corollary 1).
+
+        INPUTS:
+        active_set: active set of the parent critical region
+        minimal_coincident_facets: list of facets coincident to the minimal facets
+            (i.e.: [coincident_facets[i] for i in minimal_facets])
+
+        OUTPUTS:
+            candidate_active_sets: list of the candidate active sets for each minimal facet
+        """
+        
+        # initialize list of condidate active sets
+        candidate_active_sets = []
+
+        # cross each non-redundant facet of the parent CR
+        for coincident_facets in minimal_coincident_facets:
+
+            # add or remove each constraint crossed to the active set of the parent CR
+            candidate_active_set = set(active_set).symmetric_difference(set(coincident_facets))
+            candidate_active_sets.append([sorted(list(candidate_active_set))])
+
+        return candidate_active_sets
+    
+    @staticmethod
+    def expand_candidate_active_sets(candidate_active_sets, weakly_active_constraints):
+        """
+        Expands the candidate active sets if there are some weakly active contraints (Theorem 5).
+
+        INPUTS:
+            candidate_active_sets: list of the candidate active sets for each minimal facet
+            weakly_active_constraints: list of weakly active constraints (in the "original enumeration")
+
+        OUTPUTS:
+            candidate_active_sets: list of the candidate active sets for each minimal facet
+
+
+        """
+
+        # determine every possible combination of the weakly active contraints
+        wac_combinations = []
+        for n in range(1, len(weakly_active_constraints)+1):
+            wac_combinations_n = itertools.combinations(weakly_active_constraints, n)
+            wac_combinations += [list(c) for c in wac_combinations_n]
+
+        # for each minimal facet of the CR add or remove each combination of wakly active constraints
+        for i in range(0, len(candidate_active_sets)):
+            active_set = candidate_active_sets[i][0]
+            for combination in wac_combinations:
+                further_active_set = set(active_set).symmetric_difference(combination)
+                candidate_active_sets[i].append(sorted(list(further_active_set)))
+
+        return candidate_active_sets
 
     def z_optimal(self, x):
         """
-        Return the explicit solution of the mpQP as a function of the parameter
+        Returns the explicit solution of the mpQP as a function of the parameter.
+
         INPUTS:
-        x -> value of the parameter
+            x: value of the parameter
+
         OUTPUTS:
-        z_optimal -> solution of the QP
+            z_optimal: solution of the QP
         """
-        z_optimal = self.z_constant + self.z_linear.dot(x).reshape(self.z_constant.shape)
+        z_optimal = self.z_offset + self.z_linear.dot(x).reshape(self.z_offset.shape)
         return z_optimal
 
     def lambda_optimal(self, x):
         """
-        Return the explicit value of the multipliers of the mpQP as a function of the parameter
+        Returns the explicit value of the multipliers of the mpQP as a function of the parameter.
+
         INPUTS:
-        x -> value of the parameter
+            x: value of the parameter
+
         OUTPUTS:
-        lambda_optimal -> optimal multipliers
+            lambda_optimal: optimal multipliers
         """
-        lambda_A_optimal = self.lambda_A_constant + self.lambda_A_linear.dot(x)
+        lambda_A_optimal = self.lambda_A_offset + self.lambda_A_linear.dot(x)
         lambda_optimal = np.zeros(len(self.active_set + self.inactive_set))
         for i in range(0, len(self.active_set)):
             lambda_optimal[self.active_set[i]] = lambda_A_optimal[i]
         return lambda_optimal
 
-def candidate_active_sets_generator(active_set, polytope):
-    """
-    returns a condidate active set for each facet of a critical region
-    Theorem 2 and Corollary 1 are here applied
-    INPUTS:
-    active_set  -> active set of the parent CR
-    polytope -> polytope describing the parent CR
-    OUTPUTS:
-    candidate_active_sets -> list of candidate active sets (ordered as the facets of the parent polytope, i.e. lhs_min)
-    """
-    candidate_active_sets = []
-    # for each facet of the polytope
-    for facet in polytope.minimal_facets:
-        # start with the active set of the parent CR
-        candidate_active_set = active_set[:]
-        # check if this facet has coincident facets (this list includes the facet itself)
-        coincident_facets = polytope.coincident_facets[facet]
-        # for each coincident facet
-        for facet in coincident_facets:
-            if facet in candidate_active_set:
-                candidate_active_set.remove(facet)
-            else:
-                candidate_active_set.append(facet)
-            candidate_active_set.sort()
-            candidate_active_sets.append([candidate_active_set])
-    return candidate_active_sets
+    def applies_to(self, x):
+        """
+        Determines is a given point belongs to the critical region.
 
-def detect_weakly_active_constraints(active_set, lhs_type_2, rhs_type_2, toll=1e-8):
-    """
-    returns the list of constraints that are weakly active in the whole critical region
-    enumerated in the as in the equation G z <= W + S x ("original enumeration")
-    (by convention weakly active constraints are included among the active set,
-    so that only constraints of type 2 are anlyzed)
-    INPUTS:
-    active_set          -> active set of the parent critical region
-    [lhs_type_2, rhs_type_2] -> left- and right-hand side of the constraints of type 2 of the parent CR
-    toll             -> tollerance in the detection
-    OUTPUTS:
-    weakly_active_constraints -> list of weakly active constraints
-    """
-    weakly_active_constraints = []
-    # weakly active constraints are included in the active set
-    for i in range(0, len(active_set)):
-        # to be weakly active in the whole region they can only be in the form 0^T x <= 0
-        if np.linalg.norm(lhs_type_2[i,:]) + np.absolute(rhs_type_2[i,:]) < toll:
-            print('Weakly active constraint detected!')
-            weakly_active_constraints.append(active_set[i])
-    return weakly_active_constraints
+        INPUTS:
+            x: value of the parameter
 
-def expand_candidate_active_sets(weakly_active_constraints, candidate_active_sets):
-    """
-    returns the additional condidate active sets that are caused by weakly active constraints (theorem 5)
-    INPUTS:
-    weakly_active_constraints    -> indices of the weakly active contraints
-    candidate_active_sets -> list of candidate neighboring active sets
-    OUTPUTS:
-    candidate_active_sets -> complete list of candidate active sets
-    """
-    for i in range(0,len(candidate_active_sets)):
-        # for every possible combination of the weakly active constraints
-        for n_weakly_act in range(1,len(weakly_active_constraints)+1):
-            for comb_weakly_act in itertools.combinations(weakly_active_constraints, n_weakly_act):
-                candidate_active_sets_weak_i = []
-                # remove each combination from each candidate active set to create a new candidate active set
-                if set(candidate_active_sets[i][0]).issuperset(comb_weakly_act):
-                    # new candidate active set
-                    candidate_active_sets_weak_i.append([j for j in candidate_active_sets[i][0] if j not in list(comb_weakly_act)])
-                # update the list of candidate active sets generated because of wekly active constraints
-                candidate_active_sets[i].append(candidate_active_sets_weak_i)
-    return candidate_active_sets
+        OUTPUTS:
+            is_inside: flag (True if x is in the CR, False otherwise)
+        """
+        is_inside = np.max(self.polytope.lhs_min.dot(x) - self.polytope.rhs_min) <= 0
+        return is_inside
 
-def active_set_if_not_licq(candidate_active_set, ind, parent, H, G, W, S, dist=1e-6, lambda_bound=1e6, toll=1e-6):
-    """
-    returns the active set in case that licq does not hold (theorem 4 and some more...)
-    INPUTS:
-    parent       -> citical region that has generated this degenerate active set hypothesis
-    ind          -> index of this active set hypothesis in the parent's list of neighboring active sets
-    [H, G, W, S] -> cost and constraint matrices of the mp-QP
-    OUTPUTS:
-    active_set_child -> real active set of the child critical region (= False if the region is unfeasible)
-    """
-    x_center = parent.polytope.facet_centers[ind]
-    active_set_change = list(set(parent.active_set).symmetric_difference(set(candidate_active_set)))
-    if len(active_set_change) > 1:
-        print 'Cannot solve degeneracy with multiple active set changes! The solution of a QP is required...'
-        # just sole the QP inside the new critical region to derive the active set
-        x = x_center + dist*parent.polytope.lhs_min[ind,:]
-        x = x.reshape(x_center.shape[0],1)
-        z = quadratic_program(H, np.zeros((H.shape[0],1)), G, W+S.dot(x))[0]
-        cons_val = G.dot(z) - W - S.dot(x)
-        # new active set for the child
-        active_set_child = [i for i in range(0,cons_val.shape[0]) if cons_val[i] > -toll]
-        # convert [] to False to avoid confusion with the empty active set...
-        if not active_set_child:
-            active_set_child = False
-    else:
-        # compute optimal solution in the center of the shared facet
-        z_center = parent.z_optimal(x_center)
-        # solve lp from theorem 4
-        G_A = G[candidate_active_set,:]
-        n_lam = G_A.shape[0]
-        cost = np.zeros((n_lam,1))
-        cost[candidate_active_set.index(active_set_change[0])] = -1.
-        cons_lhs = np.vstack((G_A.T, -G_A.T, -np.eye(n_lam)))
 
-        cons_rhs = np.vstack((-H.dot(z_center), H.dot(z_center), np.zeros((n_lam,1))))
-        lambda_sol = linear_program(cost, cons_lhs, cons_rhs, lambda_bound)[0]
-        # if the solution in unbounded the region is not feasible
-        if np.max(lambda_sol) > lambda_bound - toll:
-            active_set_child = False
-        # if the solution in bounded look at the indices of the solution
-        else:
-            active_set_child = []
-            for i in range(0, n_lam):
-                if lambda_sol[i] > toll:
-                    active_set_child += [candidate_active_set[i]]
-    return active_set_child
+
+class NDPiecewise(object):
+    def __init__(self, elements):
+        self.elements = elements
+
+    def lookup(self, point):
+        for element in self.elements:
+            if element.applies_to(point):
+                return element
+        return None
+
+    def __len__(self):
+        return len(self.elements)
