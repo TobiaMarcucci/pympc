@@ -1,5 +1,3 @@
-from pydrake.solvers import mathematicalprogram as mp
-from pydrake.solvers.gurobi import GurobiSolver
 import numpy as np
 import scipy.linalg as linalg
 import scipy.spatial as spatial
@@ -9,7 +7,7 @@ from pyhull.halfspace import Halfspace
 from pyhull.halfspace import HalfspaceIntersection
 import time
 from utils.ndpiecewise import NDPiecewise
-
+from optimization import linear_program, quadratic_program
 
 
 def plot_input_sequence(u_sequence, t_s, N, u_max=None, u_min=None):
@@ -69,7 +67,7 @@ def plot_state_trajectory(x_trajectory, t_s, N, x_max=None, x_min=None):
         x_max: upper bound on the state (2D numpy vectors of dimension (n_x,1))
         x_min: lower bound on the state (2D numpy vectors of dimension (n_x,1))
     """
- 
+
     # dimension of the state
     n_x = x_trajectory[0].shape[0]
 
@@ -101,117 +99,6 @@ def plot_state_trajectory(x_trajectory, t_s, N, x_max=None, x_min=None):
     plt.xlabel(r'$t$')
 
     return
-
-
-
-def linear_program(f, A, b, x_bound=1.e9, toll=1.e-3):
-    """
-    Solves the linear program
-    minimize f^T * x
-    s. t.    A * x <= b
-             ||x||_inf <= x_bound
-
-    INPUTS:
-        f: gradient of the cost function (2D numpy array)
-        A: left hand side of the constraints (2D numpy array)
-        b: right hand side of the constraints (2D numpy array)
-        x_bound: bound on the infinity norm of the solution (used to detect unbounded solutions!)
-        toll: tollerance in the detection of unbounded solutions
-    
-    OUTPUTS:
-        x_min: argument which minimizes the cost (its elements are nan if unfeasible and inf if unbounded)
-        cost_min: minimum of the cost function (nan if unfeasible and inf if unbounded)
-        status: status of the solution (=0 if solved, =1 if unfeasible, =2 if unbounded)
-    """
-
-    # program dimensions
-    n_variables = f.shape[0]
-    n_constraints = A.shape[0]
-
-    # build program
-    prog = mp.MathematicalProgram()
-    x = prog.NewContinuousVariables(n_variables, "x")
-    for i in range(0, n_constraints):
-        prog.AddLinearConstraint((A[i,:] + 1e-15).dot(x) <= b[i])
-    prog.AddLinearCost((f.flatten() + 1e-15).dot(x))
-
-    # set bounds to the solution
-    if x_bound is not None:
-        for i in range(0, n_variables):
-                prog.AddLinearConstraint(x[i] <= x_bound)
-                prog.AddLinearConstraint(x[i] >= -x_bound)
-
-    # solve
-    solver = GurobiSolver()
-    result = solver.Solve(prog)
-    x_min = np.reshape(prog.GetSolution(x), (n_variables,1))
-    cost_min = f.T.dot(x_min)
-    status = 0
-
-    # unfeasible
-    if any(np.isnan(x_min)) or np.isnan(cost_min):
-        status = 1
-        return [x_min, cost_min, status]
-
-    # unbounded
-    x_min[np.where(x_min > x_bound - toll)] = np.inf
-    x_min[np.where(x_min < - x_bound + toll)] = -np.inf
-    if any(f[np.where(np.isinf(x_min))] != 0.):
-        cost_min = -np.inf
-        status = 2
-
-    return [x_min, cost_min, status]
-
-
-
-def quadratic_program(H, f, A, b, C=None, d=None):
-    """
-    Solves the convex (i.e., H > 0) quadratic program
-    minimize x^T * H * x + f^T * x
-    s. t.    A * x <= b
-             C * x = d
-
-    INPUTS:
-        H: Hessian of the cost function (bidimensional numpy array)
-        f: linear term of the cost function (monodimensional numpy array)
-        A: left hand side of the inequalities (bidimensional numpy array)
-        b: right hand side of the inequalities (monodimensional numpy array)
-        C: left hand side of the equalities (bidimensional numpy array)
-        d: right hand side of the equalities (monodimensional numpy array)
-
-    OUTPUTS:
-        x_min: argument which minimizes the cost (its elements are nan if unfeasible and inf if unbounded)
-        cost_min: minimum of the cost function (nan if unfeasible and inf if unbounded)
-        status: status of the solution (=0 if solved, =1 if unfeasible)
-    """
-
-    # program dimensions
-    n_variables = f.shape[0]
-    n_constraints = A.shape[0]
-
-    # build program
-    prog = mp.MathematicalProgram()
-    x = prog.NewContinuousVariables(n_variables, "x")
-    for i in range(0, n_constraints):
-        prog.AddLinearConstraint((A[i,:] + 1e-15).dot(x) <= b[i])
-    if C is not None:
-        for i in range(C.shape[0]):
-            prog.AddLinearConstraint(C[i, :].dot(x) == d[i])
-    prog.AddQuadraticCost(H, f, x)
-
-    # solve
-    solver = GurobiSolver()
-    result = solver.Solve(prog)
-    x_min = np.reshape(prog.GetSolution(x), (n_variables,1))
-    cost_min = .5*x_min.T.dot(H.dot(x_min)) + f.T.dot(x_min)
-    status = 0
-
-    # unfeasible
-    if any(np.isnan(x_min)) or np.isnan(cost_min):
-        status = 1
-
-    return [x_min, cost_min, status]
-
 
 
 class Polytope:
@@ -310,7 +197,7 @@ class Polytope:
             self.facet_centers = [upper_bound, lower_bound]
         else:
             self.facet_centers = [lower_bound, upper_bound]
-        self.coincident_facets()
+        self.find_coincident_facets()
         return
 
     def assemble_multiD(self):
@@ -341,7 +228,7 @@ class Polytope:
             facet_vertices_inidices = polyhedron_qhull.facets_by_halfspace[facet]
             facet_vertices = self.vertices[facet_vertices_inidices]
             self.facet_centers.append(np.mean(np.vstack(facet_vertices), axis=0))
-        self.coincident_facets()
+        self.find_coincident_facets()
         return
 
     def interior_point(self):
@@ -361,7 +248,7 @@ class Polytope:
             interior_point[:] = np.nan
         return interior_point
 
-    def coincident_facets(self, toll=1e-8):
+    def find_coincident_facets(self, toll=1e-8):
         # coincident facets indices
         coincident_facets = []
         lrhs = np.hstack((self.lhs, self.rhs))
@@ -453,7 +340,7 @@ class DTLinearSystem:
         for i in range(0, N):
             for j in range(0, i+1):
                 forced_evolution[self.n_x*i:self.n_x*(i+1),self.n_u*j:self.n_u*(j+1)] = np.linalg.matrix_power(self.A,i-j).dot(self.B)
-        
+
         return [free_evolution, forced_evolution]
 
     def simulate(self, x0, N, u_sequence=None):
@@ -537,204 +424,31 @@ class DTLinearSystem:
 
 
 class MPCController:
-    """
-    VARIABLES:
-        sys:
-        N:
-        Q:
-        R:
-        P:
-        terminal_cost:
-        terminal_constraint:
-        state_constraints:
-        input_constraints:
-        H:
-        F:
-        G:
-        W:
-        E:
-        S:
-        critical_regions:
-    """
 
-    def __init__(self, sys, N, Q, R, terminal_cost=None, terminal_constraint=None, state_constraints=None, input_constraints=None):
-        self.sys = sys
-        self.N = N
-        self.Q = Q
-        self.R = R
-        self.terminal_cost = terminal_cost
-        self.terminal_constraint = terminal_constraint
-        self.state_constraints = state_constraints
-        self.input_constraints = input_constraints
-        return
-
-    def add_state_constraint(self, lhs, rhs):
-        if self.state_constraints is None:
-            self.state_constraints = Polytope(lhs, rhs)
-        else:
-            self.state_constraints.add_facets(lhs, rhs)
-        return
-
-    def add_input_constraint(self, lhs, rhs):
-        if self.input_constraints is None:
-            self.input_constraints = Polytope(lhs, rhs)
-        else:
-            self.input_constraints.add_facets(lhs, rhs)
-        return
-
-    def add_state_bound(self, x_max, x_min):
-        if self.state_constraints is None:
-            self.state_constraints = Polytope.from_bounds(x_max, x_min)
-        else:
-            self.state_constraints.add_bounds(x_max, x_min)
-        return
-
-    def add_input_bound(self, u_max, u_min):
-        if self.input_constraints is None:
-            self.input_constraints = Polytope.from_bounds(u_max, u_min)
-        else:
-            self.input_constraints.add_bounds(u_max, u_min)
-        return
-
-    def set_terminal_constraint(self, terminal_constraint):
-        self. terminal_constraint = terminal_constraint
-        return
-
-    def assemble(self):
-        if self.state_constraints is not None:
-            self.state_constraints.assemble()
-        if self.input_constraints is not None:
-            self.input_constraints.assemble()
-        self.terminal_cost_matrix()
-        if self.sys.__class__ == DTLinearSystem:
-            self.constraint_blocks()
-            self.cost_blocks()
-            self.critical_regions = None
-        # if self.sys.__class__ == DTPWASystem:
-        #     constraint_bigM()
-        return
-
-    def terminal_cost_matrix(self):
-        if self.terminal_cost is None:
-            self.P = self.Q
-        elif self.terminal_cost == 'dare':
-            self.P = self.dare()[0]
-        else:
-            raise ValueError('Unknown terminal cost!')
-        return
-
-    def dare(self):
-        # DARE solution
-        P = linalg.solve_discrete_are(self.sys.A, self.sys.B, self.Q, self.R)
-        # optimal gain
-        K = - linalg.inv(self.sys.B.T.dot(P).dot(self.sys.B)+self.R).dot(self.sys.B.T).dot(P).dot(self.sys.A)
-        return [P, K]
-
-    def constraint_blocks(self):
-        # compute each constraint
-        [G_u, W_u, E_u] = self.input_constraint_blocks()
-        [G_x, W_x, E_x] = self.state_constraint_blocks()
-        [G_xN, W_xN, E_xN] = self.terminal_constraint_blocks()
-        # gather constraints
-        G = np.vstack((G_u, G_x, G_xN))
-        W = np.vstack((W_u, W_x, W_xN))
-        E = np.vstack((E_u, E_x, E_xN))
-        # remove redundant constraints
-        constraint_polytope = Polytope(np.hstack((G, -E)), W)
-        constraint_polytope.assemble()
-        self.G = constraint_polytope.lhs_min[:,:self.sys.n_u*self.N]
-        self.E = - constraint_polytope.lhs_min[:,self.sys.n_u*self.N:]
-        self.W = constraint_polytope.rhs_min
-        return
-
-    def input_constraint_blocks(self):
-        if self.input_constraints is None:
-            G_u = np.array([]).reshape((0, self.sys.n_u*self.N))
-            W_u = np.array([]).reshape((0, 1))
-            E_u = np.array([]).reshape((0, self.sys.n_x))
-        else:
-            G_u = linalg.block_diag(*[self.input_constraints.lhs_min for i in range(0, self.N)])
-            W_u = np.vstack([self.input_constraints.rhs_min for i in range(0, self.N)])
-            E_u = np.zeros((W_u.shape[0], self.sys.n_x))
-        return [G_u, W_u, E_u]
-
-    def state_constraint_blocks(self):
-        if self.state_constraints is None:
-            G_x = np.array([]).reshape((0, self.sys.n_u*self.N))
-            W_x = np.array([]).reshape((0, 1))
-            E_x = np.array([]).reshape((0, self.sys.n_x))
-        else:
-            [free_evolution, forced_evolution] = self.sys.evolution_matrices(self.N)
-            lhs_x_diag = linalg.block_diag(*[self.state_constraints.lhs_min for i in range(0, self.N)])
-            G_x = lhs_x_diag.dot(forced_evolution)
-            W_x = np.vstack([self.state_constraints.rhs_min for i in range(0, self.N)])
-            E_x = - lhs_x_diag.dot(free_evolution)
-        return [G_x, W_x, E_x]
-
-    def terminal_constraint_blocks(self):
-        if self.terminal_constraint is None:
-            G_xN = np.array([]).reshape((0, self.sys.n_u*self.N))
-            W_xN = np.array([]).reshape((0, 1))
-            E_xN = np.array([]).reshape((0, self.sys.n_x))
-        else:
-            if self.terminal_constraint == 'moas':
-                # solve dare
-                K = self.dare()[1]
-                # closed loop dynamics
-                A_cl = self.sys.A + self.sys.B.dot(K)
-                # constraints for the maximum output admissible set
-                lhs_cl = np.vstack((self.state_constraints.lhs_min, self.input_constraints.lhs_min.dot(K)))
-                rhs_cl = np.vstack((self.state_constraints.rhs_min, self.input_constraints.rhs_min))
-                # compute maximum output admissible set
-                moas = self.maximum_output_admissible_set(A_cl, lhs_cl, rhs_cl)[0]
-                lhs_xN = moas.lhs_min
-                rhs_xN = moas.rhs_min
-            elif self.terminal_constraint == 'origin':
-                lhs_xN = np.vstack((np.eye(self.sys.n_x), - np.eye(self.sys.n_x)))
-                rhs_xN = np.zeros((2*self.sys.n_x,1))
-            else:
-                raise ValueError('Unknown terminal constraint!')
-            forced_evolution = self.sys.evolution_matrices(self.N)[1]
-            G_xN = lhs_xN.dot(forced_evolution[-self.sys.n_x:,:])
-            W_xN = rhs_xN
-            E_xN = - lhs_xN.dot(np.linalg.matrix_power(self.sys.A, self.N))
-        return [G_xN, W_xN, E_xN]
-
-    def cost_blocks(self):
-        # quadratic term in the state sequence
-        H_x = linalg.block_diag(*[self.Q for i in range(0, self.N-1)])
-        H_x = linalg.block_diag(H_x, self.P)
-        # quadratic term in the input sequence
-        H_u = linalg.block_diag(*[self.R for i in range(0, self.N)])
-        # evolution of the system
-        [free_evolution, forced_evolution] = self.sys.evolution_matrices(self.N)
-        # quadratic term
-        self.H = 2*(H_u+forced_evolution.T.dot(H_x.dot(forced_evolution)))
-        # linear term
-        F = 2*forced_evolution.T.dot(H_x.T).dot(free_evolution)
-        self.F = F.T
-        return
+    def __init__(self, canonical_qp, n_u):
+        self.qp = canonical_qp
+        self.n_u = n_u
 
     def feedforward(self, x0):
-        u_feedforward = quadratic_program(self.H, (x0.T.dot(self.F)).T, self.G, self.W + self.E.dot(x0))[0]
+        u_feedforward = quadratic_program(self.qp.H, (x0.T.dot(self.qp.F)).T, self.qp.G, self.qp.W + self.qp.E.dot(x0))[0]
         if any(np.isnan(u_feedforward).flatten()):
             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
         return u_feedforward
 
     def feedback(self, x0):
-        u_feedback = self.feedforward(x0)[0:self.sys.n_u]
+        u_feedback = self.feedforward(x0)[0:self.n_u]
         return u_feedback
 
     def compute_explicit_solution(self):
 
         # change variable for exeplicit MPC (z := u_seq + H^-1 F^T x0)
         tic = time.clock()
-        H_inv = np.linalg.inv(self.H)
-        self.S = self.E + self.G.dot(H_inv.dot(self.F.T))
+        H_inv = np.linalg.inv(self.qp.H)
+        self.S = self.qp.E + self.qp.G.dot(H_inv.dot(self.qp.F.T))
 
         # initialize the search with the origin (to which the empty AS is associated)
         active_set = []
-        cr0 = CriticalRegion(active_set, self.H, self.G, self.W, self.S)
+        cr0 = CriticalRegion(active_set, self.qp.H, self.qp.G, self.qp.W, self.S)
         cr_to_be_explored = [cr0]
         explored_cr = []
         tested_active_sets =[cr0.active_set]
@@ -770,19 +484,19 @@ class MPCController:
                     tested_active_sets.append(active_set)
 
                     # check LICQ for the given active set
-                    licq_flag = self.licq_check(self.G, active_set)
+                    licq_flag = self.licq_check(self.qp.G, active_set)
 
                     # if LICQ holds, determine the critical region
                     if licq_flag:
-                        cr_to_be_explored.append(CriticalRegion(active_set, self.H, self.G, self.W, self.S))
-                    
+                        cr_to_be_explored.append(CriticalRegion(active_set, self.qp.H, self.qp.G, self.qp.W, self.S))
+
                     # if LICQ doesn't hold, correct the active set and determine the critical region
                     else:
                         print('LICQ does not hold for the active set ' + str(active_set))
                         active_set = self.active_set_if_not_licq(active_set, facet_index, cr)
                         if active_set:
                             print('    corrected active set ' + str(active_set))
-                            cr_to_be_explored.append(CriticalRegion(active_set, self.H, self.G, self.W, self.S))
+                            cr_to_be_explored.append(CriticalRegion(active_set, self.qp.H, self.qp.G, self.qp.W, self.S))
                         else:
                             print('    unfeasible critical region detected')
         return [cr_to_be_explored, tested_active_sets]
@@ -811,7 +525,7 @@ class MPCController:
         # if there is one change solve the lp from Theorem 4
         else:
             active_set = self.solve_lp_on_facet(candidate_active_set, facet_index, cr)
-            
+
         return active_set
 
     def solve_qp_beyond_facet(self, facet_index, cr, dist=1e-6, toll=1e-6):
@@ -833,11 +547,11 @@ class MPCController:
         # solve the QP inside the new critical region to derive the active set
         x_beyond = x_center + dist*cr.polytope.lhs_min[facet_index,:]
         x_beyond = x_beyond.reshape(x_center.shape[0],1)
-        z = quadratic_program(self.H, np.zeros((self.H.shape[0],1)), self.G, self.W + self.S.dot(x_beyond))[0]
-        
+        z = quadratic_program(self.qp.H, np.zeros((self.qp.H.shape[0],1)), self.qp.G, self.qp.W + self.S.dot(x_beyond))[0]
+
         # new active set for the child
-        constraints_residuals = self.G.dot(z) - self.W - self.S.dot(x_beyond)
-        active_set = [i for i in range(0,self.G.shape[0]) if constraints_residuals[i] > -toll]
+        constraints_residuals = self.qp.G.dot(z) - self.qp.W - self.S.dot(x_beyond)
+        active_set = [i for i in range(0,self.qp.G.shape[0]) if constraints_residuals[i] > -toll]
 
         return active_set
 
@@ -863,12 +577,12 @@ class MPCController:
         z_center = cr.z_optimal(x_center)
 
         # solve lp from Theorem 4
-        G_A = self.G[candidate_active_set,:]
+        G_A = self.qp.G[candidate_active_set,:]
         n_lam = G_A.shape[0]
         cost = np.zeros((n_lam,1))
         cost[candidate_active_set.index(active_set_change[0])] = -1.
         cons_lhs = np.vstack((G_A.T, -G_A.T, -np.eye(n_lam)))
-        cons_rhs = np.vstack((-self.H.dot(z_center), self.H.dot(z_center), np.zeros((n_lam,1))))
+        cons_rhs = np.vstack((-self.qp.H.dot(z_center), self.qp.H.dot(z_center), np.zeros((n_lam,1))))
         lambda_sol = linear_program(cost, cons_lhs, cons_rhs, lambda_bound)[0]
 
         # if the solution in unbounded the region is unfeasible
@@ -887,19 +601,19 @@ class MPCController:
         # check that the explicit solution is available
         if self.critical_regions is None:
             raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution() ...')
-        
+
         # find the CR to which the given state belongs
         cr_where_x0 = self.critical_regions.lookup(x0)
 
         # derive explicit solution
         if cr_where_x0 is not None:
             z = cr_where_x0.z_optimal(x0)
-            u_feedforward = z - np.linalg.inv(self.H).dot(self.F.T.dot(x0))
+            u_feedforward = z - np.linalg.inv(self.qp.H).dot(self.qp.F.T.dot(x0))
 
         # if unfeasible return nan
         else:
             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
-            u_feedforward = np.zeros((self.sys.n_u*self.N,1))
+            u_feedforward = np.zeros((self.qp.G.shape[1], 1))
             u_feedforward[:] = np.nan
 
         return u_feedforward
@@ -907,63 +621,9 @@ class MPCController:
     def feedback_explicit(self, x0):
 
         # select only the first control of the feedforward
-        u_feedback = self.feedforward_explicit(x0)[0:self.sys.n_u]
+        u_feedback = self.feedforward_explicit(x0)[0:self.n_u]
 
         return u_feedback
-    
-    @staticmethod
-    def maximum_output_admissible_set(A, lhs, rhs):
-        """
-        Returns the maximum output admissible set (see Gilbert, Tan - Linear Systems with State and
-        Control Constraints, The Theory and Application of Maximal Output Admissible Sets) for a
-        non-actuated linear system with state constraints (the output vector is supposed to be the
-        entire state of the system , i.e. y=x and C=I).
-
-        INPUTS:
-            A: state transition matrix
-            lhs: left-hand side of the constraints lhs * x <= rhs
-            rhs: right-hand side of the constraints lhs * x <= rhs
-
-        OUTPUTS:
-            moas: maximum output admissible set (instatiated as a polytope)
-            t: minimum number of steps in the future that define the moas
-        """
-
-        # ensure that the system is stable (otherwise the algorithm doesn't converge)
-        eig_max = np.max(np.absolute(np.linalg.eig(A)[0]))
-        if eig_max > 1:
-            raise ValueError('Cannot compute MOAS for unstable systems')
-
-        # Gilber and Tan algorithm
-        [n_constraints, n_variables] = lhs.shape
-        t = 0
-        convergence = False
-        while convergence == False:
-
-            # cost function gradients for all i
-            J = lhs.dot(np.linalg.matrix_power(A,t+1))
-
-            # constraints to each LP
-            cons_lhs = np.vstack([lhs.dot(np.linalg.matrix_power(A,k)) for k in range(0,t+1)])
-            cons_rhs = np.vstack([rhs for k in range(0,t+1)])
-
-            # list of all minima
-            J_sol = [] 
-            for i in range(0, n_constraints):
-                J_sol_i = linear_program(np.reshape(-J[i,:], (n_variables,1)), cons_lhs, cons_rhs)[1]
-                J_sol.append(-J_sol_i - rhs[i])
-
-            # convergence check
-            if np.max(J_sol) < 0:
-                convergence = True
-            else:
-                t += 1
-
-        # define polytope
-        moas = Polytope(cons_lhs, cons_rhs)
-        moas.assemble()
-
-        return [moas, t]
 
     @staticmethod
     def licq_check(G, active_set, max_cond=1e9):
@@ -974,11 +634,11 @@ class MPCController:
             G: gradient of the constraints
             active_set: active set
             max_cond: maximum condition number of the squared active constraints
-        
+
         OUTPUTS:
             licq -> flag (True if licq holds, False if licq doesn't hold)
         """
-        
+
         # select active constraints
         G_A = G[active_set,:]
 
@@ -994,7 +654,7 @@ class MPCController:
 class CriticalRegion:
     """
     Implements the algorithm from Tondel et al. "An algorithm for multi-parametric quadratic programming and explicit MPC solutions"
-    
+
     VARIABLES:
         n_constraints: number of contraints in the qp
         n_parameters: number of parameters of the qp
@@ -1030,7 +690,7 @@ class CriticalRegion:
         self.candidate_active_sets = self.candidate_active_sets(active_set, minimal_coincident_facets)
 
         # detect weakly active constraints
-        self.weakly_active_constraints()
+        self.find_weakly_active_constraints()
 
         # expand the candidates if there are weakly active constraints
         if self.weakly_active_constraints:
@@ -1075,7 +735,7 @@ class CriticalRegion:
 
         return
 
-    def weakly_active_constraints(self, toll=1e-8):
+    def find_weakly_active_constraints(self, toll=1e-8):
         """
         Stores the list of constraints that are weakly active in the whole critical region
         enumerated in the as in the equation G z <= W + S x ("original enumeration")
@@ -1112,7 +772,7 @@ class CriticalRegion:
         OUTPUTS:
             candidate_active_sets: list of the candidate active sets for each minimal facet
         """
-        
+
         # initialize list of condidate active sets
         candidate_active_sets = []
 
@@ -1124,7 +784,7 @@ class CriticalRegion:
             candidate_active_sets.append([sorted(list(candidate_active_set))])
 
         return candidate_active_sets
-    
+
     @staticmethod
     def expand_candidate_active_sets(candidate_active_sets, weakly_active_constraints):
         """
@@ -1177,7 +837,7 @@ class CriticalRegion:
         OUTPUTS:
             lambda_optimal: optimal multipliers
         """
-        
+
         lambda_A_optimal = self.lambda_A_offset + self.lambda_A_linear.dot(x)
         lambda_optimal = np.zeros(len(self.active_set + self.inactive_set))
         for i in range(0, len(self.active_set)):

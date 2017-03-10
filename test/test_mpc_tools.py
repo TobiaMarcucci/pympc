@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 import sys
 import mpc_tools as mpc
+import mpc_tools.mpcqp as mqp
 
 # https://docs.python.org/2/library/unittest.html
 
@@ -270,16 +271,17 @@ class TestMPCTools(unittest.TestCase):
         Q = np.eye(A.shape[0])
         R = np.eye(B.shape[1])
         terminal_cost = 'dare'
-        controller = mpc.MPCController(sys, N, Q, R, terminal_cost)
+        factory = mqp.MPCQPFactory(sys, N, Q, R, terminal_cost)
         x_max = np.array([[1.], [1.]])
         x_min = -x_max
-        controller.add_state_bound(x_max, x_min)
+        factory.add_state_bound(x_max, x_min)
         u_max = np.array([[1.]])
         u_min = -u_max
-        controller.add_input_bound(u_max, u_min)
+        factory.add_input_bound(u_max, u_min)
         terminal_constraint = 'moas'
-        controller.set_terminal_constraint(terminal_constraint)
-        controller.assemble()
+        factory.set_terminal_constraint(terminal_constraint)
+        qp = factory.assemble()
+        controller = mpc.MPCController(qp, 1)
 
         # explicit vs implicit solution
         controller.compute_explicit_solution()

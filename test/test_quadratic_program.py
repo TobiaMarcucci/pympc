@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 import pydrake.solvers.mathematicalprogram as mp
 
-from mpc_tools import quadratic_program, DTLinearSystem
+from mpc_tools import DTLinearSystem
+from mpc_tools.optimization import quadratic_program
 import mpc_tools.mpcqp as mqp
 
 

@@ -1,7 +1,9 @@
 import itertools
 import numpy as np
+import scipy.linalg as linalg
 import pydrake.solvers.mathematicalprogram as mp
 from mpc_tools import Polytope
+from optimization import linear_program
 
 
 def extract_linear_equalities(prog):
@@ -408,62 +410,235 @@ class CanonicalMPCQP(object):
         return self.to_simple_qp().solve()
 
 
-def generate_mpc_system(prog, u, x0):
-    C, d = extract_linear_equalities(prog)
-    A, b = extract_linear_inequalities(prog)
-    Q, q = extract_objective(prog)
-    assert np.allclose(q, 0), "linear objective terms are not yet implemented"
-    return Q, q, A, b, C, d
+class MPCQPFactory(object):
+    """
+    VARIABLES:
+        sys:
+        N:
+        Q:
+        R:
+        P:
+        terminal_cost:
+        terminal_constraint:
+        state_constraints:
+        input_constraints:
+        H:
+        F:
+        G:
+        W:
+        E:
+        S:
+    """
+    def __init__(self, sys, N, Q, R, terminal_cost=None, terminal_constraint=None, state_constraints=None, input_constraints=None):
+        self.sys = sys
+        self.N = N
+        self.Q = Q
+        self.R = R
+        self.terminal_cost = terminal_cost
+        self.terminal_constraint = terminal_constraint
+        self.state_constraints = state_constraints
+        self.input_constraints = input_constraints
+        return
 
-    order = mpc_order(prog, u, x0)
-    P = permutation_matrix(order)
-    # yhat = P * y
-    # y = P^-1 * yhat
+    def add_state_constraint(self, lhs, rhs):
+        if self.state_constraints is None:
+            self.state_constraints = Polytope(lhs, rhs)
+        else:
+            self.state_constraints.add_facets(lhs, rhs)
+        return
 
-    Pinv = np.linalg.inv(P)
+    def add_input_constraint(self, lhs, rhs):
+        if self.input_constraints is None:
+            self.input_constraints = Polytope(lhs, rhs)
+        else:
+            self.input_constraints.add_facets(lhs, rhs)
+        return
 
-    Qhat = Pinv.T.dot(Q).dot(Pinv)
-    qhat = q.dot(Pinv)
-    Ahat = A.dot(Pinv)
-    bhat = b
-    Chat = C.dot(Pinv)
-    dhat = d
+    def add_state_bound(self, x_max, x_min):
+        if self.state_constraints is None:
+            self.state_constraints = Polytope.from_bounds(x_max, x_min)
+        else:
+            self.state_constraints.add_bounds(x_max, x_min)
+        return
 
-    for i in range(10):
-        f = rand(q.size)
-        fhat = f.dot(Pinv)
-        y, cost = mpc.quadratic_program(Q, f, A, b, C, d)
-        yhat, cost_hat = mpc.quadratic_program(Qhat, fhat, Ahat, bhat, Chat, dhat)
-        assert np.isclose(cost, cost_hat)
-        assert np.allclose(yhat, P.dot(y))
+    def add_input_bound(self, u_max, u_min):
+        if self.input_constraints is None:
+            self.input_constraints = Polytope.from_bounds(u_max, u_min)
+        else:
+            self.input_constraints.add_bounds(u_max, u_min)
+        return
 
-    W = simplify(Chat)
-    # yhat = W * z
+    def set_terminal_constraint(self, terminal_constraint):
+        self. terminal_constraint = terminal_constraint
+        return
 
-    Qtilde = W.T.dot(Qhat).dot(W)
-    qtilde = qhat.dot(W)
-    Atilde = Ahat.dot(W)
-    btilde = bhat
-    Ctilde = Chat.dot(W)
-    dtilde = dhat
-    assert np.allclose(Ctilde, 0)
+    def assemble(self):
+        if self.state_constraints is not None:
+            self.state_constraints.assemble()
+        if self.input_constraints is not None:
+            self.input_constraints.assemble()
+        self.terminal_cost_matrix()
+        self.constraint_blocks()
+        self.cost_blocks()
+        self.critical_regions = None
+        return CanonicalMPCQP(H=self.H,
+                              F=self.F,
+                              Q=np.eye(self.F.shape[0]),
+                              G=self.G,
+                              W=self.W,
+                              E=self.E)
 
-    for i in range(100):
-        f = rand(q.size)
-        fhat = f.dot(Pinv)
-        ftilde = fhat.dot(W)
-        y, cost = mpc.quadratic_program(Q, f, A, b, C, d)
-        yhat, cost_hat = mpc.quadratic_program(Qhat, fhat, Ahat, bhat, Chat, dhat)
-        ytilde, cost_tilde = mpc.quadratic_program(Qtilde, ftilde, Atilde, btilde)
-        assert np.isclose(cost, cost_hat)
-        assert np.isclose(cost, cost_tilde)
-        assert np.allclose(yhat, P.dot(y))
-        assert np.allclose(yhat, W.dot(ytilde))
+    def terminal_cost_matrix(self):
+        if self.terminal_cost is None:
+            self.P = self.Q
+        elif self.terminal_cost == 'dare':
+            self.P = self.dare()[0]
+        else:
+            raise ValueError('Unknown terminal cost!')
+        return
 
-    H = Qtilde[:u.size, :u.size]
-    F = Qtilde[u.size:, :u.size]
-    G = Atilde[:, :u.size]
-    E = -Atilde[:, u.size:]
-    W = btilde
+    def dare(self):
+        # DARE solution
+        P = linalg.solve_discrete_are(self.sys.A, self.sys.B, self.Q, self.R)
+        # optimal gain
+        K = - linalg.inv(self.sys.B.T.dot(P).dot(self.sys.B)+self.R).dot(self.sys.B.T).dot(P).dot(self.sys.A)
+        return [P, K]
 
-    return H, F, G, W, E
+    def constraint_blocks(self):
+        # compute each constraint
+        [G_u, W_u, E_u] = self.input_constraint_blocks()
+        [G_x, W_x, E_x] = self.state_constraint_blocks()
+        [G_xN, W_xN, E_xN] = self.terminal_constraint_blocks()
+        # gather constraints
+        G = np.vstack((G_u, G_x, G_xN))
+        W = np.vstack((W_u, W_x, W_xN))
+        E = np.vstack((E_u, E_x, E_xN))
+        # remove redundant constraints
+        constraint_polytope = Polytope(np.hstack((G, -E)), W)
+        constraint_polytope.assemble()
+        self.G = constraint_polytope.lhs_min[:,:self.sys.n_u*self.N]
+        self.E = - constraint_polytope.lhs_min[:,self.sys.n_u*self.N:]
+        self.W = constraint_polytope.rhs_min
+        return
+
+    def input_constraint_blocks(self):
+        if self.input_constraints is None:
+            G_u = np.array([]).reshape((0, self.sys.n_u*self.N))
+            W_u = np.array([]).reshape((0, 1))
+            E_u = np.array([]).reshape((0, self.sys.n_x))
+        else:
+            G_u = linalg.block_diag(*[self.input_constraints.lhs_min for i in range(0, self.N)])
+            W_u = np.vstack([self.input_constraints.rhs_min for i in range(0, self.N)])
+            E_u = np.zeros((W_u.shape[0], self.sys.n_x))
+        return [G_u, W_u, E_u]
+
+    def state_constraint_blocks(self):
+        if self.state_constraints is None:
+            G_x = np.array([]).reshape((0, self.sys.n_u*self.N))
+            W_x = np.array([]).reshape((0, 1))
+            E_x = np.array([]).reshape((0, self.sys.n_x))
+        else:
+            [free_evolution, forced_evolution] = self.sys.evolution_matrices(self.N)
+            lhs_x_diag = linalg.block_diag(*[self.state_constraints.lhs_min for i in range(0, self.N)])
+            G_x = lhs_x_diag.dot(forced_evolution)
+            W_x = np.vstack([self.state_constraints.rhs_min for i in range(0, self.N)])
+            E_x = - lhs_x_diag.dot(free_evolution)
+        return [G_x, W_x, E_x]
+
+    def terminal_constraint_blocks(self):
+        if self.terminal_constraint is None:
+            G_xN = np.array([]).reshape((0, self.sys.n_u*self.N))
+            W_xN = np.array([]).reshape((0, 1))
+            E_xN = np.array([]).reshape((0, self.sys.n_x))
+        else:
+            if self.terminal_constraint == 'moas':
+                # solve dare
+                K = self.dare()[1]
+                # closed loop dynamics
+                A_cl = self.sys.A + self.sys.B.dot(K)
+                # constraints for the maximum output admissible set
+                lhs_cl = np.vstack((self.state_constraints.lhs_min, self.input_constraints.lhs_min.dot(K)))
+                rhs_cl = np.vstack((self.state_constraints.rhs_min, self.input_constraints.rhs_min))
+                # compute maximum output admissible set
+                moas = self.maximum_output_admissible_set(A_cl, lhs_cl, rhs_cl)[0]
+                lhs_xN = moas.lhs_min
+                rhs_xN = moas.rhs_min
+            elif self.terminal_constraint == 'origin':
+                lhs_xN = np.vstack((np.eye(self.sys.n_x), - np.eye(self.sys.n_x)))
+                rhs_xN = np.zeros((2*self.sys.n_x,1))
+            else:
+                raise ValueError('Unknown terminal constraint!')
+            forced_evolution = self.sys.evolution_matrices(self.N)[1]
+            G_xN = lhs_xN.dot(forced_evolution[-self.sys.n_x:,:])
+            W_xN = rhs_xN
+            E_xN = - lhs_xN.dot(np.linalg.matrix_power(self.sys.A, self.N))
+        return [G_xN, W_xN, E_xN]
+
+    def cost_blocks(self):
+        # quadratic term in the state sequence
+        H_x = linalg.block_diag(*[self.Q for i in range(0, self.N-1)])
+        H_x = linalg.block_diag(H_x, self.P)
+        # quadratic term in the input sequence
+        H_u = linalg.block_diag(*[self.R for i in range(0, self.N)])
+        # evolution of the system
+        [free_evolution, forced_evolution] = self.sys.evolution_matrices(self.N)
+        # quadratic term
+        self.H = 2*(H_u+forced_evolution.T.dot(H_x.dot(forced_evolution)))
+        # linear term
+        F = 2*forced_evolution.T.dot(H_x.T).dot(free_evolution)
+        self.F = F.T
+        return
+
+    @staticmethod
+    def maximum_output_admissible_set(A, lhs, rhs):
+        """
+        Returns the maximum output admissible set (see Gilbert, Tan - Linear Systems with State and
+        Control Constraints, The Theory and Application of Maximal Output Admissible Sets) for a
+        non-actuated linear system with state constraints (the output vector is supposed to be the
+        entire state of the system , i.e. y=x and C=I).
+
+        INPUTS:
+            A: state transition matrix
+            lhs: left-hand side of the constraints lhs * x <= rhs
+            rhs: right-hand side of the constraints lhs * x <= rhs
+
+        OUTPUTS:
+            moas: maximum output admissible set (instatiated as a polytope)
+            t: minimum number of steps in the future that define the moas
+        """
+
+        # ensure that the system is stable (otherwise the algorithm doesn't converge)
+        eig_max = np.max(np.absolute(np.linalg.eig(A)[0]))
+        if eig_max > 1:
+            raise ValueError('Cannot compute MOAS for unstable systems')
+
+        # Gilber and Tan algorithm
+        [n_constraints, n_variables] = lhs.shape
+        t = 0
+        convergence = False
+        while convergence == False:
+
+            # cost function gradients for all i
+            J = lhs.dot(np.linalg.matrix_power(A,t+1))
+
+            # constraints to each LP
+            cons_lhs = np.vstack([lhs.dot(np.linalg.matrix_power(A,k)) for k in range(0,t+1)])
+            cons_rhs = np.vstack([rhs for k in range(0,t+1)])
+
+            # list of all minima
+            J_sol = []
+            for i in range(0, n_constraints):
+                J_sol_i = linear_program(np.reshape(-J[i,:], (n_variables,1)), cons_lhs, cons_rhs)[1]
+                J_sol.append(-J_sol_i - rhs[i])
+
+            # convergence check
+            if np.max(J_sol) < 0:
+                convergence = True
+            else:
+                t += 1
+
+        # define polytope
+        moas = Polytope(cons_lhs, cons_rhs)
+        moas.assemble()
+
+        return [moas, t]
