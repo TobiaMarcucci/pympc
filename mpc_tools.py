@@ -8,7 +8,7 @@ import itertools
 from pyhull.halfspace import Halfspace
 from pyhull.halfspace import HalfspaceIntersection
 import time
-#from utils.ndpiecewise import NDPiecewise
+from utils.ndpiecewise import NDPiecewise
 
 
 
@@ -214,87 +214,6 @@ def quadratic_program(H, f, A, b, C=None, d=None):
 
 
 
-def maximum_output_admissible_set(A, lhs, rhs):
-    """
-    Returns the maximum output admissible set (see Gilbert, Tan - Linear Systems with State and
-    Control Constraints, The Theory and Application of Maximal Output Admissible Sets) for a
-    non-actuated linear system with state constraints (the output vector is supposed to be the
-    entire state of the system , i.e. y=x and C=I).
-
-    INPUTS:
-        A: state transition matrix
-        lhs: left-hand side of the constraints lhs * x <= rhs
-        rhs: right-hand side of the constraints lhs * x <= rhs
-
-    OUTPUTS:
-        moas: maximum output admissible set (instatiated as a polytope)
-        t: minimum number of steps in the future that define the moas
-    """
-
-    # ensure that the system is stable (otherwise the algorithm doesn't converge)
-    eig_max = np.max(np.absolute(np.linalg.eig(A)[0]))
-    if eig_max > 1:
-        raise ValueError('Cannot compute MOAS for unstable systems')
-
-    # Gilber and Tan algorithm
-    [n_constraints, n_variables] = lhs.shape
-    t = 0
-    convergence = False
-    while convergence == False:
-
-        # cost function gradients for all i
-        J = lhs.dot(np.linalg.matrix_power(A,t+1))
-
-        # constraints to each LP
-        cons_lhs = np.vstack([lhs.dot(np.linalg.matrix_power(A,k)) for k in range(0,t+1)])
-        cons_rhs = np.vstack([rhs for k in range(0,t+1)])
-
-        # list of all minima
-        J_sol = [] 
-        for i in range(0, n_constraints):
-            J_sol_i = linear_program(np.reshape(-J[i,:], (n_variables,1)), cons_lhs, cons_rhs)[1]
-            J_sol.append(-J_sol_i - rhs[i])
-
-        # convergence check
-        if np.max(J_sol) < 0:
-            convergence = True
-        else:
-            t += 1
-
-    # define polytope
-    moas = Polytope(cons_lhs, cons_rhs)
-    moas.assemble()
-
-    return [moas, t]
-
-
-
-def licq_check(G, active_set, max_cond=1e9):
-    """
-    Checks if LICQ holds for the given active set
-
-    INPUTS:
-        G: gradient of the constraints
-        active_set: active set
-        max_cond: maximum condition number of the squared active constraints
-    
-    OUTPUTS:
-        licq -> flag (True if licq holds, False if licq doesn't hold)
-    """
-    
-    # select active constraints
-    G_A = G[active_set,:]
-
-    # check condion number of the squared active constraints
-    licq = True
-    cond = np.linalg.cond(G_A.dot(G_A.T))
-    if cond > max_cond:
-        licq = False
-
-    return licq
-
-
-
 class Polytope:
     """
     Defines a polytope as {x | lhs * x <= rhs}.
@@ -478,6 +397,16 @@ class Polytope:
 
     @staticmethod
     def from_bounds(x_max, x_min):
+        """
+        Returns a polytope defines through the its bounds.
+
+        INPUTS:
+            x_max: upper bound of the variables
+            x_min: lower bound of the variables
+
+        OUTPUTS:
+            p: polytope
+        """
         n = x_max.shape[0]
         lhs = np.vstack((np.eye(n), -np.eye(n)))
         rhs = np.vstack((x_max, -x_min))
@@ -487,6 +416,15 @@ class Polytope:
 
 
 class DTLinearSystem:
+    """
+    Discrete time linear systems in the form x_{k+1} = A*x_k + B*u_k.
+
+    VARIABLES:
+        A: discrete time state transition matrix
+        B: discrete time input to state map
+        n_x: number of sates
+        n_u: number of inputs
+    """
 
     def __init__(self, A, B):
         self.A = A
@@ -495,38 +433,88 @@ class DTLinearSystem:
         return
 
     def evolution_matrices(self, N):
+        """
+        Returns the free and forced evolution matrices for the linear system
+        (i.e. [x_1^T, ...,  x_N^T]^T = free_evolution*x_0 + forced_evolution*[u_0^T, ...,  u_{N-1}^T]^T)
+
+        INPUTS:
+            N: number of steps
+
+        OUTPUTS:
+            free_evolution: free evolution matrix
+            forced_evolution: forced evolution matrix
+        """
+
         # free evolution of the system
         free_evolution = np.vstack([np.linalg.matrix_power(self.A,k) for k in range(1, N+1)])
+
         # forced evolution of the system
         forced_evolution = np.zeros((self.n_x*N,self.n_u*N))
         for i in range(0, N):
             for j in range(0, i+1):
                 forced_evolution[self.n_x*i:self.n_x*(i+1),self.n_u*j:self.n_u*(j+1)] = np.linalg.matrix_power(self.A,i-j).dot(self.B)
+        
         return [free_evolution, forced_evolution]
 
     def simulate(self, x0, N, u_sequence=None):
+        """
+        Returns the list of states obtained simulating the system dynamics.
+
+        INPUTS:
+            x0: initial state of the system
+            N: number of steps
+            u_sequence: list of inputs [u_1, ..., u_{N-1}]
+
+        OUTPUTS:
+            x_trajectory: list of states [x_0, ..., x_N]
+        """
+
+        # reshape input list if provided
         if u_sequence is None:
             u_sequence = np.zeros((self.n_u*N, 1))
         else:
             u_sequence = np.vstack(u_sequence)
+
+        # derive evolution matrices
         [free_evolution, forced_evolution] = self.evolution_matrices(N)
-        # state trajectory
+
+        # derive state trajectory includion initial state
         if x0.ndim == 1:
             x0 = np.reshape(x0, (x0.shape[0],1))
         x = free_evolution.dot(x0) + forced_evolution.dot(u_sequence)
         x_trajectory = [x0]
         [x_trajectory.append(x[self.n_x*i:self.n_x*(i+1)]) for i in range(0,N)]
+
         return x_trajectory
 
     @staticmethod
     def from_continuous(t_s, A, B):
+        """
+        Defines a discrete time linear system starting from the continuous time dynamics \dot x = A*x + B*u
+        (the exact zero order hold method is used for the discretization).
+
+        INPUTS:
+            t_s: sampling time
+            A: continuous time state transition matrix
+            B: continuous time input to state map
+
+        OUTPUTS:
+            sys: discrete time linear system
+        """
+
+        # system dimensions
         n_x = np.shape(A)[0]
         n_u = np.shape(B)[1]
+
+        # zero order hold (see Bicchi - Fondamenti di Autometica 2)
         mat_c = np.zeros((n_x+n_u, n_x+n_u))
         mat_c[0:n_x,:] = np.hstack((A, B))
         mat_d = linalg.expm(mat_c*t_s)
+
+        # discrete time dynamics
         A_d = mat_d[0:n_x, 0:n_x]
         B_d = mat_d[0:n_x, n_x:n_x+n_u]
+
         sys = DTLinearSystem(A_d, B_d)
         return sys
 
@@ -549,6 +537,25 @@ class DTLinearSystem:
 
 
 class MPCController:
+    """
+    VARIABLES:
+        sys:
+        N:
+        Q:
+        R:
+        P:
+        terminal_cost:
+        terminal_constraint:
+        state_constraints:
+        input_constraints:
+        H:
+        F:
+        G:
+        W:
+        E:
+        S:
+        critical_regions:
+    """
 
     def __init__(self, sys, N, Q, R, terminal_cost=None, terminal_constraint=None, state_constraints=None, input_constraints=None):
         self.sys = sys
@@ -679,7 +686,7 @@ class MPCController:
                 lhs_cl = np.vstack((self.state_constraints.lhs_min, self.input_constraints.lhs_min.dot(K)))
                 rhs_cl = np.vstack((self.state_constraints.rhs_min, self.input_constraints.rhs_min))
                 # compute maximum output admissible set
-                moas = maximum_output_admissible_set(A_cl, lhs_cl, rhs_cl)[0]
+                moas = self.maximum_output_admissible_set(A_cl, lhs_cl, rhs_cl)[0]
                 lhs_xN = moas.lhs_min
                 rhs_xN = moas.rhs_min
             elif self.terminal_constraint == 'origin':
@@ -763,7 +770,7 @@ class MPCController:
                     tested_active_sets.append(active_set)
 
                     # check LICQ for the given active set
-                    licq_flag = licq_check(self.G, active_set)
+                    licq_flag = self.licq_check(self.G, active_set)
 
                     # if LICQ holds, determine the critical region
                     if licq_flag:
@@ -865,16 +872,14 @@ class MPCController:
         lambda_sol = linear_program(cost, cons_lhs, cons_rhs, lambda_bound)[0]
 
         # if the solution in unbounded the region is unfeasible
+        active_set = []
         if np.max(lambda_sol) > lambda_bound - toll:
-            active_set = []
+            return active_set
 
         # if the solution in bounded look at the indices of the solution to derive the active set
-        else:
-            active_set = []
-            for i in range(0, n_lam):
-                if lambda_sol[i] > toll:
-                    active_set += [candidate_active_set[i]]
-
+        for i in range(0, n_lam):
+            if lambda_sol[i] > toll:
+                active_set += [candidate_active_set[i]]
         return active_set
 
     def feedforward_explicit(self, x0):
@@ -905,12 +910,106 @@ class MPCController:
         u_feedback = self.feedforward_explicit(x0)[0:self.sys.n_u]
 
         return u_feedback
+    
+    @staticmethod
+    def maximum_output_admissible_set(A, lhs, rhs):
+        """
+        Returns the maximum output admissible set (see Gilbert, Tan - Linear Systems with State and
+        Control Constraints, The Theory and Application of Maximal Output Admissible Sets) for a
+        non-actuated linear system with state constraints (the output vector is supposed to be the
+        entire state of the system , i.e. y=x and C=I).
 
+        INPUTS:
+            A: state transition matrix
+            lhs: left-hand side of the constraints lhs * x <= rhs
+            rhs: right-hand side of the constraints lhs * x <= rhs
+
+        OUTPUTS:
+            moas: maximum output admissible set (instatiated as a polytope)
+            t: minimum number of steps in the future that define the moas
+        """
+
+        # ensure that the system is stable (otherwise the algorithm doesn't converge)
+        eig_max = np.max(np.absolute(np.linalg.eig(A)[0]))
+        if eig_max > 1:
+            raise ValueError('Cannot compute MOAS for unstable systems')
+
+        # Gilber and Tan algorithm
+        [n_constraints, n_variables] = lhs.shape
+        t = 0
+        convergence = False
+        while convergence == False:
+
+            # cost function gradients for all i
+            J = lhs.dot(np.linalg.matrix_power(A,t+1))
+
+            # constraints to each LP
+            cons_lhs = np.vstack([lhs.dot(np.linalg.matrix_power(A,k)) for k in range(0,t+1)])
+            cons_rhs = np.vstack([rhs for k in range(0,t+1)])
+
+            # list of all minima
+            J_sol = [] 
+            for i in range(0, n_constraints):
+                J_sol_i = linear_program(np.reshape(-J[i,:], (n_variables,1)), cons_lhs, cons_rhs)[1]
+                J_sol.append(-J_sol_i - rhs[i])
+
+            # convergence check
+            if np.max(J_sol) < 0:
+                convergence = True
+            else:
+                t += 1
+
+        # define polytope
+        moas = Polytope(cons_lhs, cons_rhs)
+        moas.assemble()
+
+        return [moas, t]
+
+    @staticmethod
+    def licq_check(G, active_set, max_cond=1e9):
+        """
+        Checks if LICQ holds for the given active set
+
+        INPUTS:
+            G: gradient of the constraints
+            active_set: active set
+            max_cond: maximum condition number of the squared active constraints
+        
+        OUTPUTS:
+            licq -> flag (True if licq holds, False if licq doesn't hold)
+        """
+        
+        # select active constraints
+        G_A = G[active_set,:]
+
+        # check condion number of the squared active constraints
+        licq = True
+        cond = np.linalg.cond(G_A.dot(G_A.T))
+        if cond > max_cond:
+            licq = False
+
+        return licq
 
 
 class CriticalRegion:
     """
     Implements the algorithm from Tondel et al. "An algorithm for multi-parametric quadratic programming and explicit MPC solutions"
+    
+    VARIABLES:
+        n_constraints: number of contraints in the qp
+        n_parameters: number of parameters of the qp
+        active_set: active set inside the critical region
+        inactive_set: list of indices of non active contraints inside the critical region
+        polytope: polytope describing the ceritical region in the parameter space
+        weakly_active_constraints: list of indices of constraints that are weakly active iside the entire critical region
+        candidate_active_sets: list of lists of active sets, its ith element collects the set of all the possible
+            active sets that can be found crossing the ith minimal facet of the polyhedron
+        z_linear: linear term in the piecewise affine primal solution z_opt = z_linear*x + z_offset
+        z_offset: offset term in the piecewise affine primal solution z_opt = z_linear*x + z_offset
+        lambda_A_linear: linear term in the piecewise affine dual solution (only active multipliers)
+            lambda_A = lambda_A_linear*x + lambda_A_offset
+        lambda_A_offset: offset term in the piecewise affine dual solution (only active multipliers)
+            lambda_A = lambda_A_linear*x + lambda_A_offset
     """
 
     def __init__(self, active_set, H, G, W, S):
@@ -1037,8 +1136,6 @@ class CriticalRegion:
 
         OUTPUTS:
             candidate_active_sets: list of the candidate active sets for each minimal facet
-
-
         """
 
         # determine every possible combination of the weakly active contraints
@@ -1066,6 +1163,7 @@ class CriticalRegion:
         OUTPUTS:
             z_optimal: solution of the QP
         """
+
         z_optimal = self.z_offset + self.z_linear.dot(x).reshape(self.z_offset.shape)
         return z_optimal
 
@@ -1079,6 +1177,7 @@ class CriticalRegion:
         OUTPUTS:
             lambda_optimal: optimal multipliers
         """
+        
         lambda_A_optimal = self.lambda_A_offset + self.lambda_A_linear.dot(x)
         lambda_optimal = np.zeros(len(self.active_set + self.inactive_set))
         for i in range(0, len(self.active_set)):
@@ -1095,7 +1194,10 @@ class CriticalRegion:
         OUTPUTS:
             is_inside: flag (True if x is in the CR, False otherwise)
         """
+
+        # check if x is inside the polytope
         is_inside = np.max(self.polytope.lhs_min.dot(x) - self.polytope.rhs_min) <= 0
+
         return is_inside
 
 
