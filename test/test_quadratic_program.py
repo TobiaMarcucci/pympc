@@ -3,12 +3,11 @@ import numpy as np
 import pydrake.solvers.mathematicalprogram as mp
 
 from mpc_tools import quadratic_program, DTLinearSystem
-import mpc_tools.symbolic as sym
+import mpc_tools.mpcqp as mqp
 
 
 class TestQuadraticProgram(unittest.TestCase):
     def test_round_trip(self):
-
         np.random.seed(0)
         for i in range(20):
             x_goal = np.random.rand(3) * 20 - 10
@@ -22,7 +21,7 @@ class TestQuadraticProgram(unittest.TestCase):
             prog1.AddQuadraticCost(np.sum(np.power(x - x_goal, 2)))
             prog1.Solve()
             xstar_prog1 = prog1.GetSolution(x)
-            simple = sym.SimpleQuadraticProgram.from_mathematicalprogram(prog1)
+            simple = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog1)
             xstar_qp, cost = quadratic_program(simple.H, simple.f,
                                            simple.A, simple.b,
                                            simple.C, simple.d)
@@ -44,7 +43,7 @@ class TestQuadraticProgram(unittest.TestCase):
             prog.AddLinearConstraint(x[0] + x[1] <= np.random.randint(4, 10))
             prog.AddQuadraticCost(np.sum(np.power(x - x_goal, 2)))
 
-            simple_x = sym.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+            simple_x = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
             # x = T y + u
             T = np.random.rand(2, 2) - 0.5
             u = np.random.rand(2) - 0.5
@@ -71,10 +70,10 @@ class TestQuadraticProgram(unittest.TestCase):
             order = np.arange(x.size)
             np.random.shuffle(order)
 
-            simple_x = sym.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+            simple_x = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
 
             # y = P * x = x[order]
-            P = sym.permutation_matrix(order)
+            P = mqp.permutation_matrix(order)
             # x = P^-1 * y
             simple_y = simple_x.affine_variable_substitution(np.linalg.inv(P),
                                                              np.zeros(x.size))
@@ -86,7 +85,7 @@ class TestQuadraticProgram(unittest.TestCase):
             zstar = simple_z.solve()
             self.assertTrue(np.allclose(zstar, xstar))
 
-    def test_elimination(self):
+    def test_equality_elimination(self):
         m = 1.
         l = 1.
         g = 10.
@@ -136,12 +135,30 @@ class TestQuadraticProgram(unittest.TestCase):
                 prog.AddQuadraticCost((x[:, j] - x_goal).dot(Q).dot(x[:, j] - x_goal))
                 prog.AddQuadraticCost(u[:, j].T.dot(R).dot(u[:, j]))
 
-            simple = sym.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+            simple = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
             simple_eliminated = simple.eliminate_equality_constrained_variables()
 
             self.assertEqual(simple_eliminated.C.shape[0], 0)
             self.assertEqual(simple_eliminated.d.shape[0], 0)
             self.assertTrue(np.allclose(simple.solve(), simple_eliminated.solve()))
+
+    def test_inequality_elimination(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] >= 0)
+        prog.AddLinearConstraint(x[1] >= 0)
+        prog.AddLinearConstraint(x[0] + x[1] <= 1)
+        prog.AddLinearConstraint(x[0] + x[1] <= 2)
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        reduced = qp.eliminate_redundant_inequalities()
+
+        # Sort the rows of A. Kind of gross.
+        order = sorted(range(reduced.A.shape[0]), key=lambda i: tuple(reduced.A[i, :]))
+        self.assertTrue(np.allclose(reduced.A[order, :],
+                                    np.array([[-1, 0],
+                                              [0, -1],
+                                              [1 / np.sqrt(2), 1 / np.sqrt(2)]])))
+        self.assertTrue(np.allclose(reduced.b[order], np.array([0, 0, 1 / np.sqrt(2)])))
 
     def test_mpc_order(self):
         m = 1.
@@ -193,8 +210,8 @@ class TestQuadraticProgram(unittest.TestCase):
                 prog.AddQuadraticCost((x[:, j] - x_goal).dot(Q).dot(x[:, j] - x_goal))
                 prog.AddQuadraticCost(u[:, j].T.dot(R).dot(u[:, j]))
 
-            simple = sym.SimpleQuadraticProgram.from_mathematicalprogram(prog)
-            order = sym.mpc_order(prog, u, x)
+            simple = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+            order = mqp.mpc_order(prog, u, x)
             simple_permuted = simple.permute_variables(order)
             self.assertTrue(np.allclose(simple.solve(), simple_permuted.solve()))
 
@@ -214,7 +231,7 @@ class TestQuadraticProgram(unittest.TestCase):
             prog.AddLinearConstraint(x[2] == x[0] + -2 * x[1])
             prog.AddQuadraticCost(np.sum(np.power(x - x_goal, 2)))
 
-            qp = sym.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+            qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
             recentered = qp.transform_goal_to_origin()
             self.assertFalse(np.allclose(qp.f, 0))
             self.assertTrue(np.allclose(recentered.f, 0))
@@ -272,9 +289,9 @@ class TestQuadraticProgram(unittest.TestCase):
                 prog.AddQuadraticCost(u[:, j].T.dot(R).dot(u[:, j]))
 
             assert prog.Solve() == mp.SolutionResult.kSolutionFound
-            qp = sym.SimpleQuadraticProgram.from_mathematicalprogram(prog)
-            mpc_qp = sym.CanonicalMPCQP.from_mathematicalprogram(prog, u, x)
-            self.assertTrue(np.allclose(qp.solve(), mpc_qp.solve(), atol=1e-7))
+            qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+            mpc_qp = mqp.CanonicalMPCQP.from_mathematicalprogram(prog, u, x)
+            self.assertTrue(np.allclose(qp.solve(), mpc_qp.solve(), atol=1e-4))
 
 if __name__ == '__main__':
     unittest.main()
