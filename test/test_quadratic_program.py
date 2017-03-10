@@ -22,7 +22,7 @@ class TestQuadraticProgram(unittest.TestCase):
             prog1.Solve()
             xstar_prog1 = prog1.GetSolution(x)
             simple = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog1)
-            xstar_qp, cost = quadratic_program(simple.H, simple.f,
+            xstar_qp, _, _ = quadratic_program(simple.H, simple.f,
                                            simple.A, simple.b,
                                            simple.C, simple.d)
             self.assertTrue(np.allclose(xstar_prog1, xstar_qp.flatten(), atol=1e-7))
