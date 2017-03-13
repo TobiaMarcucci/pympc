@@ -4,6 +4,7 @@ import scipy.linalg as linalg
 import pydrake.solvers.mathematicalprogram as mp
 from mpc_tools import Polytope
 from optimization import linear_program
+import cdd
 
 
 def extract_linear_equalities(prog):
@@ -280,7 +281,17 @@ class SimpleQuadraticProgram(object):
         v == -H^-T f
         """
         U = np.eye(self.num_vars)
-        v = -np.linalg.inv(self.H).T.dot(self.f)
+        assert np.allclose(self.H, self.H.T)
+        zero_mask = [np.allclose(self.H[i, :], 0) for i in range(self.H.shape[0])]
+        nonzero_mask = np.logical_not(zero_mask)
+        assert np.allclose(self.f[np.logical_not(nonzero_mask)], 0)
+        Hhat = self.H[nonzero_mask, :][:, nonzero_mask]
+        fhat = self.f[nonzero_mask]
+        vhat = -np.linalg.inv(Hhat).T.dot(fhat)
+        v = np.zeros(self.f.shape)
+        v[nonzero_mask] = vhat
+        assert np.allclose(self.H.T.dot(v) + self.f, 0)
+        # v = -np.linalg.inv(self.H).T.dot(self.f)
         return self.affine_variable_substitution(U, v)
 
     def eliminate_equality_constrained_variables(self, preserve=None):
