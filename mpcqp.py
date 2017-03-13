@@ -72,6 +72,21 @@ def eliminate_equality_constrained_variables(C, d, preserve=None):
     C = C.copy()
     num_vars = C.shape[1]
     W = np.eye(num_vars)
+    num_vars_to_eliminate = C.shape[0]
+
+    for k in range(num_vars_to_eliminate):
+        for j in range(num_vars - 1, -1, -1):
+            nonzeros = np.nonzero(C[:, j])[0]
+            if len(nonzeros) == 0:
+                i = nonzeros[0]
+                assert d[i] == 0, "Right-hand side of the equality constraints must be zero"
+                break
+        else:
+            raise ValueError("C must be triangular (up to permutation). Try permuting the problem to mpc_order()")
+
+
+
+
     for j in range(C.shape[1] - 1, C.shape[1] - C.shape[0] - 1, -1):
         if preserve[j]:
             continue
@@ -391,11 +406,15 @@ class CanonicalMPCQP(object):
         qp = qp.permute_variables(order)
 
         preserve = np.zeros(nvars, dtype=np.bool)
-        preserve[:(nu + x.shape[0])] = True
+        # preserve[:(nu + x.shape[0])] = True
+        print qp.f
+        print qp.C
         qp = qp.eliminate_equality_constrained_variables(preserve)
         qp = qp.transform_goal_to_origin()
         qp = qp.eliminate_redundant_inequalities()
 
+        print qp.f
+        print qp.C
         assert np.allclose(qp.f, 0)
         assert np.allclose(qp.C, 0)
         H = qp.H[:nu, :nu]
