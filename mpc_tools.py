@@ -244,7 +244,7 @@ class Polytope:
         lhs_ip = np.hstack((self.lhs, -np.ones((self.n_facets, 1))))
         [interior_point, penetration] = linear_program(cost_gradient_ip, lhs_ip, self.rhs)[0:2]
         interior_point = interior_point[0:-1]
-        if penetration > 0:
+        if penetration >= 0:
             interior_point[:] = np.nan
         return interior_point
 
