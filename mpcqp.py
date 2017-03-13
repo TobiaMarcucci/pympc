@@ -392,7 +392,7 @@ class CanonicalMPCQP(object):
         Q = qp.H[nu:, nu:]
 
         G = qp.A[:, :nu]
-        W = qp.b
+        W = qp.b.reshape((-1, 1))
         E = -qp.A[:, nu:]
         return CanonicalMPCQP(H, F, Q, G, W, E, qp.T)
 

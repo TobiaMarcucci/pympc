@@ -294,5 +294,79 @@ class TestQuadraticProgram(unittest.TestCase):
             mpc_qp = mqp.CanonicalMPCQP.from_mathematicalprogram(prog, u, x)
             self.assertTrue(np.allclose(qp.solve(), mpc_qp.solve(), atol=1e-4))
 
+    def test_symbolic_and_factory_qps(self):
+        # Set up the system
+        m = 1.
+        l = 1.
+        g = 10.
+        A = np.array([
+            [0., 1.],
+            [g/l, 0.]
+        ])
+        B = np.array([
+            [0.],
+            [1/(m*l**2.)]
+        ])
+        t_s = .1
+        sys = DTLinearSystem.from_continuous(t_s, A, B)
+
+        for N in range(1, 5):
+            Q = np.eye(A.shape[0])/100.
+            R = np.eye(B.shape[1])
+            x_max = np.array([[np.pi/6.], [np.pi/20./(N*t_s)]])
+            x_min = -x_max
+            u_max = np.array([[m*g*l*np.pi/8.]])
+            u_min = -u_max
+
+            # Construct a QP using the MPC QP factory:
+            factory = mqp.MPCQPFactory(sys, N, Q, R)
+            factory.add_state_bound(x_max, x_min)
+            factory.add_input_bound(u_max, u_min)
+            mpc_qp = factory.assemble()
+
+            # Construct an equivalent symbolic program representing the same QP:
+            prog = mp.MathematicalProgram()
+            x = prog.NewContinuousVariables(2, N, "x")
+            u = prog.NewContinuousVariables(1, N, "u")
+            for j in range(N):
+                x_next = sys.A.dot(x[:, j]) + sys.B.dot(u[:, j])
+                for i in range(x.shape[0]):
+                    prog.AddLinearConstraint(x_next[i] <= x_max[i])
+                    prog.AddLinearConstraint(x_next[i] >= x_min[i])
+
+                for i in range(u.shape[0]):
+                    prog.AddLinearConstraint(u[i, j] <= u_max[i])
+                    prog.AddLinearConstraint(u[i, j] >= u_min[i])
+
+                if j < N - 1:
+                    for i in range(x.shape[0]):
+                        prog.AddLinearConstraint(x[i, j + 1] == x_next[i])
+
+                prog.AddQuadraticCost(x_next.dot(Q).dot(x_next))
+                prog.AddQuadraticCost(u[:, j].dot(R).dot(u[:, j]))
+            sym_qp = mqp.CanonicalMPCQP.from_mathematicalprogram(prog, u, x)
+
+            self.assertTrue(np.allclose(mpc_qp.H, sym_qp.H))
+            self.assertTrue(np.allclose(mpc_qp.F, sym_qp.F))
+            self.assertTrue(equal_up_to_row_permutations(mpc_qp.G, sym_qp.G))
+            self.assertTrue(equal_up_to_row_permutations(mpc_qp.E, sym_qp.E))
+            self.assertTrue(equal_up_to_row_permutations(mpc_qp.W, sym_qp.W))
+            self.assertTrue(equal_up_to_row_permutations(
+                np.hstack((mpc_qp.G, mpc_qp.W, mpc_qp.E)),
+                np.hstack((sym_qp.G, sym_qp.W, sym_qp.E))))
+
+
+def equal_up_to_row_permutations(A, B, **kwargs):
+    A = np.asarray(A)
+    B = np.asarray(B)
+    if A.ndim != B.ndim:
+        return False
+    if A.shape != B.shape:
+        return False
+    A = A[sorted(range(A.shape[0]), key=lambda i: tuple(A[i,:])), :]
+    B = B[sorted(range(B.shape[0]), key=lambda i: tuple(B[i,:])), :]
+    return np.allclose(A, B, **kwargs)
+
+
 if __name__ == '__main__':
     unittest.main()
