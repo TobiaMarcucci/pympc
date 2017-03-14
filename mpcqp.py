@@ -71,6 +71,8 @@ def eliminate_equality_constrained_variables(C, d):
     fewer variables with no equality constraints.
     """
     assert np.allclose(d, 0), "Right-hand side of the equality constraints must be zero"
+    if C.shape[0] == 0:
+        return np.eye(C.shape[1])
     c_rational = sympy.Matrix([[sympy.Rational(x) for x in row] for row in C])
     W = D = sympy.Matrix.hstack(*c_rational.nullspace())
     W = W.T.rref()[0].T
