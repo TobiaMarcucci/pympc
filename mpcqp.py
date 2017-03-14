@@ -1,4 +1,5 @@
 import itertools
+import sympy
 import numpy as np
 import scipy.linalg as linalg
 import pydrake.solvers.mathematicalprogram as mp
@@ -56,7 +57,7 @@ def mpc_order(prog, u, x0):
     return np.argsort(order)
 
 
-def eliminate_equality_constrained_variables(C, d, preserve=None):
+def eliminate_equality_constrained_variables(C, d):
     """
     Given C and d defining a set of linear equality constraints:
 
@@ -64,41 +65,16 @@ def eliminate_equality_constrained_variables(C, d, preserve=None):
 
     find a matrix W such that C x == d implies x = W z for some z \subset x
 
+    This is just a matter of taking an appropriate null basis of C.
+
     This allows us to rewrite a QP with equality constraints into a QP over
     fewer variables with no equality constraints.
     """
-    if preserve is None:
-        preserve = np.zeros(C.shape[1], dtype=np.bool)
-    C = C.copy()
-    num_vars = C.shape[1]
-    W = np.eye(num_vars)
-    num_vars_to_eliminate = C.shape[0]
-
-    for k in range(num_vars_to_eliminate):
-        for j in range(num_vars - 1, -1, -1):
-            nonzeros = np.nonzero(C[:, j])[0]
-            if len(nonzeros) == 0:
-                i = nonzeros[0]
-                assert d[i] == 0, "Right-hand side of the equality constraints must be zero"
-                break
-        else:
-            raise ValueError("C must be triangular (up to permutation). Try permuting the problem to mpc_order()")
-
-
-
-
-    for j in range(C.shape[1] - 1, C.shape[1] - C.shape[0] - 1, -1):
-        if preserve[j]:
-            continue
-        nonzeros = np.nonzero(C[:, j])[0]
-        if len(nonzeros) != 1:
-            raise ValueError("C must be triangular (up to permutation). Try permuting the problem to mpc_order()")
-        i = nonzeros[0]
-        assert d[i] == 0, "Right-hand side of the equality constraints must be zero"
-        v = C[i, :j] / -C[i, j]
-        W = W.dot(np.vstack([np.eye(j), v]))
-        C = C[[k for k in range(C.shape[0]) if k != i], :]
-    return W
+    assert np.allclose(d, 0), "Right-hand side of the equality constraints must be zero"
+    c_rational = sympy.Matrix([[sympy.Rational(x) for x in row] for row in C])
+    W = D = sympy.Matrix.hstack(*c_rational.nullspace())
+    W = W.T.rref()[0].T
+    return np.asarray(W).astype(np.float64)
 
 
 def extract_objective(prog):
@@ -309,7 +285,7 @@ class SimpleQuadraticProgram(object):
         # v = -np.linalg.inv(self.H).T.dot(self.f)
         return self.affine_variable_substitution(U, v)
 
-    def eliminate_equality_constrained_variables(self, preserve=None):
+    def eliminate_equality_constrained_variables(self):
         """
         Given:
             - self: an optimization program over variables x
@@ -323,7 +299,7 @@ class SimpleQuadraticProgram(object):
         values for x
         """
 
-        W = eliminate_equality_constrained_variables(self.C, self.d, preserve)
+        W = eliminate_equality_constrained_variables(self.C, self.d)
         # x = W z
         new_program = self.affine_variable_substitution(W, np.zeros(self.num_vars))
         mask = np.ones(new_program.C.shape[0], dtype=np.bool)
@@ -405,11 +381,11 @@ class CanonicalMPCQP(object):
         order = mpc_order(prog, u, x)
         qp = qp.permute_variables(order)
 
-        preserve = np.zeros(nvars, dtype=np.bool)
+        # preserve = np.zeros(nvars, dtype=np.bool)
         # preserve[:(nu + x.shape[0])] = True
         print qp.f
         print qp.C
-        qp = qp.eliminate_equality_constrained_variables(preserve)
+        qp = qp.eliminate_equality_constrained_variables()
         qp = qp.transform_goal_to_origin()
         qp = qp.eliminate_redundant_inequalities()
 
