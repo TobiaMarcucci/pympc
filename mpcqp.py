@@ -381,16 +381,10 @@ class CanonicalMPCQP(object):
         order = mpc_order(prog, u, x)
         qp = qp.permute_variables(order)
 
-        # preserve = np.zeros(nvars, dtype=np.bool)
-        # preserve[:(nu + x.shape[0])] = True
-        print qp.f
-        print qp.C
         qp = qp.eliminate_equality_constrained_variables()
         qp = qp.transform_goal_to_origin()
         qp = qp.eliminate_redundant_inequalities()
 
-        print qp.f
-        print qp.C
         assert np.allclose(qp.f, 0)
         assert np.allclose(qp.C, 0)
         H = qp.H[:nu, :nu]
