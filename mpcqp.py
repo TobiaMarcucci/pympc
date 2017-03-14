@@ -582,7 +582,15 @@ class MPCQPFactory(object):
 
     def cost_blocks(self):
         # quadratic term in the state sequence
-        H_x = linalg.block_diag(*[self.Q for i in range(0, self.N-1)])
+
+        # On my mac, block_diag produces the wrong result when given an empty
+        # input (i.e. when self.N = 1). Instead of an empty 0 x 0 matrix, it
+        # gives an empty 1 x 0 matrix, which results in H being non-square. So
+        # we need a special case to work around that issue:
+        if self.N == 1:
+            H_x = np.zeros((0, 0))
+        else:
+            H_x = linalg.block_diag(*[self.Q for i in range(0, self.N-1)])
         H_x = linalg.block_diag(H_x, self.P)
         # quadratic term in the input sequence
         H_u = linalg.block_diag(*[self.R for i in range(0, self.N)])
