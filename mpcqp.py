@@ -373,6 +373,32 @@ class CanonicalMPCQP(object):
             T = Affine(np.eye(nv), np.zeros(nv))
         self.T = T
 
+    def save(self, file):
+        np.lib.npyio._savez(file, args=[], kwds={
+            "H": self.H,
+            "F": self.F,
+            "Q": self.Q,
+            "G": self.G,
+            "W": self.W,
+            "E": self.E,
+            "TA": self.T.A,
+            "Tb": self.T.b
+        }, compress=False, allow_pickle=False)
+
+    @staticmethod
+    def load(file):
+        data = np.load(file)
+        qp = CanonicalMPCQP(H=data["H"],
+                            F=data["F"],
+                            Q=data["Q"],
+                            G=data["G"],
+                            W=data["W"],
+                            E=data["E"],
+                            T=Affine(data["TA"],
+                                     data["Tb"]))
+        data.close()
+        return qp
+
     @staticmethod
     def from_mathematicalprogram(prog, u, x):
         u = np.asarray(u)
