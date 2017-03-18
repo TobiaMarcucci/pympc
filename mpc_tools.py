@@ -1,13 +1,11 @@
 import numpy as np
 import scipy.linalg as linalg
-import scipy.spatial as spatial
 import matplotlib.pyplot as plt
 import itertools
-from pyhull.halfspace import Halfspace
-from pyhull.halfspace import HalfspaceIntersection
 import time
 from utils.ndpiecewise import NDPiecewise
 from optimization import linear_program, quadratic_program
+from geometry import Polytope
 
 
 def plot_input_sequence(u_sequence, t_s, N, u_max=None, u_min=None):
@@ -99,206 +97,6 @@ def plot_state_trajectory(x_trajectory, t_s, N, x_max=None, x_min=None):
     plt.xlabel(r'$t$')
 
     return
-
-
-class Polytope:
-    """
-    Defines a polytope as {x | lhs * x <= rhs}.
-
-    VARIABLES:
-        lhs: left-hand side of redundant description of the polytope {x | lhs * x <= rhs}
-        rhs: right-hand side of redundant description of the polytope {x | lhs * x <= rhs}
-        assembled: flag that determines when it isn't possible to add constraints
-        empty: flag that determines if the polytope is empty
-        bounded: flag that determines if the polytope is bounded (if not a ValueError is thrown)
-        coincident_facets: list of of lists of coincident facets (one list for each facet)
-        vertices: list of vertices of the polytope (each one is a 1D array)
-        minimal_facets: list of indices of the non-redundant facets
-        lhs_min: left-hand side of non-redundant facets
-        rhs_min: right-hand side of non-redundant facets
-        facet_centers: list of centers of each non-redundant facet
-            (i.e.: lhs_min[i,:].dot(facet_centers[i]) = rhs_min[i])
-    """
-
-    def __init__(self, lhs, rhs):
-        self.lhs = lhs
-        self.rhs = rhs
-        self.assembled = False
-        return
-
-    def add_facets(self, lhs, rhs):
-        if self.assembled:
-            raise ValueError('Polytope already assembled, cannot add facets!')
-        self.lhs = np.vstack((self.lhs, lhs))
-        self.rhs = np.vstack((self.rhs, rhs))
-        return
-
-    def add_bounds(self, x_max, x_min):
-        if self.assembled:
-            raise ValueError('Polytope already assembled, cannot add bounds!')
-        n_variables = x_max.shape[0]
-        lhs = np.vstack((np.eye(n_variables), -np.eye(n_variables)))
-        rhs = np.vstack((x_max, -x_min))
-        self.add_facets(lhs, rhs)
-        return
-
-    def assemble(self):
-        if self.assembled:
-            raise ValueError('Polytope already assembled, cannot assemble again!')
-        [self.n_facets, self.n_variables] = self.lhs.shape
-        self.normalize()
-        self.empty = False
-        self.bounded = True
-        if self.n_facets < self.n_variables+1:
-            self.bounded = False
-        elif self.n_variables == 1:
-            self.assemble_1D()
-        elif self.n_variables > 1:
-            self.assemble_multiD()
-        if self.empty:
-            print('Empty polytope')
-        if not self.bounded:
-            raise ValueError('Unbounded polyhedron: only polytopes allowed')
-        return
-
-    def normalize(self, toll=1e-8):
-        for i in range(0, self.n_facets):
-            norm_factor = np.linalg.norm(self.lhs[i,:])
-            if norm_factor > toll:
-                self.lhs[i,:] = self.lhs[i,:]/norm_factor
-                self.rhs[i] = self.rhs[i]/norm_factor
-        return
-
-    def assemble_1D(self):
-        upper_bounds = []
-        lower_bounds = []
-        for i in range(0, self.n_facets):
-            if self.lhs[i] > 0:
-                upper_bounds.append((self.rhs[i,0]/self.lhs[i])[0])
-                lower_bounds.append(-np.inf)
-            elif self.lhs[i] < 0:
-                upper_bounds.append(np.inf)
-                lower_bounds.append((self.rhs[i,0]/self.lhs[i])[0])
-            else:
-                raise ValueError('Invalid constraint!')
-        upper_bound = min(upper_bounds)
-        lower_bound = max(lower_bounds)
-        if lower_bound > upper_bound:
-            self.empty = True
-            return
-        self.vertices = [lower_bound, upper_bound]
-        if any(np.isinf(self.vertices).flatten()):
-            self.bounded = False
-            return
-        self.minimal_facets = sorted([upper_bounds.index(upper_bound), lower_bounds.index(lower_bound)])
-        self.lhs_min = self.lhs[self.minimal_facets,:]
-        self.rhs_min = self.rhs[self.minimal_facets]
-        if upper_bounds.index(upper_bound) < lower_bounds.index(lower_bound):
-            self.facet_centers = [upper_bound, lower_bound]
-        else:
-            self.facet_centers = [lower_bound, upper_bound]
-        self.find_coincident_facets()
-        return
-
-    def assemble_multiD(self):
-        interior_point = self.interior_point()
-        if any(np.isnan(interior_point)):
-            self.empty = True
-            return
-        if any(np.isinf(interior_point).flatten()):
-            self.bounded = False
-            return
-        halfspaces = []
-        for i in range(0, self.n_facets):
-            halfspace = Halfspace(self.lhs[i,:].tolist(), (-self.rhs[i,0]).tolist())
-            halfspaces.append(halfspace)
-        polyhedron_qhull = HalfspaceIntersection(halfspaces, interior_point.flatten().tolist())
-        self.vertices = polyhedron_qhull.vertices
-        if any(np.isinf(self.vertices).flatten()):
-            self.bounded = False
-            return
-        self.minimal_facets = []
-        for i in range(0, self.n_facets):
-            if polyhedron_qhull.facets_by_halfspace[i]:
-                self.minimal_facets.append(i)
-        self.lhs_min = self.lhs[self.minimal_facets,:]
-        self.rhs_min = self.rhs[self.minimal_facets]
-        self.facet_centers = []
-        for facet in self.minimal_facets:
-            facet_vertices_inidices = polyhedron_qhull.facets_by_halfspace[facet]
-            facet_vertices = self.vertices[facet_vertices_inidices]
-            self.facet_centers.append(np.mean(np.vstack(facet_vertices), axis=0))
-        self.find_coincident_facets()
-        return
-
-    def interior_point(self):
-        """
-        Finds an interior point solving the linear program
-        minimize y
-        s.t.     lhs * x - rhs <= y
-        Returns nan if the polyhedron is empty
-        Might return inf if the polyhedron is unbounded
-        """
-        cost_gradient_ip = np.zeros((self.n_variables+1, 1))
-        cost_gradient_ip[-1] = 1.
-        lhs_ip = np.hstack((self.lhs, -np.ones((self.n_facets, 1))))
-        [interior_point, penetration] = linear_program(cost_gradient_ip, lhs_ip, self.rhs)[0:2]
-        interior_point = interior_point[0:-1]
-        if penetration > 0:
-            interior_point[:] = np.nan
-        return interior_point
-
-    def find_coincident_facets(self, toll=1e-8):
-        # coincident facets indices
-        coincident_facets = []
-        lrhs = np.hstack((self.lhs, self.rhs))
-        for i in range(0, self.n_facets):
-            coincident_facets.append(
-                sorted(np.where(np.all(np.isclose(lrhs, lrhs[i,:], toll, toll), axis=1))[0].tolist())
-                )
-        self.coincident_facets = coincident_facets
-        return
-
-    def plot(self, dim_proj=[0,1], **kwargs):
-        """
-        Plots a 2d projection of the polytope.
-
-        INPUTS:
-            dim_proj: dimensions in which to project the polytope
-
-        OUTPUTS:
-            polytope_plot: figure handle
-        """
-        if self.empty:
-            raise ValueError('Empty polytope!')
-        if len(dim_proj) != 2:
-            raise ValueError('Only 2d polytopes!')
-        # extract vertices components
-        vertices_proj = np.vstack(self.vertices)[:,dim_proj]
-        hull = spatial.ConvexHull(vertices_proj)
-        for simplex in hull.simplices:
-            polytope_plot, = plt.plot(vertices_proj[simplex, 0], vertices_proj[simplex, 1], **kwargs)
-        plt.xlabel(r'$x_' + str(dim_proj[0]+1) + '$')
-        plt.ylabel(r'$x_' + str(dim_proj[1]+1) + '$')
-        return polytope_plot
-
-    @staticmethod
-    def from_bounds(x_max, x_min):
-        """
-        Returns a polytope defines through the its bounds.
-
-        INPUTS:
-            x_max: upper bound of the variables
-            x_min: lower bound of the variables
-
-        OUTPUTS:
-            p: polytope
-        """
-        n = x_max.shape[0]
-        lhs = np.vstack((np.eye(n), -np.eye(n)))
-        rhs = np.vstack((x_max, -x_min))
-        p = Polytope(lhs, rhs)
-        return p
 
 
 
@@ -409,16 +207,30 @@ class DTLinearSystem:
 
  #    def __init__(self, A_list, B_list, S_list, R_list, T_list):
  #        self.n_systems = len(A_list)
- #        self.linear_system_list = linear_system_list
- #        self.domain_list = domain_list
+ #        if len(B_list) != self.n_systems or len(S_list) != self.n_systems or len(R_list) != self.n_systems or len(T_list) != self.n_systems:
+ #            raise ValueError('Inconsistent input dimensions')
+ #        self.A_list = A_list
+ #        self.B_list = B_list
+ #        self.S_list = S_list
+ #        self.R_list = R_list
+ #        self.T_list = T_list
+ #        self.check_intersections()
  #        return
 
  #    def check_intersections(self):
- #        # do stuff
+ #        for i in range(0, self.n_systems):
+ #            lhs_i = np.hstack(S_list[i], R_list[i])
+ #            rhs_i = T_list[i]
+ #            polytope_i = Polytope(lhs_i, rhs_i)
+ #            for j in range(0, i):
+ #                lhs_j = np.hstack(S_list[j], R_list[j])
+ #                rhs_j = T_list[j]
+ #                intersection_ij = polytope_i.check_intersection_with(lhs_j, rhs_j)
+ #                if intersection_ij:
+ #                    raise ValueError('Non-empty intersection of two domains')
  #        return
 
  #    def join_domains(self):
- #        # if facet_i = - facet_j -> remove facets
  #        return
 
 
@@ -441,14 +253,12 @@ class MPCController:
 
     def compute_explicit_solution(self):
 
-        # change variable for exeplicit MPC (z := u_seq + H^-1 F^T x0)
+        # start clock
         tic = time.clock()
-        H_inv = np.linalg.inv(self.qp.H)
-        self.S = self.qp.E + self.qp.G.dot(H_inv.dot(self.qp.F.T))
 
         # initialize the search with the origin (to which the empty AS is associated)
         active_set = []
-        cr0 = CriticalRegion(active_set, self.qp.H, self.qp.G, self.qp.W, self.S)
+        cr0 = CriticalRegion(active_set, self.qp)
         cr_to_be_explored = [cr0]
         explored_cr = []
         tested_active_sets =[cr0.active_set]
@@ -488,7 +298,7 @@ class MPCController:
 
                     # if LICQ holds, determine the critical region
                     if licq_flag:
-                        cr_to_be_explored.append(CriticalRegion(active_set, self.qp.H, self.qp.G, self.qp.W, self.S))
+                        cr_to_be_explored.append(CriticalRegion(active_set, self.qp))
 
                     # if LICQ doesn't hold, correct the active set and determine the critical region
                     else:
@@ -496,7 +306,7 @@ class MPCController:
                         active_set = self.active_set_if_not_licq(active_set, facet_index, cr)
                         if active_set:
                             print('    corrected active set ' + str(active_set))
-                            cr_to_be_explored.append(CriticalRegion(active_set, self.qp.H, self.qp.G, self.qp.W, self.S))
+                            cr_to_be_explored.append(CriticalRegion(active_set, self.qp))
                         else:
                             print('    unfeasible critical region detected')
         return [cr_to_be_explored, tested_active_sets]
@@ -542,7 +352,7 @@ class MPCController:
         """
 
         # center of the facet in the parameter space
-        x_center = cr.polytope.facet_centers[facet_index]
+        x_center = cr.polytope.facet_centers(facet_index)
 
         # solve the QP inside the new critical region to derive the active set
         x_beyond = x_center + dist*cr.polytope.lhs_min[facet_index,:]
@@ -555,7 +365,7 @@ class MPCController:
 
         return active_set
 
-    def solve_lp_on_facet(self, candidate_active_set, facet_index, cr, lambda_bound=1e6, toll=1e-6):
+    def solve_lp_on_facet(self, candidate_active_set, facet_index, cr, toll=1e-6):
         """
         Solves a LP on the center of the facet wich index is "facet_index" to determine
         the active set in that region (Theorem 4)
@@ -573,7 +383,7 @@ class MPCController:
         active_set_change = list(set(cr.active_set).symmetric_difference(set(candidate_active_set)))
 
         # compute optimal solution in the center of the shared facet
-        x_center = cr.polytope.facet_centers[facet_index]
+        x_center = cr.polytope.facet_centers(facet_index)
         z_center = cr.z_optimal(x_center)
 
         # solve lp from Theorem 4
@@ -583,11 +393,11 @@ class MPCController:
         cost[candidate_active_set.index(active_set_change[0])] = -1.
         cons_lhs = np.vstack((G_A.T, -G_A.T, -np.eye(n_lam)))
         cons_rhs = np.vstack((-self.qp.H.dot(z_center), self.qp.H.dot(z_center), np.zeros((n_lam,1))))
-        lambda_sol = linear_program(cost, cons_lhs, cons_rhs, lambda_bound)[0]
+        lambda_sol = linear_program(cost, cons_lhs, cons_rhs)[0]
 
         # if the solution in unbounded the region is unfeasible
         active_set = []
-        if np.max(lambda_sol) > lambda_bound - toll:
+        if any(np.isnan(lambda_sol)):
             return active_set
 
         # if the solution in bounded look at the indices of the solution to derive the active set
@@ -672,16 +482,16 @@ class CriticalRegion:
             lambda_A = lambda_A_linear*x + lambda_A_offset
     """
 
-    def __init__(self, active_set, H, G, W, S):
+    def __init__(self, active_set, qp):
 
         # store active set
         print 'Computing critical region for the active set ' + str(active_set)
-        [self.n_constraints, self.n_parameters] = S.shape
+        [self.n_constraints, self.n_parameters] = qp.S.shape
         self.active_set = active_set
         self.inactive_set = sorted(list(set(range(0, self.n_constraints)) - set(active_set)))
 
         # find the polytope
-        self.polytope(H, G, W, S)
+        self.polytope(qp)
         if self.polytope.empty:
             return
 
@@ -698,22 +508,21 @@ class CriticalRegion:
 
         return
 
-    def polytope(self, H, G, W, S):
+    def polytope(self, qp):
         """
         Stores a polytope that describes the critical region in the parameter space.
         """
 
         # multipliers explicit solution
-        H_inv = np.linalg.inv(H)
-        [G_A, W_A, S_A] = [G[self.active_set,:], W[self.active_set,:], S[self.active_set,:]]
-        [G_I, W_I, S_I] = [G[self.inactive_set,:], W[self.inactive_set,:], S[self.inactive_set,:]]
-        H_A = np.linalg.inv(G_A.dot(H_inv.dot(G_A.T)))
+        [G_A, W_A, S_A] = [qp.G[self.active_set,:], qp.W[self.active_set,:], qp.S[self.active_set,:]]
+        [G_I, W_I, S_I] = [qp.G[self.inactive_set,:], qp.W[self.inactive_set,:], qp.S[self.inactive_set,:]]
+        H_A = np.linalg.inv(G_A.dot(qp.H_inv.dot(G_A.T)))
         self.lambda_A_offset = - H_A.dot(W_A)
         self.lambda_A_linear = - H_A.dot(S_A)
 
         # primal variables explicit solution
-        self.z_offset = - H_inv.dot(G_A.T.dot(self.lambda_A_offset))
-        self.z_linear = - H_inv.dot(G_A.T.dot(self.lambda_A_linear))
+        self.z_offset = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_offset))
+        self.z_linear = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_linear))
 
         # equation (12) (modified: only inactive indices considered)
         lhs_type_1 = G_I.dot(self.z_linear) - S_I
@@ -860,17 +669,3 @@ class CriticalRegion:
 
         return is_inside
 
-
-
-class NDPiecewise(object):
-    def __init__(self, elements):
-        self.elements = elements
-
-    def lookup(self, point):
-        for element in self.elements:
-            if element.applies_to(point):
-                return element
-        return None
-
-    def __len__(self):
-        return len(self.elements)
