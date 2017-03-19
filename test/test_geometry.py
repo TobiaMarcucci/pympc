@@ -23,10 +23,10 @@ class TestGeometry(unittest.TestCase):
         C = np.array([[1.,0.]])
         d = np.array([[.1]])
         true_center = np.array([[.1],[0.]])
-        true_radius = np.array([[1.]])
+        true_radius = 1.
         [center, radius] = chebyshev_center(A,b,C,d)
-        self.assertTrue(all(true_center == center))
-        self.assertTrue(all(true_radius == radius))
+        self.assertTrue(all(np.isclose(true_center, center)))
+        self.assertTrue(np.isclose(true_radius, radius))
 
     def test_Polytope(self):
 
@@ -80,7 +80,7 @@ class TestGeometry(unittest.TestCase):
         self.assertEqual(p.coincident_facets, true_coincident_facets)
         self.assertEqual(true_minimal_facets, p.minimal_facets)
         for i in range(0, len(true_facet_centers)):
-            self.assertTrue(all(np.isclose(true_facet_centers[i], p.facet_centers[i])))
+            self.assertTrue(all(np.isclose(true_facet_centers[i], p.facet_centers(i))))
 
         # from_ and add_ methods
         x_max = np.ones((2,1))

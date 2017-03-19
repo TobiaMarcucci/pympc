@@ -2,11 +2,18 @@ from pydrake.solvers import mathematicalprogram as mp
 from pydrake.solvers.gurobi import GurobiSolver
 from pydrake.solvers.mosek import MosekSolver
 from scipy.optimize import nnls
-
-
 import numpy as np
 
-def linear_program(f, A, b, C=None, d=None, x_bound=None, solver='gurobi', **kwargs):
+def linear_program(f, A, b, C=None, d=None, x_bound=None, solver='pnnls', **kwargs):
+    if solver == 'pnnls':
+        [x_min, cost_min] = linear_program_pnnls(f, A, b, C, d)
+    elif solver == 'gurobi':
+        [x_min, cost_min] = linear_program_drake(f, A, b, C, d, x_bound, solver='gurobi', **kwargs)
+    elif solver == 'mosek':
+        [x_min, cost_min] = linear_program_drake(f, A, b, C, d, x_bound, solver='mosek', **kwargs)
+    return [x_min, cost_min]
+
+def linear_program_drake(f, A, b, C=None, d=None, x_bound=None, solver='gurobi', **kwargs):
     """
     Solves the linear program
     minimize f^T * x
@@ -133,7 +140,7 @@ def pnnls(A, B, c):
     u_star = -B_pinv.dot(A.dot(v_star) - c)
     return [v_star, u_star, r_star]
 
-def linear_program_pnnls(f, A, b, C=None, d=None, x_bound=None, toll=1.e-10):
+def linear_program_pnnls(f, A, b, C=None, d=None, toll=1.e-10):
     # remove equalities
     A_augmented = A
     b_augmented = b
@@ -151,16 +158,5 @@ def linear_program_pnnls(f, A, b, C=None, d=None, x_bound=None, toll=1.e-10):
     _, x_min, r_star = pnnls(A_pnnls, B_pnnls, c_pnnls)
     if r_star > toll:
         x_min[:] = np.nan
-    cost_min = f.T.dot(x_min)
+    cost_min = (f.T.dot(x_min))[0,0]
     return [x_min, cost_min]
-
-
-        
-
-
-
-
-
-
-
-

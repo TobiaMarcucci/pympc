@@ -26,8 +26,7 @@ class Polytope:
         b_min: right-hand side of non-redundant facets
         facet_centers: list of Chebyshev centers of each non-redundant facet (i.e.: A_min[i,:].dot(facet_centers[i]) = b_min[i])
         facet_radii: list of Chebyshev radii of each non-redundant facet
-        vertices: list of vertices of the polytope (each one is a 1D array)
-        
+        vertices: list of vertices of the polytope (each one is a 1D array) 
     """
 
     def __init__(self, A, b):
@@ -172,22 +171,6 @@ class Polytope:
         self.rhs_min = self.b[self.minimal_facets]
         return
 
-    # def find_facet_centers(self, toll=1.e-9):
-    #     """
-    #     Finds the Chebyshev center and radius of each minimal facet of the polytope.
-    #     """
-    #     self.facet_centers = []
-    #     self.facet_radii = []
-    #     for i in range(0, len(self.minimal_facets)):
-    #         A_lp = np.delete(self.lhs_min, i, 0)
-    #         b_lp = np.delete(self.rhs_min, i, 0)
-    #         C_lp = np.reshape(self.lhs_min[i,:], (1, self.n_variables))
-    #         d_lp = self.rhs_min[i,:]
-    #         facet_center, facet_radius = chebyshev_center(A_lp, b_lp, C_lp, d_lp)
-    #         self.facet_centers.append(facet_center)
-    #         self.facet_radii.append(facet_radius)
-    #     return
-
     def facet_centers(self, i):
         if self._facet_centers[i] is None:
             A_lp = np.delete(self.lhs_min, i, 0)
@@ -298,10 +281,8 @@ def chebyshev_center(A, b, C=None, d=None):
     f_lp[-1] = 1.
     A_row_norm = np.reshape(np.linalg.norm(A_projected, axis=1), (n_facets, 1))
     A_lp = np.hstack((A_projected, -A_row_norm))
-    # print (f_lp, A_lp, b_projected)
     center, radius = linear_program(f_lp, A_lp, b_projected)
     center = center[0:-1]
-    # print center, radius
     radius = -radius
     if C is not None and d is not None:
         # go back to the original coordinates
@@ -316,6 +297,9 @@ def chebyshev_center(A, b, C=None, d=None):
     return [center, radius]
 
 def nullspace_basis(A):
+    """
+    Uses singular value decomposition to find a basis of the nullsapce of A.
+    """
     V = np.linalg.svd(A)[2].T
     rank = np.linalg.matrix_rank(A)
     Z = V[:,rank:]
