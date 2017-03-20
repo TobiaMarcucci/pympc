@@ -305,7 +305,7 @@ class SimpleQuadraticProgram(object):
         vhat = -np.linalg.inv(Hhat).T.dot(fhat)
         v = np.zeros(self.f.shape)
         v[nonzero_mask] = vhat
-        assert np.allclose(self.H.T.dot(v) + self.f, 0)
+        assert np.allclose(self.H.T.dot(v) + self.f, 0, atol=1e-6)
         # v = -np.linalg.inv(self.H).T.dot(self.f)
         return self.affine_variable_substitution(U, v)
 
