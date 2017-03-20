@@ -72,11 +72,26 @@ def eliminate_equality_constrained_variables(C, d):
     """
     assert np.allclose(d, 0), "Right-hand side of the equality constraints must be zero"
     if C.shape[0] == 0:
-        return np.eye(C.shape[1])
+        return np.eye(C.shape[1]), np.ones(C.shape[1], dtype=np.bool)
     c_rational = sympy.Matrix([[sympy.Rational(x) for x in row] for row in C])
     W = D = sympy.Matrix.hstack(*c_rational.nullspace())
+
+    # Convert to column-echelon form. We do this in order to ensure that each
+    # variable in the new optimization corresponds exactly to one variable in
+    # the original optimization (rather than corresponding to some constant
+    # times that variable). This makes it easier to verify that our model is
+    # correct.
     W = W.T.rref()[0].T
-    return np.asarray(W).astype(np.float64)
+
+    # Check which variables were preserved by looking for the leading ones
+    preserved = np.zeros(C.shape[1], dtype=np.bool)
+    for j in range(W.shape[1]):
+        for i in range(W.shape[0]):
+            if W[i, j] == 1:
+                preserved[i] = True
+                break
+
+    return np.asarray(W).astype(np.float64), preserved
 
 
 def extract_objective(prog):
@@ -301,7 +316,7 @@ class SimpleQuadraticProgram(object):
         values for x
         """
 
-        W = eliminate_equality_constrained_variables(self.C, self.d)
+        W, preserved = eliminate_equality_constrained_variables(self.C, self.d)
         # x = W z
         new_program = self.affine_variable_substitution(W, np.zeros(self.num_vars))
         mask = np.ones(new_program.C.shape[0], dtype=np.bool)
@@ -407,23 +422,33 @@ class CanonicalMPCQP(object):
         nu = u.size
         x = np.asarray(x)
         nvars = u.size + x.size
+        u_mask = np.zeros(nvars, dtype=np.bool)
+        u_mask[:nu] = True
+        x_mask = np.zeros(nvars, dtype=np.bool)
+        x_mask[nu:] = True
+
         qp = SimpleQuadraticProgram.from_mathematicalprogram(prog)
         order = mpc_order(prog, u, x)
         qp = qp.permute_variables(order)
 
+        _, preserved = eliminate_equality_constrained_variables(qp.C, qp.d)
         qp = qp.eliminate_equality_constrained_variables()
+        u_mask = u_mask[preserved]
+        x_mask = x_mask[preserved]
+        assert sum(u_mask) + sum(x_mask) == qp.A.shape[1]
+
         qp = qp.transform_goal_to_origin()
         qp = qp.eliminate_redundant_inequalities()
-
         assert np.allclose(qp.f, 0)
         assert np.allclose(qp.C, 0)
-        H = qp.H[:nu, :nu]
-        F = qp.H[nu:, :nu]
-        Q = qp.H[nu:, nu:]
 
-        G = qp.A[:, :nu]
+        H = qp.H[u_mask, :][:, u_mask]
+        F = qp.H[x_mask, :][:, u_mask]
+        Q = qp.H[x_mask, :][:, x_mask]
+
+        G = qp.A[:, u_mask]
         W = qp.b.reshape((-1, 1))
-        E = -qp.A[:, nu:]
+        E = -qp.A[:, x_mask]
         return CanonicalMPCQP(H, F, Q, G, W, E, qp.T)
 
     def to_simple_qp(self):
