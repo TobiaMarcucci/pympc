@@ -63,18 +63,22 @@ def eliminate_equality_constrained_variables(C, d):
 
         C x == d
 
-    find a matrix W such that C x == d implies x = W z for some z \subset x
+    find A, b such that x = A z + b implies C x == d implies for any z \subset x
 
     This is just a matter of taking an appropriate null basis of C.
 
     This allows us to rewrite a QP with equality constraints into a QP over
     fewer variables with no equality constraints.
     """
-    assert np.allclose(d, 0), "Right-hand side of the equality constraints must be zero"
     if C.shape[0] == 0:
-        return np.eye(C.shape[1]), np.ones(C.shape[1], dtype=np.bool)
+        assert d.size == 0
+        A = np.eye(C.shape[1])
+        b = np.zeros(C.shape[1])
+        preserved = np.ones(C.shape[1], dtype=np.bool)
+        return Affine(A, b), preserved
+
     c_rational = sympy.Matrix([[sympy.Rational(x) for x in row] for row in C])
-    W = D = sympy.Matrix.hstack(*c_rational.nullspace())
+    W = sympy.Matrix.hstack(*c_rational.nullspace())
 
     # Convert to column-echelon form. We do this in order to ensure that each
     # variable in the new optimization corresponds exactly to one variable in
@@ -91,7 +95,10 @@ def eliminate_equality_constrained_variables(C, d):
                 preserved[i] = True
                 break
 
-    return np.asarray(W).astype(np.float64), preserved
+    A = np.asarray(W).astype(np.float64)
+    b = np.linalg.lstsq(C, d)[0]
+    assert b.size == A.shape[0]
+    return Affine(A, b), preserved
 
 
 def extract_objective(prog):
@@ -316,9 +323,9 @@ class SimpleQuadraticProgram(object):
         values for x
         """
 
-        W, preserved = eliminate_equality_constrained_variables(self.C, self.d)
-        # x = W z
-        new_program = self.affine_variable_substitution(W, np.zeros(self.num_vars))
+        T, preserved = eliminate_equality_constrained_variables(self.C, self.d)
+        # x = T.A z + T.b
+        new_program = self.affine_variable_substitution(T.A, T.b)
         mask = np.ones(new_program.C.shape[0], dtype=np.bool)
         for i in range(new_program.C.shape[0]):
             if np.allclose(new_program.C[i, :], 0):
@@ -326,7 +333,7 @@ class SimpleQuadraticProgram(object):
                 mask[i] = False
         new_program.C = new_program.C[mask, :]
         new_program.d = new_program.d[mask]
-        return new_program
+        return new_program, preserved
 
     def eliminate_redundant_inequalities(self):
         """
@@ -431,8 +438,7 @@ class CanonicalMPCQP(object):
         order = mpc_order(prog, u, x)
         qp = qp.permute_variables(order)
 
-        _, preserved = eliminate_equality_constrained_variables(qp.C, qp.d)
-        qp = qp.eliminate_equality_constrained_variables()
+        qp, preserved = qp.eliminate_equality_constrained_variables()
         u_mask = u_mask[preserved]
         x_mask = x_mask[preserved]
         assert sum(u_mask) + sum(x_mask) == qp.A.shape[1]

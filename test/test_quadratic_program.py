@@ -137,7 +137,7 @@ class TestQuadraticProgram(unittest.TestCase):
                 prog.AddQuadraticCost(u[:, j].T.dot(R).dot(u[:, j]))
 
             simple = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
-            simple_eliminated = simple.eliminate_equality_constrained_variables()
+            simple_eliminated, _ = simple.eliminate_equality_constrained_variables()
 
             self.assertEqual(simple_eliminated.C.shape[0], 0)
             self.assertEqual(simple_eliminated.d.shape[0], 0)
@@ -216,7 +216,7 @@ class TestQuadraticProgram(unittest.TestCase):
             simple_permuted = simple.permute_variables(order)
             self.assertTrue(np.allclose(simple.solve(), simple_permuted.solve()))
 
-            simple_eliminated = simple_permuted.eliminate_equality_constrained_variables()
+            simple_eliminated, _ = simple_permuted.eliminate_equality_constrained_variables()
             self.assertTrue(np.allclose(simple.solve(), simple_eliminated.solve()))
 
     def test_recenter(self):
@@ -237,6 +237,20 @@ class TestQuadraticProgram(unittest.TestCase):
             self.assertFalse(np.allclose(qp.f, 0))
             self.assertTrue(np.allclose(recentered.f, 0))
             self.assertTrue(np.allclose(recentered.solve(), qp.solve(), atol=1e-7))
+
+    def test_nonzero_equality_rhs(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] == 5)
+        prog.AddQuadraticCost(np.sum(np.power(x, 2)))
+        prog.AddLinearConstraint(np.sum(x) <= 10)
+
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        qp_elim, preserved = qp.eliminate_equality_constrained_variables()
+        self.assertEqual(qp_elim.A.shape[1], 1)
+        self.assertTrue(np.allclose(preserved, [False, True]))
+        self.assertTrue(np.allclose(qp.solve(), qp_elim.solve()))
+        self.assertTrue(np.allclose(qp.solve(), [5, 0]))
 
     def test_canonical_qp(self):
         m = 1.
