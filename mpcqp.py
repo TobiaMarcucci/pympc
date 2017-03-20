@@ -372,6 +372,34 @@ class CanonicalMPCQP(object):
             nv = G.shape[1] + E.shape[1]
             T = Affine(np.eye(nv), np.zeros(nv))
         self.T = T
+        self._H_inv = None
+        self._S = None
+
+    def save(self, file):
+        np.lib.npyio._savez(file, args=[], kwds={
+            "H": self.H,
+            "F": self.F,
+            "Q": self.Q,
+            "G": self.G,
+            "W": self.W,
+            "E": self.E,
+            "TA": self.T.A,
+            "Tb": self.T.b
+        }, compress=False, allow_pickle=False)
+
+    @staticmethod
+    def load(file):
+        data = np.load(file)
+        qp = CanonicalMPCQP(H=data["H"],
+                            F=data["F"],
+                            Q=data["Q"],
+                            G=data["G"],
+                            W=data["W"],
+                            E=data["E"],
+                            T=Affine(data["TA"],
+                                     data["Tb"]))
+        data.close()
+        return qp
 
     @staticmethod
     def from_mathematicalprogram(prog, u, x):
@@ -410,6 +438,19 @@ class CanonicalMPCQP(object):
 
     def solve(self):
         return self.to_simple_qp().solve()
+
+    @property
+    def H_inv(self):
+        if self._H_inv is None:
+            self._H_inv = np.linalg.inv(self.H)
+        return self._H_inv
+
+    @property
+    def S(self):
+        # change of variables for exeplicit MPC (z := u_seq + H^-1 F^T x0)
+        if self._S is None:
+            self._S = self.E + self.G.dot(self.H_inv.dot(self.F.T))
+        return self._S
 
 
 class MPCQPFactory(object):
