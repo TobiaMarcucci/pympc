@@ -360,8 +360,9 @@ class SimpleQuadraticProgram(object):
                     d_new.append(vi[-1])
         qp.A = qp.A[np.logical_not(to_delete), :]
         qp.b = qp.b[np.logical_not(to_delete)]
-        qp.C = np.vstack((qp.C, np.vstack(C_new)))
-        qp.d = np.hstack((qp.d, np.hstack(d_new)))
+        if C_new:
+            qp.C = np.vstack((qp.C, np.vstack(C_new)))
+            qp.d = np.hstack((qp.d, np.hstack(d_new)))
         return qp
 
     def eliminate_redundant_inequalities(self):
@@ -481,9 +482,15 @@ class CanonicalMPCQP(object):
         assert sum(u_mask) + sum(x_mask) == qp.A.shape[1]
 
         qp = qp.transform_goal_to_origin()
+
+        # print "A"
+        # print qp.A
+        # print "b"
+        # print qp.b
+
         qp = qp.eliminate_redundant_inequalities()
-        assert np.allclose(qp.f, 0)
-        assert np.allclose(qp.C, 0)
+        assert np.allclose(qp.f, 0, atol=1e-6)
+        assert np.allclose(qp.C, 0, atol=1e-6)
 
         H = qp.H[u_mask, :][:, u_mask]
         F = qp.H[x_mask, :][:, u_mask]
