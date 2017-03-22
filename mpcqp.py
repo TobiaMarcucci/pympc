@@ -142,6 +142,9 @@ class Affine(object):
         self.A = A
         self.b = b
 
+    def copy(self):
+        return Affine(self.A.copy(), self.b.copy())
+
 
 class SimpleQuadraticProgram(object):
     """
@@ -335,6 +338,32 @@ class SimpleQuadraticProgram(object):
         new_program.d = new_program.d[mask]
         return new_program, preserved
 
+    def convert_double_inequalities_to_equalities(self):
+        qp = self.copy()
+        to_delete = np.zeros(qp.A.shape[0], dtype=np.bool)
+        C_new = []
+        d_new = []
+        for i in range(qp.A.shape[0]):
+            vi = np.hstack((qp.A[i, :], qp.b[i]))
+            if np.linalg.norm(vi) == 0:
+                continue
+            vi /= np.linalg.norm(vi)
+            for j in range(i + 1, qp.A.shape[0]):
+                vj = np.hstack((qp.A[j, :], qp.b[j]))
+                if np.linalg.norm(vj) == 0:
+                    continue
+                vj /= np.linalg.norm(vj)
+                if np.allclose(vi, -vj):
+                    to_delete[i] = True
+                    to_delete[j] = True
+                    C_new.append(vi[:-1])
+                    d_new.append(vi[-1])
+        qp.A = qp.A[np.logical_not(to_delete), :]
+        qp.b = qp.b[np.logical_not(to_delete)]
+        qp.C = np.vstack((qp.C, np.vstack(C_new)))
+        qp.d = np.hstack((qp.d, np.hstack(d_new)))
+        return qp
+
     def eliminate_redundant_inequalities(self):
         """
         Returns a new quadratic program with all redundant inequality
@@ -351,6 +380,12 @@ class SimpleQuadraticProgram(object):
                                              self.C, self.d,
                                              self.T)
         return new_program
+
+    def copy(self):
+        return SimpleQuadraticProgram(self.H.copy(), self.f.copy(),
+                                      self.A.copy(), self.b.copy(),
+                                      self.C.copy(), self.d.copy(),
+                                      T=self.T.copy())
 
     def permute_variables(self, new_order):
         """
@@ -435,6 +470,8 @@ class CanonicalMPCQP(object):
         x_mask[nu:] = True
 
         qp = SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        qp = qp.convert_double_inequalities_to_equalities()
+
         order = mpc_order(prog, u, x)
         qp = qp.permute_variables(order)
 

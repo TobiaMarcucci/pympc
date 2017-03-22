@@ -252,6 +252,44 @@ class TestQuadraticProgram(unittest.TestCase):
         self.assertTrue(np.allclose(qp.solve(), qp_elim.solve()))
         self.assertTrue(np.allclose(qp.solve(), [5, 0]))
 
+    def test_double_sided_inequalities(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] >= 1)
+        prog.AddLinearConstraint(x[0] <= 1)
+
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        self.assertEqual(qp.A.shape, (2, 2))
+        self.assertEqual(qp.C.shape, (0, 2))
+
+        qp = qp.convert_double_inequalities_to_equalities()
+        self.assertEqual(qp.A.shape, (0, 2))
+        self.assertEqual(qp.b.shape, (0,))
+        self.assertEqual(qp.C.shape, (1, 2))
+        self.assertEqual(qp.d.shape, (1,))
+        s = np.sign(qp.C[0, 0])
+        self.assertTrue(np.allclose(qp.C * s, np.array([[1.0 / np.sqrt(2), 0]])))
+        self.assertTrue(np.allclose(qp.d * s, np.array([1.0 / np.sqrt(2)])))
+
+    def test_scaled_double_sided_ineq(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] + 2 * x[1] >= 2)
+        prog.AddLinearConstraint(-3 * x[0] - 6 * x[1] >= -6)
+
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        self.assertEqual(qp.A.shape, (2, 2))
+        self.assertEqual(qp.C.shape, (0, 2))
+
+        qp = qp.convert_double_inequalities_to_equalities()
+        self.assertEqual(qp.A.shape, (0, 2))
+        self.assertEqual(qp.b.shape, (0,))
+        self.assertEqual(qp.C.shape, (1, 2))
+        self.assertEqual(qp.d.shape, (1,))
+        s = np.sign(qp.C[0, 0])
+        self.assertTrue(np.allclose(qp.C * s, np.array([[1.0 / 3.0, 2.0 / 3.0]])))
+        self.assertTrue(np.allclose(qp.d * s, np.array([2.0 / 3.0])))
+
     def test_canonical_qp(self):
         m = 1.
         l = 1.
