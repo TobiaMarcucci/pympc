@@ -95,7 +95,7 @@ class Polytope:
 
     def check_boundedness(self, toll=1.e-9):
         """
-        Checks if the polyhedron is bounded: a polyhedron is bounded (i.e. a polytope) iff there exists an x != 0 in the recession cone (A*x <= 0). We also have that { exists x != 0 | A*x <= 0 } <=> { exists z < 0 | A^T*z = 0 }. The second condition is tested through a LP.
+        Checks if the polyhedron is bounded: a polyhedron is unbounded (i.e. a polytope) iff there exists an x != 0 in the recession cone (A*x <= 0). We also have that { exists x != 0 | A*x <= 0 } <=> { exists z < 0 | A^T*z = 0 }. The second condition is tested through a LP.
         """
         self.bounded = True
         # if the Chebyshev radius is infinite
