@@ -62,6 +62,7 @@ class Polytope:
             return
         self.check_boundedness()
         if not(self.bounded):
+            np.savez("unbounded_polyhedron", A=self.A, b=self.b)
             raise ValueError('Unbounded polyhedron: only polytopes allowed')
         self.find_coincident_facets()
         self.find_minimal_facets()
@@ -206,7 +207,7 @@ class Polytope:
             self._vertices = polyhedron_qhull.vertices
         return self._vertices
 
-    def plot(self, dim_proj=[0,1], **kwargs):
+    def plot(self, dim_proj=[0,1], color='b'):
         """
         Plots a 2d projection of the polytope.
 
@@ -224,7 +225,7 @@ class Polytope:
         vertices_proj = np.vstack(self.vertices)[:,dim_proj]
         hull = spatial.ConvexHull(vertices_proj)
         for simplex in hull.simplices:
-            polytope_plot, = plt.plot(vertices_proj[simplex, 0], vertices_proj[simplex, 1], **kwargs)
+            polytope_plot, = plt.plot(vertices_proj[simplex, 0], vertices_proj[simplex, 1], color=color)
         plt.xlabel(r'$x_' + str(dim_proj[0]+1) + '$')
         plt.ylabel(r'$x_' + str(dim_proj[1]+1) + '$')
         return polytope_plot
@@ -248,12 +249,12 @@ class Polytope:
         return p
 
 
-def chebyshev_center(A, b, C=None, d=None):
+def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     """
     Finds the Chebyshevcenter of the polytope P := {x | A*x <= b, C*x = d} solving the linear program
     minimize e
-    s.t.     F * z <= g + e
-    where if an equality is not ptovided F=A, z=x, g=b; whereas if equalities are present F=A*Z, g=b-A*Y*y, with: Z basis of the nullspace of C, Y orthogonal complement to Z, y=(C*Y)^-1*d and x is retrived as x=Z*z+Y*y.
+    s.t.     F * z <= g + g_{\|}e
+    where if an equality is not provided F=A, z=x, g=b; whereas if equalities are present F=A*Z, g=b-A*Y*y, with: Z basis of the nullspace of C, Y orthogonal complement to Z, y=(C*Y)^-1*d and x is retrived as x=Z*z+Y*y.
 
     INPUTS:
         A: left-hand side of the inequalities
@@ -277,6 +278,15 @@ def chebyshev_center(A, b, C=None, d=None):
         y = np.reshape(y, (y.shape[0],1))
         b_projected = b - A.dot(Y.dot(y))
     [n_facets, n_variables] = A_projected.shape
+    # check if the problem is trivially unbounded
+    A_row_norm = np.linalg.norm(A,axis=1)
+    A_zero_rows = np.where(A_row_norm < tol)[0]
+    print any(b[A_zero_rows])
+    if any(b[A_zero_rows] < 0):
+        radius = np.nan
+        center = np.zeros((n_variables,1))
+        center[:] = np.nan
+        return [center, radius]
     f_lp = np.zeros((n_variables+1, 1))
     f_lp[-1] = 1.
     A_row_norm = np.reshape(np.linalg.norm(A_projected, axis=1), (n_facets, 1))
