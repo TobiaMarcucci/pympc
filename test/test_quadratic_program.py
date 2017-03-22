@@ -290,6 +290,19 @@ class TestQuadraticProgram(unittest.TestCase):
         self.assertTrue(np.allclose(qp.C * s, np.array([[1.0 / 3.0, 2.0 / 3.0]])))
         self.assertTrue(np.allclose(qp.d * s, np.array([2.0 / 3.0])))
 
+    def test_trivial_inequalities(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] + 2 * x[1] <= 2)
+        prog.AddLinearConstraint(1e-16 * x[0] + 1e-16 * x[1] <= 0)
+
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        self.assertEqual(qp.A.shape, (2, 2))
+        qp = qp.eliminate_trivial_inequalities()
+        self.assertEqual(qp.A.shape, (1, 2))
+        self.assertTrue(np.allclose(qp.A, np.array([[1, 2]])))
+        self.assertTrue(np.allclose(qp.b, np.array([2])))
+
     def test_canonical_qp(self):
         m = 1.
         l = 1.

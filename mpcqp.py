@@ -339,6 +339,13 @@ class SimpleQuadraticProgram(object):
         return new_program, preserved
 
     def convert_double_inequalities_to_equalities(self):
+        """
+        Returns a new quadratic program with all double-sided inequalities:
+            a'x <= b AND a'x >= b
+        converted to equalities:
+            a'x == b
+        """
+
         qp = self.copy()
         to_delete = np.zeros(qp.A.shape[0], dtype=np.bool)
         C_new = []
@@ -363,6 +370,22 @@ class SimpleQuadraticProgram(object):
         if C_new:
             qp.C = np.vstack((qp.C, np.vstack(C_new)))
             qp.d = np.hstack((qp.d, np.hstack(d_new)))
+        return qp
+
+    def eliminate_trivial_inequalities(self, tol=1e-7):
+        """
+        Returns a new quadratic program with all trivial inequality
+        constraints (of the form: a'x <= b where a == 0 and b == 0)
+        removed.
+        """
+        qp = self.copy()
+        to_delete = np.zeros(qp.A.shape[0], dtype=np.bool)
+        for i in range(qp.A.shape[0]):
+            if np.linalg.norm(qp.A[i, :]) <= tol:
+                assert qp.b[i] >= -10 * tol, "Constraint appears to be trivially infeasible: a: {}, b: {}".format(qp.A[i, :], qp.b[i])
+                to_delete[i] = True
+        qp.A = qp.A[np.logical_not(to_delete), :]
+        qp.b = qp.b[np.logical_not(to_delete)]
         return qp
 
     def eliminate_redundant_inequalities(self):
@@ -488,6 +511,8 @@ class CanonicalMPCQP(object):
         # print "b"
         # print qp.b
 
+        qp = qp.eliminate_trivial_inequalities()
+
         qp = qp.eliminate_redundant_inequalities()
         assert np.allclose(qp.f, 0, atol=1e-6)
         assert np.allclose(qp.C, 0, atol=1e-6)
@@ -500,6 +525,15 @@ class CanonicalMPCQP(object):
         W = qp.b.reshape((-1, 1))
         E = -qp.A[:, x_mask]
         return CanonicalMPCQP(H, F, Q, G, W, E, qp.T)
+
+    def eliminate_state_constraints(self, tol=1e-7):
+        to_delete = np.zeros(self.G.shape[0], dtype=np.bool)
+        for i in range(self.G.shape[0]):
+            if np.linalg.norm(self.G[i, :]) <= tol:
+                to_delete[i] = True
+        self.G = self.G[np.logical_not(to_delete), :]
+        self.W = self.W[np.logical_not(to_delete), :]
+        self.E = self.E[np.logical_not(to_delete), :]
 
     def to_simple_qp(self):
         nu = self.G.shape[1]
