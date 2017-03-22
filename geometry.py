@@ -26,7 +26,7 @@ class Polytope:
         b_min: right-hand side of non-redundant facets
         facet_centers: list of Chebyshev centers of each non-redundant facet (i.e.: A_min[i,:].dot(facet_centers[i]) = b_min[i])
         facet_radii: list of Chebyshev radii of each non-redundant facet
-        vertices: list of vertices of the polytope (each one is a 1D array) 
+        vertices: list of vertices of the polytope (each one is a 1D array)
     """
 
     def __init__(self, A, b):
@@ -163,7 +163,7 @@ class Polytope:
             #             on_boundary = False
 
             cost_i = - linear_program(-self.A[i,:].T, A_reduced, b_relaxed, x_bound=self.x_bound)[1]
-            
+
             # remove redundant facets from the list
             if cost_i < self.b[i] + toll or np.isnan(cost_i):
                 self.minimal_facets.remove(i)
@@ -281,7 +281,6 @@ def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     # check if the problem is trivially unbounded
     A_row_norm = np.linalg.norm(A,axis=1)
     A_zero_rows = np.where(A_row_norm < tol)[0]
-    print any(b[A_zero_rows])
     if any(b[A_zero_rows] < 0):
         radius = np.nan
         center = np.zeros((n_variables,1))
