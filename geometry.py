@@ -100,7 +100,7 @@ class Polytope:
         self.bounded = True
         # if the Chebyshev radius is infinite
         if np.isinf(self.radius):
-            print 'Infinite Chebyshev radius!'
+            print 'Infinite Chebyshev center or radius!'
             self.bounded = False
             return
         # if ker(A) != 0
@@ -182,7 +182,7 @@ class Polytope:
         return self._facet_centers[i]
 
     def facet_radii(self, i):
-        if self.facet_radii[i] is None:
+        if self._facet_radii[i] is None:
             A_lp = np.delete(self.lhs_min, i, 0)
             b_lp = np.delete(self.rhs_min, i, 0)
             C_lp = np.reshape(self.lhs_min[i,:], (1, self.n_variables))
@@ -281,7 +281,6 @@ def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     # check if the problem is trivially unbounded
     A_row_norm = np.linalg.norm(A,axis=1)
     A_zero_rows = np.where(A_row_norm < tol)[0]
-    print any(b[A_zero_rows])
     if any(b[A_zero_rows] < 0):
         radius = np.nan
         center = np.zeros((n_variables,1))
