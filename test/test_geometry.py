@@ -11,11 +11,11 @@ class TestGeometry(unittest.TestCase):
         # without equility
         A = np.array([[1.,0.],[-1.,0.],[0.,1.],[0.,-1.]])
         b = np.array([[.5],[.5],[1.],[1.]])
-        true_radius = np.array([[.5]])
+        true_radius = .5
         [center, radius] = chebyshev_center(A,b)
-        self.assertTrue(0. == center[0,0])
+        self.assertTrue(np.isclose(0.,center[0,0]))
         self.assertTrue(np.absolute(center[1,0]) <= .5)
-        self.assertTrue(all(true_radius == radius))
+        self.assertTrue(np.isclose(true_radius, radius))
         
         # with equility
         A = np.array([[1.,0.],[-1.,0.],[0.,1.],[0.,-1.]])
@@ -27,6 +27,14 @@ class TestGeometry(unittest.TestCase):
         [center, radius] = chebyshev_center(A,b,C,d)
         self.assertTrue(all(np.isclose(true_center, center)))
         self.assertTrue(np.isclose(true_radius, radius))
+        
+        # unbounded domain, but finite radius
+        print '--------'
+        A = np.array([[1.,0.],[-1.,0.],[0.,1.]])
+        b = np.array([[1.],[1.],[0.]])
+        [center, radius] = chebyshev_center(A,b)
+        print center, radius
+        print '--------'
 
     def test_Polytope(self):
 
