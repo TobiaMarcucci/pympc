@@ -526,7 +526,7 @@ class MPCQPFactory(object):
         self.critical_regions = None
         return CanonicalMPCQP(H=self.H,
                               F=self.F,
-                              Q=np.eye(self.F.shape[0]),
+                              Q=self.Y,
                               G=self.G,
                               W=self.W,
                               E=self.E)
@@ -535,16 +535,17 @@ class MPCQPFactory(object):
         if self.terminal_cost is None:
             self.P = self.Q
         elif self.terminal_cost == 'dare':
-            self.P = self.dare()[0]
+            self.P = self.dare(self.sys.A, self.sys.B, self.Q, self.R)[0]
         else:
             raise ValueError('Unknown terminal cost!')
         return
 
-    def dare(self):
+    @staticmethod
+    def dare(A, B, Q, R):
         # DARE solution
-        P = linalg.solve_discrete_are(self.sys.A, self.sys.B, self.Q, self.R)
+        P = linalg.solve_discrete_are(A, B, Q, R)
         # optimal gain
-        K = - linalg.inv(self.sys.B.T.dot(P).dot(self.sys.B)+self.R).dot(self.sys.B.T).dot(P).dot(self.sys.A)
+        K = - linalg.inv(B.T.dot(P).dot(B)+R).dot(B.T).dot(P).dot(A)
         return [P, K]
 
     def constraint_blocks(self):
@@ -596,7 +597,7 @@ class MPCQPFactory(object):
         else:
             if self.terminal_constraint == 'moas':
                 # solve dare
-                K = self.dare()[1]
+                K = self.dare(self.sys.A, self.sys.B, self.Q, self.R)[1]
                 # closed loop dynamics
                 A_cl = self.sys.A + self.sys.B.dot(K)
                 # constraints for the maximum output admissible set
@@ -638,6 +639,8 @@ class MPCQPFactory(object):
         # linear term
         F = 2*forced_evolution.T.dot(H_x.T).dot(free_evolution)
         self.F = F.T
+        # quadratic term in the initial state
+        self.Y = 2.*(self.Q + free_evolution.T.dot(H_x.T).dot(free_evolution))
         return
 
     @staticmethod

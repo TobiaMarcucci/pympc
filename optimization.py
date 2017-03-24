@@ -3,6 +3,7 @@ from pydrake.solvers.gurobi import GurobiSolver
 from pydrake.solvers.mosek import MosekSolver
 from scipy.optimize import nnls
 import numpy as np
+import time
 
 def linear_program(f, A, b, C=None, d=None, x_bound=None, solver='pnnls', **kwargs):
     if solver == 'pnnls':
@@ -132,7 +133,6 @@ def pnnls(A, B, c):
     n_u = B.shape[1]
     B_pinv = np.linalg.pinv(B)
     B_bar = np.eye(n_ineq) - B.dot(B_pinv)
-    # print B_bar
     A_bar = B_bar.dot(A)
     b_bar = B_bar.dot(c)
     [v_star, r_star] = nnls(A_bar, b_bar.flatten())
