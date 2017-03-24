@@ -338,7 +338,7 @@ class MPCController:
 
         return active_set
 
-    def solve_qp_beyond_facet(self, facet_index, cr, dist=1e-8, toll=1.e-8):
+    def solve_qp_beyond_facet(self, facet_index, cr, dist=1e-8, toll=1.e-6):
         """
         Solves a QP a step of length "dist" beyond the facet wich index is "facet_index"
         to determine the active set in that region.
