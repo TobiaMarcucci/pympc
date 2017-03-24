@@ -182,7 +182,7 @@ class Polytope:
         return self._facet_centers[i]
 
     def facet_radii(self, i):
-        if self.facet_radii[i] is None:
+        if self._facet_radii[i] is None:
             A_lp = np.delete(self.lhs_min, i, 0)
             b_lp = np.delete(self.rhs_min, i, 0)
             C_lp = np.reshape(self.lhs_min[i,:], (1, self.n_variables))

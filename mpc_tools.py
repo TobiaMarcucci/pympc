@@ -338,7 +338,7 @@ class MPCController:
 
         return active_set
 
-    def solve_qp_beyond_facet(self, facet_index, cr, dist=1e-6, toll=1e-6):
+    def solve_qp_beyond_facet(self, facet_index, cr, dist=1e-8, toll=1.e-8):
         """
         Solves a QP a step of length "dist" beyond the facet wich index is "facet_index"
         to determine the active set in that region.
@@ -351,16 +351,19 @@ class MPCController:
             active_set: real active set of the child critical region ([] if the region is unfeasible)
         """
 
+        # relates step length to polytope dimension
+        dist = min(dist, cr.polytope.radius, cr.polytope.facet_radii(facet_index))
+
         # center of the facet in the parameter space
         x_center = cr.polytope.facet_centers(facet_index)
 
         # solve the QP inside the new critical region to derive the active set
-        x_beyond = x_center + dist*cr.polytope.lhs_min[facet_index,:]
+        x_beyond = x_center + dist*cr.polytope.lhs_min[facet_index,:].reshape(x_center.shape)
         x_beyond = x_beyond.reshape(x_center.shape[0],1)
-        z = quadratic_program(self.qp.H, np.zeros((self.qp.H.shape[0],1)), self.qp.G, self.qp.W + self.S.dot(x_beyond))[0]
+        z = quadratic_program(self.qp.H, np.zeros((self.qp.H.shape[0],1)), self.qp.G, self.qp.W + self.qp.S.dot(x_beyond))[0]
 
         # new active set for the child
-        constraints_residuals = self.qp.G.dot(z) - self.qp.W - self.S.dot(x_beyond)
+        constraints_residuals = self.qp.G.dot(z) - self.qp.W - self.qp.S.dot(x_beyond)
         active_set = [i for i in range(0,self.qp.G.shape[0]) if constraints_residuals[i] > -toll]
 
         return active_set
