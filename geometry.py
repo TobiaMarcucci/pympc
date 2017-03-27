@@ -150,6 +150,7 @@ class Polytope:
             b_relaxed = (self.b + b_relaxation)[self.minimal_facets];
             # check redundancy
 
+            # # the following lines are needed when using gurobi
             # if np.linalg.norm(self.A[i,:]) < 1.e-10 and self.b[i] > 0:
             #     cost_i = 0.
             # else:
@@ -313,28 +314,3 @@ def nullspace_basis(A):
     rank = np.linalg.matrix_rank(A)
     Z = V[:,rank:]
     return Z
-
-    # def check_intersections_with(self, A_2, b_2):
-    #     A_12 = np.vstack((self.A, A_2))
-    #     b_12 = np.vstack((self.b, b_2))
-    #     interior_point = self.interior_point(A_12, b_12)
-    #     intersection = True
-    #     if any(np.isnan(interior_point)):
-    #         intersection = False
-    #     return intersection
-
-    # def convex_union_with(self, A_list, b_list):
-    #     """
-    #     Algorithm 4.1 from "Bemporad et al. - Convexity recognition of the union of polyhedra"
-    #     """
-    #     if notself.assembled:
-    #         raise ValueError('Polytope already assembled, cannot assemble again!')
-    #     n_addition = len(A_list)
-    #     if len(b_list) != n_addition:
-    #         raise ValueError('Inconsistent input dimensions')
-    #     polytope_list = []
-    #     for i in range(0, n_addition):
-    #         polytope_i = Polytope(A_list[i], b_list[i])
-    #         polytope_i.assemble()
-    #         polytope_list.append(polytope_i)
-    #     for i in range(0, n_addition)

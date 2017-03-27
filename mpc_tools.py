@@ -473,17 +473,18 @@ class MPCController:
 
     def plot_merged_state_partition(self):
         self.merge_critical_regions()
-        # print self.qp.G
+        #print self.qp.G
         colors = ['b','g','r','c','m','y']*len(self.cr_families)
         plt.figure()
         for i, family in enumerate(self.cr_families):
             for cr in family:
+                # plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
                 cr.polytope.plot(color=colors[i])
         # for family in self.cr_families:
         #     for cr in family:
         #         x0a = -.5
         #         x0b = .5
-        #         if cr.active_set == [11, 13, 15, 17, 25]:
+        #         if cr.active_set == [11,13, 15]:
 
         #             y0a = (cr.polytope.b[0]-cr.polytope.A[0,0]*x0a)/cr.polytope.A[0,1]
         #             y0b = (cr.polytope.b[0]-cr.polytope.A[0,0]*x0b)/cr.polytope.A[0,1]
@@ -492,12 +493,13 @@ class MPCController:
         #             y0a = (cr.polytope.b[1]-cr.polytope.A[1,0]*x0a)/cr.polytope.A[1,1]
         #             y0b = (cr.polytope.b[1]-cr.polytope.A[1,0]*x0b)/cr.polytope.A[1,1]
         #             plt.plot([x0a,x0b],[y0a,y0b], 'black')
+        #             # print cr.polytope.b[10],cr.polytope.A[10,:]
         #             # y0a = (cr.polytope.b[10]-cr.polytope.A[10,0]*x0a)/cr.polytope.A[10,1]
         #             # y0b = (cr.polytope.b[10]-cr.polytope.A[10,0]*x0b)/cr.polytope.A[10,1]
-        #             # plt.plot([x0a,x0b],[y0a,y0b], 'black')
-        #             # y0a = (cr.polytope.b[11]-cr.polytope.A[11,0]*x0a)/cr.polytope.A[11,1]
-        #             # y0b = (cr.polytope.b[11]-cr.polytope.A[11,0]*x0b)/cr.polytope.A[11,1]
-        #             # plt.plot([x0a,x0b],[y0a,y0b], 'black')
+        #             plt.plot([x0a,x0b],[y0a,y0b], 'black')
+        #             y0a = (cr.polytope.b[11]-cr.polytope.A[11,0]*x0a)/cr.polytope.A[11,1]
+        #             y0b = (cr.polytope.b[11]-cr.polytope.A[11,0]*x0b)/cr.polytope.A[11,1]
+        #             plt.plot([x0a,x0b],[y0a,y0b], 'black')
 
         #             # y0a = -1.5
         #             # y0b = 1.5
