@@ -137,7 +137,7 @@ class TestQuadraticProgram(unittest.TestCase):
                 prog.AddQuadraticCost(u[:, j].T.dot(R).dot(u[:, j]))
 
             simple = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
-            simple_eliminated = simple.eliminate_equality_constrained_variables()
+            simple_eliminated, _ = simple.eliminate_equality_constrained_variables()
 
             self.assertEqual(simple_eliminated.C.shape[0], 0)
             self.assertEqual(simple_eliminated.d.shape[0], 0)
@@ -216,7 +216,7 @@ class TestQuadraticProgram(unittest.TestCase):
             simple_permuted = simple.permute_variables(order)
             self.assertTrue(np.allclose(simple.solve(), simple_permuted.solve()))
 
-            simple_eliminated = simple_permuted.eliminate_equality_constrained_variables()
+            simple_eliminated, _ = simple_permuted.eliminate_equality_constrained_variables()
             self.assertTrue(np.allclose(simple.solve(), simple_eliminated.solve()))
 
     def test_recenter(self):
@@ -237,6 +237,71 @@ class TestQuadraticProgram(unittest.TestCase):
             self.assertFalse(np.allclose(qp.f, 0))
             self.assertTrue(np.allclose(recentered.f, 0))
             self.assertTrue(np.allclose(recentered.solve(), qp.solve(), atol=1e-7))
+
+    def test_nonzero_equality_rhs(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] == 5)
+        prog.AddQuadraticCost(np.sum(np.power(x, 2)))
+        prog.AddLinearConstraint(np.sum(x) <= 10)
+
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        qp_elim, preserved = qp.eliminate_equality_constrained_variables()
+        self.assertEqual(qp_elim.A.shape[1], 1)
+        self.assertTrue(np.allclose(preserved, [False, True]))
+        self.assertTrue(np.allclose(qp.solve(), qp_elim.solve()))
+        self.assertTrue(np.allclose(qp.solve(), [5, 0]))
+
+    def test_double_sided_inequalities(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] >= 1)
+        prog.AddLinearConstraint(x[0] <= 1)
+
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        self.assertEqual(qp.A.shape, (2, 2))
+        self.assertEqual(qp.C.shape, (0, 2))
+
+        qp = qp.convert_double_inequalities_to_equalities()
+        self.assertEqual(qp.A.shape, (0, 2))
+        self.assertEqual(qp.b.shape, (0,))
+        self.assertEqual(qp.C.shape, (1, 2))
+        self.assertEqual(qp.d.shape, (1,))
+        s = np.sign(qp.C[0, 0])
+        self.assertTrue(np.allclose(qp.C * s, np.array([[1.0 / np.sqrt(2), 0]])))
+        self.assertTrue(np.allclose(qp.d * s, np.array([1.0 / np.sqrt(2)])))
+
+    def test_scaled_double_sided_ineq(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] + 2 * x[1] >= 2)
+        prog.AddLinearConstraint(-3 * x[0] - 6 * x[1] >= -6)
+
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        self.assertEqual(qp.A.shape, (2, 2))
+        self.assertEqual(qp.C.shape, (0, 2))
+
+        qp = qp.convert_double_inequalities_to_equalities()
+        self.assertEqual(qp.A.shape, (0, 2))
+        self.assertEqual(qp.b.shape, (0,))
+        self.assertEqual(qp.C.shape, (1, 2))
+        self.assertEqual(qp.d.shape, (1,))
+        s = np.sign(qp.C[0, 0])
+        self.assertTrue(np.allclose(qp.C * s, np.array([[1.0 / 3.0, 2.0 / 3.0]])))
+        self.assertTrue(np.allclose(qp.d * s, np.array([2.0 / 3.0])))
+
+    def test_trivial_inequalities(self):
+        prog = mp.MathematicalProgram()
+        x = prog.NewContinuousVariables(2, "x")
+        prog.AddLinearConstraint(x[0] + 2 * x[1] <= 2)
+        prog.AddLinearConstraint(1e-16 * x[0] + 1e-16 * x[1] <= 0)
+
+        qp = mqp.SimpleQuadraticProgram.from_mathematicalprogram(prog)
+        self.assertEqual(qp.A.shape, (2, 2))
+        qp = qp.eliminate_trivial_inequalities()
+        self.assertEqual(qp.A.shape, (1, 2))
+        self.assertTrue(np.allclose(qp.A, np.array([[1, 2]])))
+        self.assertTrue(np.allclose(qp.b, np.array([2])))
 
     def test_canonical_qp(self):
         m = 1.

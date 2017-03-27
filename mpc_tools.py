@@ -339,7 +339,8 @@ class MPCController:
 
         return active_set
 
-    def solve_qp_beyond_facet(self, facet_index, cr, dist=1.e-8, toll=1e-6):
+    def solve_qp_beyond_facet(self, facet_index, cr, dist=1e-8, toll=1.e-6):
+
         """
         Solves a QP a step of length "dist" beyond the facet wich index is "facet_index"
         to determine the active set in that region.
@@ -355,6 +356,9 @@ class MPCController:
         # relate step distance with polytope dimensions
         print cr.polytope.facet_radii(facet_index)/100.
         dist = min(cr.polytope.facet_radii(facet_index)/100., cr.polytope.radius/100., dist)
+
+        # relates step length to polytope dimension
+        dist = min(dist, cr.polytope.radius, cr.polytope.facet_radii(facet_index))
 
         # center of the facet in the parameter space
         x_center = cr.polytope.facet_centers(facet_index)
