@@ -204,38 +204,6 @@ class DTLinearSystem:
         sys = DTLinearSystem(A_d, B_d)
         return sys
 
- # class DTPWASystem:
-
- #    def __init__(self, A_list, B_list, S_list, R_list, T_list):
- #        self.n_systems = len(A_list)
- #        if len(B_list) != self.n_systems or len(S_list) != self.n_systems or len(R_list) != self.n_systems or len(T_list) != self.n_systems:
- #            raise ValueError('Inconsistent input dimensions')
- #        self.A_list = A_list
- #        self.B_list = B_list
- #        self.S_list = S_list
- #        self.R_list = R_list
- #        self.T_list = T_list
- #        self.check_intersections()
- #        return
-
- #    def check_intersections(self):
- #        for i in range(0, self.n_systems):
- #            lhs_i = np.hstack(S_list[i], R_list[i])
- #            rhs_i = T_list[i]
- #            polytope_i = Polytope(lhs_i, rhs_i)
- #            for j in range(0, i):
- #                lhs_j = np.hstack(S_list[j], R_list[j])
- #                rhs_j = T_list[j]
- #                intersection_ij = polytope_i.check_intersection_with(lhs_j, rhs_j)
- #                if intersection_ij:
- #                    raise ValueError('Non-empty intersection of two domains')
- #        return
-
- #    def join_domains(self):
- #        return
-
-
-
 class MPCController:
 
     def __init__(self, canonical_qp, n_u):
@@ -519,7 +487,7 @@ class MPCController:
         # # plt.savefig('figures/act_set_2.pdf')
 
 
-        
+
         return
 
 
