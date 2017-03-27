@@ -26,7 +26,7 @@ class Polytope:
         b_min: right-hand side of non-redundant facets
         facet_centers: list of Chebyshev centers of each non-redundant facet (i.e.: A_min[i,:].dot(facet_centers[i]) = b_min[i])
         facet_radii: list of Chebyshev radii of each non-redundant facet
-        vertices: list of vertices of the polytope (each one is a 1D array) 
+        vertices: list of vertices of the polytope (each one is a 1D array)
     """
 
     def __init__(self, A, b):
@@ -95,7 +95,7 @@ class Polytope:
 
     def check_boundedness(self, toll=1.e-9):
         """
-        Checks if the polyhedron is bounded: a polyhedron is bounded (i.e. a polytope) iff there exists an x != 0 in the recession cone (A*x <= 0). We also have that { exists x != 0 | A*x <= 0 } <=> { exists z < 0 | A^T*z = 0 }. The second condition is tested through a LP.
+        Checks if the polyhedron is bounded: a polyhedron is unbounded (i.e. a polytope) iff there exists an x != 0 in the recession cone (A*x <= 0). We also have that { exists x != 0 | A*x <= 0 } <=> { exists z < 0 | A^T*z = 0 }. The second condition is tested through a LP.
         """
         self.bounded = True
         # if the Chebyshev radius is infinite
@@ -164,7 +164,7 @@ class Polytope:
             #             on_boundary = False
 
             cost_i = - linear_program(-self.A[i,:].T, A_reduced, b_relaxed, x_bound=self.x_bound)[1]
-            
+
             # remove redundant facets from the list
             if cost_i < self.b[i] + toll or np.isnan(cost_i):
                 self.minimal_facets.remove(i)
