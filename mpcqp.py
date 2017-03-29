@@ -666,6 +666,15 @@ class MPCQPFactory(object):
         G = np.vstack((G_u, G_x, G_xN))
         W = np.vstack((W_u, W_x, W_xN))
         E = np.vstack((E_u, E_x, E_xN))
+        # permutation of the rows to put G in lower triangular form
+        n_u = len(self.input_constraints.minimal_facets)
+        n_x = len(self.state_constraints.minimal_facets)
+        row_permutation = []
+        for i in range(0, self.N):
+            row_permutation += range(i*n_u, (i+1)*n_u) + range(self.N*n_u + i*n_x, self.N*n_u + (i+1)*n_x)
+        G[0:len(row_permutation)] = G[row_permutation]
+        W[0:len(row_permutation)] = W[row_permutation]
+        E[0:len(row_permutation)] = E[row_permutation]
         # remove redundant constraints
         constraint_polytope = Polytope(np.hstack((G, -E)), W)
         constraint_polytope.assemble()
