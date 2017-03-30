@@ -455,6 +455,7 @@ class CanonicalMPCQP(object):
         self.T = T
         self._H_inv = None
         self._S = None
+        self.feasible_region = None
 
     def save(self, file):
         np.lib.npyio._savez(file, args=[], kwds={
@@ -561,6 +562,19 @@ class CanonicalMPCQP(object):
             self._S = self.E + self.G.dot(self.H_inv.dot(self.F.T))
         return self._S
 
+    def find_feasible_region(self):
+        if self.feasible_region is None:
+            feasible_polytope = Polytope(np.hstack((- self.E, self.G)), self.W)
+            feasible_polytope.assemble()
+            self.feasible_region = feasible_polytope.orthogonal_projection(range(0, self.E.shape[1]))
+        return
+
+    def plot_feasible_region(self, **kwargs):
+        if self.feasible_region is None:
+            self.find_feasible_region()
+        self.feasible_region.plot(**kwargs)
+        return
+
 
 class MPCQPFactory(object):
     """
@@ -590,9 +604,12 @@ class MPCQPFactory(object):
         self.terminal_constraint = terminal_constraint
         self.state_constraints = state_constraints
         self.input_constraints = input_constraints
+        self.assembled = False
         return
 
     def add_state_constraint(self, lhs, rhs):
+        if self.assembled:
+            raise ValueError('QP already assembled, cannot add constraints!')
         if self.state_constraints is None:
             self.state_constraints = Polytope(lhs, rhs)
         else:
@@ -600,6 +617,8 @@ class MPCQPFactory(object):
         return
 
     def add_input_constraint(self, lhs, rhs):
+        if self.assembled:
+            raise ValueError('QP already assembled, cannot add constraints!')
         if self.input_constraints is None:
             self.input_constraints = Polytope(lhs, rhs)
         else:
@@ -607,6 +626,8 @@ class MPCQPFactory(object):
         return
 
     def add_state_bound(self, x_max, x_min):
+        if self.assembled:
+            raise ValueError('QP already assembled, cannot add constraints!')
         if self.state_constraints is None:
             self.state_constraints = Polytope.from_bounds(x_max, x_min)
         else:
@@ -614,6 +635,8 @@ class MPCQPFactory(object):
         return
 
     def add_input_bound(self, u_max, u_min):
+        if self.assembled:
+            raise ValueError('QP already assembled, cannot add constraints!')
         if self.input_constraints is None:
             self.input_constraints = Polytope.from_bounds(u_max, u_min)
         else:
@@ -621,6 +644,8 @@ class MPCQPFactory(object):
         return
 
     def set_terminal_constraint(self, terminal_constraint):
+        if self.assembled:
+            raise ValueError('QP already assembled, cannot add constraints!')
         self. terminal_constraint = terminal_constraint
         return
 
@@ -633,6 +658,7 @@ class MPCQPFactory(object):
         self.constraint_blocks()
         self.cost_blocks()
         self.critical_regions = None
+        self.assembled = True
         return CanonicalMPCQP(H=self.H,
                               F=self.F,
                               Q=self.Y,
@@ -723,17 +749,17 @@ class MPCQPFactory(object):
                 rhs_cl = np.vstack((self.state_constraints.rhs_min, self.input_constraints.rhs_min))
                 # compute maximum output admissible set
                 moas = self.maximum_output_admissible_set(A_cl, lhs_cl, rhs_cl)[0]
-                lhs_xN = moas.lhs_min
-                rhs_xN = moas.rhs_min
+                self.lhs_xN = moas.lhs_min
+                self.rhs_xN = moas.rhs_min
             elif self.terminal_constraint == 'origin':
-                lhs_xN = np.vstack((np.eye(self.sys.n_x), - np.eye(self.sys.n_x)))
-                rhs_xN = np.zeros((2*self.sys.n_x,1))
+                self.lhs_xN = np.vstack((np.eye(self.sys.n_x), - np.eye(self.sys.n_x)))
+                self.rhs_xN = np.zeros((2*self.sys.n_x,1))
             else:
                 raise ValueError('Unknown terminal constraint!')
             forced_evolution = self.sys.evolution_matrices(self.N)[1]
-            G_xN = lhs_xN.dot(forced_evolution[-self.sys.n_x:,:])
-            W_xN = rhs_xN
-            E_xN = - lhs_xN.dot(np.linalg.matrix_power(self.sys.A, self.N))
+            G_xN = self.lhs_xN.dot(forced_evolution[-self.sys.n_x:,:])
+            W_xN = self.rhs_xN
+            E_xN = - self.lhs_xN.dot(np.linalg.matrix_power(self.sys.A, self.N))
         return [G_xN, W_xN, E_xN]
 
     def cost_blocks(self):

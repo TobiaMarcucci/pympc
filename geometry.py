@@ -3,6 +3,7 @@ from sympy import Matrix
 from optimization import linear_program
 from pyhull.halfspace import Halfspace
 from pyhull.halfspace import HalfspaceIntersection
+import cdd
 import scipy.spatial as spatial
 import matplotlib.pyplot as plt
 
@@ -208,6 +209,29 @@ class Polytope:
             self._vertices = polyhedron_qhull.vertices
         return self._vertices
 
+    def orthogonal_projection(self, projection_directions):
+        """
+        Uses cddlib to project the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
+        """
+        H_list = np.hstack((self.rhs_min, -self.lhs_min)).tolist()
+        H_matrix = cdd.Matrix(H_list, number_type='float')
+        H_matrix.rep_type = cdd.RepType.INEQUALITY
+        polytope = cdd.Polyhedron(H_matrix)
+        V_matrix = polytope.get_generators()
+        V_list = V_matrix.__getitem__(slice(0, V_matrix.row_size))
+        V_projector = [0] + [direction+1 for direction in projection_directions]
+        projected_V_list = [[V[i] for i in V_projector] for V in V_list]
+        projected_V_matrix = cdd.Matrix(projected_V_list, number_type='float')
+        projected_V_matrix.rep_type = cdd.RepType.GENERATOR
+        projected_polytope = cdd.Polyhedron(projected_V_matrix)
+        projected_H_matrix = projected_polytope.get_inequalities()
+        projected_H_list = projected_H_matrix.__getitem__(slice(0, projected_H_matrix.row_size))
+        lhs = - np.array([list(H[1:]) for H in projected_H_list])
+        rhs = np.array([[H[0]] for H in projected_H_list])
+        projected_polytope = Polytope(lhs,rhs)
+        projected_polytope.assemble()
+        return projected_polytope
+
     def plot(self, dim_proj=[0,1], color='b'):
         """
         Plots a 2d projection of the polytope.
@@ -248,6 +272,22 @@ class Polytope:
         b = np.vstack((x_max, -x_min))
         p = Polytope(A, b)
         return p
+
+    def applies_to(self, x):
+        """
+        Determines is a given point belongs to the polytope.
+
+        INPUTS:
+            x: tested point
+
+        OUTPUTS:
+            is_inside: flag (True if x is in the polytope, False otherwise)
+        """
+
+        # check if x is inside the polytope
+        is_inside = np.max(self.lhs_min.dot(x) - self.rhs_min) <= 0
+
+        return is_inside
 
 
 def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
@@ -314,3 +354,11 @@ def nullspace_basis(A):
     rank = np.linalg.matrix_rank(A)
     Z = V[:,rank:]
     return Z
+
+
+
+
+
+
+
+

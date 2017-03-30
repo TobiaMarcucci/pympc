@@ -82,9 +82,9 @@ class TestMPCTools(unittest.TestCase):
         qp = factory.assemble()
         controller = mpc.MPCController(qp, 1)
 
-        # explicit vs implicit solution
+        # explicit vs implicit solution vs feasibility region
         controller.compute_explicit_solution()
-        print controller.critical_regions
+        qp.find_feasible_region()
         n_test = 100
         for i in range(0, n_test):
             x0 = np.random.rand(2,1)
@@ -93,9 +93,11 @@ class TestMPCTools(unittest.TestCase):
             if any(np.isnan(u_explicit)) or any(np.isnan(u_implicit)):
                 self.assertTrue(all(np.isnan(u_explicit)))
                 self.assertTrue(all(np.isnan(u_implicit)))
+                self.assertFalse(qp.feasible_region.applies_to(x0))
             else:
                 rel_toll = 5.e-2
                 self.assertTrue(all(np.isclose(u_explicit, u_implicit, rel_toll).flatten()))
+                self.assertTrue(qp.feasible_region.applies_to(x0))
 
 if __name__ == '__main__':
     unittest.main()

@@ -444,53 +444,32 @@ class MPCController:
 
     def plot_merged_state_partition(self):
         self.merge_critical_regions()
-        # print self.qp.G
+
+        # first_input_index = np.where(np.isclose(self.qp.G[:,1:], 0.).all(axis=1))[0]
+        # asets = [[]]
+        # for n in range(1, len(first_input_index)+1):
+        #     asets_n = itertools.combinations(first_input_index, n)
+        #     asets += [list(c) for c in asets_n]
+
         colors = ['b','g','r','c','m','y']*len(self.cr_families)
-        plt.figure()
+        fig, ax = plt.subplots()
         for i, family in enumerate(self.cr_families):
             for cr in family:
                 cr.polytope.plot(color=colors[i])
 
-
-
+        #         circle = plt.Circle((cr.polytope.center[0], cr.polytope.center[1]), cr.polytope.radius)
+        #         ax.add_artist(circle)
         #         plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
         #         for j in range(0, len(cr.polytope.minimal_facets)):
         #             plt.text(cr.polytope.facet_centers(j)[0], cr.polytope.facet_centers(j)[1], str(cr.polytope.minimal_facets[j]))
         # for family in self.cr_families:
-        #     for cr in family:
-        #         x0a = -.5
-        #         x0b = .5
-
-        #         if cr.active_set == [11,13,15,17,19]:
-        #             # y0a = (cr.polytope.b[0]-cr.polytope.A[0,0]*x0a)/cr.polytope.A[0,1]
-        #             # y0b = (cr.polytope.b[0]-cr.polytope.A[0,0]*x0b)/cr.polytope.A[0,1]
-        #             # plt.plot([x0a,x0b],[y0a,y0b], 'black')
-        #             # print cr.polytope.b[0],cr.polytope.A[0,:]
-
-        #             # # plt.plot([.47,.47],[-1.5,.5],'black')
-        #             y0a = (cr.polytope.b[1]-cr.polytope.A[1,0]*x0a)/cr.polytope.A[1,1]
-        #             y0b = (cr.polytope.b[1]-cr.polytope.A[1,0]*x0b)/cr.polytope.A[1,1]
-        #             plt.plot([x0a,x0b],[y0a,y0b], 'black')
-        #             #print cr.polytope.b[1],cr.polytope.A[1,:]
-
-        #             # y0a = (cr.polytope.b[10]-cr.polytope.A[10,0]*x0a)/cr.polytope.A[10,1]
-        #             # y0b = (cr.polytope.b[10]-cr.polytope.A[10,0]*x0b)/cr.polytope.A[10,1]
-        #             # plt.plot([x0a,x0b],[y0a,y0b], 'black')
-        #             print cr.polytope.b[10],cr.polytope.A[10,:]
-
-        #             y0a = (cr.polytope.b[11]-cr.polytope.A[11,0]*x0a)/cr.polytope.A[11,1]
-        #             y0b = (cr.polytope.b[11]-cr.polytope.A[11,0]*x0b)/cr.polytope.A[11,1]
-        #             plt.plot([x0a,x0b],[y0a,y0b], 'black')
-        #             #print cr.polytope.b[11],cr.polytope.A[11,:]
-
-        #             # y0a = -1.5
-        #             # y0b = 1.5
-        #             # x0a = (cr.polytope.b[10]-cr.polytope.A[10,1]*y0a)/cr.polytope.A[10,0]
-        #             # x0b = (cr.polytope.b[10]-cr.polytope.A[10,1]*y0b)/cr.polytope.A[10,0]
-        #             # plt.plot([x0a,x0b],[y0a,y0b], 'black')
-        # # plt.savefig('figures/act_set_2.pdf')
-
-
+        #     for cr in family: 
+        #         #if cr.active_set in asets:
+        #         if cr.active_set in asets:
+        #             p = Polytope(cr.polytope.A[first_input_index,:], cr.polytope.b[first_input_index])
+        #             p.add_bounds(np.array([[.4],[1.]]), np.array([[-.4],[-1.]]))
+        #             p.assemble()
+        #             p.plot(color='black')
 
         return
 
@@ -790,6 +769,6 @@ class CriticalRegion:
         """
 
         # check if x is inside the polytope
-        is_inside = np.max(self.polytope.lhs_min.dot(x) - self.polytope.rhs_min) <= 0
+        is_inside = self.polytope.applies_to(x)
 
         return is_inside
