@@ -4,7 +4,7 @@ import numpy as np
 import scipy.linalg as linalg
 import pydrake.solvers.mathematicalprogram as mp
 from mpc_tools import Polytope
-from optimization import linear_program
+from optimization.pnnls import linear_program
 import cdd
 
 
@@ -566,6 +566,7 @@ class CanonicalMPCQP(object):
         if self.feasible_region is None:
             feasible_polytope = Polytope(np.hstack((- self.E, self.G)), self.W)
             feasible_polytope.assemble()
+            print 'aaa'
             self.feasible_region = feasible_polytope.orthogonal_projection(range(0, self.E.shape[1]))
         return
 

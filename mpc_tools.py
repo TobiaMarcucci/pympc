@@ -5,8 +5,10 @@ from mpl_toolkits.mplot3d import Axes3D
 import itertools
 import time
 from utils.ndpiecewise import NDPiecewise
-from optimization import linear_program, quadratic_program
+from optimization.pnnls import linear_program
+from optimization.drake import quadratic_program
 from geometry import Polytope
+import copy
 
 
 def plot_input_sequence(u_sequence, t_s, N, u_max=None, u_min=None):
@@ -81,7 +83,7 @@ def plot_state_trajectory(x_trajectory, t_s, N, x_max=None, x_min=None):
         x_i_trajectory = [x_trajectory[j][i] for j in range(0,N+1)]
         state_plot, = plt.plot(t, x_i_trajectory, 'b')
 
-        # plot bounds iff provided
+        # plot bounds if provided
         if x_max is not None:
             bound_plot, = plt.step(t, x_max[i,0]*np.ones(t.shape),'r')
         if x_min is not None:
@@ -445,11 +447,11 @@ class MPCController:
     def plot_merged_state_partition(self):
         self.merge_critical_regions()
 
-        # first_input_index = np.where(np.isclose(self.qp.G[:,1:], 0.).all(axis=1))[0]
-        # asets = [[]]
-        # for n in range(1, len(first_input_index)+1):
-        #     asets_n = itertools.combinations(first_input_index, n)
-        #     asets += [list(c) for c in asets_n]
+        first_input_index = np.where(np.isclose(self.qp.G[:,1:], 0.).all(axis=1))[0]
+        asets = [[]]
+        for n in range(1, len(first_input_index)+1):
+            asets_n = itertools.combinations(first_input_index, n)
+            asets += [list(c) for c in asets_n]
 
         colors = ['b','g','r','c','m','y']*len(self.cr_families)
         fig, ax = plt.subplots()
@@ -460,16 +462,17 @@ class MPCController:
         #         circle = plt.Circle((cr.polytope.center[0], cr.polytope.center[1]), cr.polytope.radius)
         #         ax.add_artist(circle)
         #         plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
+                # plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.u_linear[0,:])+str(cr.u_offset[0]))
         #         for j in range(0, len(cr.polytope.minimal_facets)):
         #             plt.text(cr.polytope.facet_centers(j)[0], cr.polytope.facet_centers(j)[1], str(cr.polytope.minimal_facets[j]))
-        # for family in self.cr_families:
-        #     for cr in family: 
-        #         #if cr.active_set in asets:
-        #         if cr.active_set in asets:
-        #             p = Polytope(cr.polytope.A[first_input_index,:], cr.polytope.b[first_input_index])
-        #             p.add_bounds(np.array([[.4],[1.]]), np.array([[-.4],[-1.]]))
-        #             p.assemble()
-        #             p.plot(color='black')
+        for family in self.cr_families:
+            for cr in family: 
+                #if cr.active_set in asets:
+                if cr.active_set in asets:
+                    p = Polytope(cr.polytope.A[first_input_index,:], cr.polytope.b[first_input_index])
+                    p.add_bounds(np.array([[.4],[1.]]), np.array([[-.4],[-1.]]))
+                    p.assemble()
+                    p.plot(color='black')
 
         return
 
@@ -554,6 +557,54 @@ class MPCController:
 
         return licq
 
+    # def compute_approximated_explicit_solution(self):
+
+    #     self.qp.find_feasible_region()
+
+    #     first_block_indices = np.where(np.isclose(self.qp.G[:,1:], 0.).all(axis=1))[0]
+    #     if first_block_indices != range(0, len(first_block_indices)):
+    #         raise ValueError('Constraint matrix not in lower triangular form!')
+        
+    #     x_beyond_facet =
+    #     first_block_active_set = 
+    #     first_block_inactive_set = sorted(list(set(first_block_indices) - set(first_block_active_set)))
+        
+    #     # remove rows associated with incative contraints
+    #     modified_qp = copy.copy(self.qp)
+    #     modified_qp.G[first_block_inactive_set,:] = []
+    #     modified_qp.W[first_block_inactive_set,:] = []
+    #     modified_qp.S[first_block_inactive_set,:] = []
+
+    #     # turn active inequaliteis into euqualities
+    #     modified_qp.G = np.vstack((- selg.qp.G[first_block_active_set,:], modified_qp.G))
+    #     modified_qp.W = np.vstack((- selg.qp.W[first_block_active_set,:], modified_qp.W))
+    #     modified_qp.S = np.vstack((- selg.qp.S[first_block_active_set,:], modified_qp.S))
+
+    #     # get active set
+    #     f = x_beyond_facet.T.dot(modified_qp.F)
+    #     b = modified_qp.S.dot(x_beyond_facet) + modified_qp.W
+    #     z_star = quadratic_program(modified_qp.H, f, modified_qp.G, b)[0]
+    #     active_set = ???
+    #     inactive_set = sorted(list(set(range(0, qp.G.shape[0])) - set(active_set)))
+
+    #     # multipliers explicit solution
+    #     [G_A, W_A, S_A] = [qp.G[active_set,:], qp.W[active_set,:], qp.S[active_set,:]]
+    #     [G_I, W_I, S_I] = [qp.G[inactive_set,:], qp.W[inactive_set,:], qp.S[inactive_set,:]]
+    #     H_A = np.linalg.inv(G_A.dot(qp.H_inv.dot(G_A.T)))
+    #     lambda_A_offset = - H_A.dot(W_A)
+    #     lambda_A_linear = - H_A.dot(S_A)
+
+    #     # primal variables explicit solution
+    #     z_offset = - qp.H_inv.dot(G_A.T.dot(lambda_A_offset))
+    #     z_linear = - qp.H_inv.dot(G_A.T.dot(lambda_A_linear))
+        
+    #     # first input primal boundaries
+    #     fipb_lhs = self.qp.G[first_block_inactive_set,:].dot(z_linear) - self.qp.S[first_block_inactive_set,:]
+    #     fipb_rhs = - self.qp.G[first_block_inactive_set,:].dot(z_offset) + self.qp.W[first_block_inactive_set,:]
+
+
+
+
 
 class CriticalRegion:
     """
@@ -623,7 +674,6 @@ class CriticalRegion:
         self.u_linear = self.z_linear - np.linalg.inv(qp.H).dot(qp.F.T)
 
         # optimal value function explicit solution
-        # V = .5*u_feedforward.T.dot(self.qp.H.dot(u_feedforward)) + x0.T.dot(self.qp.F.dot(u_feedforward)) + .5*x0.T.dot(self.qp.Q).dot(x0)
         self.V_offset = .5*self.u_offset.T.dot(qp.H).dot(self.u_offset)
         self.V_linear = self.u_offset.T.dot(qp.H).dot(self.u_linear) + self.u_offset.T.dot(qp.F.T)
         self.V_quadratic = self.u_linear.T.dot(qp.H).dot(self.u_linear) + qp.Q + 2.*qp.F.dot(self.u_linear)
@@ -772,3 +822,47 @@ class CriticalRegion:
         is_inside = self.polytope.applies_to(x)
 
         return is_inside
+
+
+class ApproximatedCriticalRegion:
+
+    def __init__(self, active_set, qp, feasible_region):
+
+        # store active set
+        print 'Computing approximated critical region for the active set ' + str(active_set)
+        [self.n_constraints, self.n_parameters] = qp.S.shape
+        self.active_set = active_set
+        self.inactive_set = sorted(list(set(range(0, self.n_constraints)) - set(active_set)))
+
+        # find the polytope
+        self.polytope(qp, feasible_region)
+        if self.polytope.empty:
+            return
+
+
+    def polytope(self, qp, feasible_region):
+
+        # multipliers explicit solution
+        [G_A, W_A, S_A] = [qp.G[self.active_set,:], qp.W[self.active_set,:], qp.S[self.active_set,:]]
+        [G_I, W_I, S_I] = [qp.G[self.inactive_set,:], qp.W[self.inactive_set,:], qp.S[self.inactive_set,:]]
+        H_A = np.linalg.inv(G_A.dot(qp.H_inv.dot(G_A.T)))
+        self.lambda_A_offset = - H_A.dot(W_A)
+        self.lambda_A_linear = - H_A.dot(S_A)
+
+        # primal variables explicit solution
+        self.z_offset = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_offset))
+        self.z_linear = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_linear))
+
+        # primal original variables explicit solution
+        self.u_offset = self.z_offset
+        self.u_linear = self.z_linear - np.linalg.inv(qp.H).dot(qp.F.T)
+
+        # first input primal boundaries
+        lhs_type_1 = G_I.dot(self.z_linear) - S_I
+        rhs_type_1 = - G_I.dot(self.z_offset) + W_I
+
+        # construct polytope
+        self.polytope = Polytope(lhs, rhs)
+        self.polytope.assemble()
+
+        return

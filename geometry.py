@@ -1,6 +1,6 @@
 import numpy as np
 from sympy import Matrix
-from optimization import linear_program
+from optimization.pnnls import linear_program
 from pyhull.halfspace import Halfspace
 from pyhull.halfspace import HalfspaceIntersection
 import cdd
@@ -89,7 +89,7 @@ class Polytope:
         """
         self.empty = False
         self.center, self.radius = chebyshev_center(self.A, self.b)
-        self.x_bound = np.linalg.norm(self.center) + self.radius*1.e2
+        # self.x_bound = np.linalg.norm(self.center) + self.radius*1.e2
         if np.isnan(self.radius):
             self.empty = True
         return
@@ -164,7 +164,7 @@ class Polytope:
             #         else:
             #             on_boundary = False
 
-            cost_i = - linear_program(-self.A[i,:].T, A_reduced, b_relaxed, x_bound=self.x_bound)[1]
+            cost_i = - linear_program(-self.A[i,:].T, A_reduced, b_relaxed)[1]
 
             # remove redundant facets from the list
             if cost_i < self.b[i] + toll or np.isnan(cost_i):
@@ -218,6 +218,7 @@ class Polytope:
         H_matrix.rep_type = cdd.RepType.INEQUALITY
         polytope = cdd.Polyhedron(H_matrix)
         V_matrix = polytope.get_generators()
+        print 'bbb'
         V_list = V_matrix.__getitem__(slice(0, V_matrix.row_size))
         V_projector = [0] + [direction+1 for direction in projection_directions]
         projected_V_list = [[V[i] for i in V_projector] for V in V_list]
