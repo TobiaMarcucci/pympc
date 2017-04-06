@@ -1,11 +1,13 @@
 import numpy as np
 from sympy import Matrix
 from optimization.pnnls import linear_program
-from pyhull.halfspace import Halfspace
-from pyhull.halfspace import HalfspaceIntersection
+from pyhull.halfspace import Halfspace, HalfspaceIntersection
+from pyhull.convex_hull import ConvexHull
 import cdd
 import scipy.spatial as spatial
 import matplotlib.pyplot as plt
+from matplotlib.path import Path
+import matplotlib.patches as patches
 
 class Polytope:
     """
@@ -89,7 +91,6 @@ class Polytope:
         """
         self.empty = False
         self.center, self.radius = chebyshev_center(self.A, self.b)
-        # self.x_bound = np.linalg.norm(self.center) + self.radius*1.e2
         if np.isnan(self.radius):
             self.empty = True
         return
@@ -202,46 +203,50 @@ class Polytope:
                 self._vertices = []
                 return self._vertices
             halfspaces = []
+            # change of coordinates because qhull is stupid...
+            b_qhull = self.b - self.A.dot(self.center)
             for i in range(0, self.n_facets):
-                halfspace = Halfspace(self.A[i,:].tolist(), (-self.b[i,0]).tolist())
+                halfspace = Halfspace(self.A[i,:].tolist(), (-b_qhull[i,0]).tolist())
                 halfspaces.append(halfspace)
-            polyhedron_qhull = HalfspaceIntersection(halfspaces, self.center.flatten().tolist())
+            polyhedron_qhull = HalfspaceIntersection(halfspaces, np.zeros(self.center.shape).flatten().tolist())
             self._vertices = polyhedron_qhull.vertices
+            self._vertices += np.repeat(self.center.T, self._vertices.shape[0], axis=0)
         return self._vertices
 
-    def orthogonal_projection(self, projection_directions):
+    def orthogonal_projection(self, dim_proj):
         """
         Uses cddlib to project the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
         """
-        H_list = np.hstack((self.rhs_min, -self.lhs_min)).tolist()
-        H_matrix = cdd.Matrix(H_list, number_type='float')
-        H_matrix.rep_type = cdd.RepType.INEQUALITY
-        polytope = cdd.Polyhedron(H_matrix)
-        V_matrix = polytope.get_generators()
-        print 'bbb'
-        V_list = V_matrix.__getitem__(slice(0, V_matrix.row_size))
-        V_projector = [0] + [direction+1 for direction in projection_directions]
-        projected_V_list = [[V[i] for i in V_projector] for V in V_list]
-        projected_V_matrix = cdd.Matrix(projected_V_list, number_type='float')
-        projected_V_matrix.rep_type = cdd.RepType.GENERATOR
-        projected_polytope = cdd.Polyhedron(projected_V_matrix)
-        projected_H_matrix = projected_polytope.get_inequalities()
-        projected_H_list = projected_H_matrix.__getitem__(slice(0, projected_H_matrix.row_size))
-        lhs = - np.array([list(H[1:]) for H in projected_H_list])
-        rhs = np.array([[H[0]] for H in projected_H_list])
-        projected_polytope = Polytope(lhs,rhs)
+        vertices_proj = np.vstack(self.vertices)[:,dim_proj]
+        hull = spatial.ConvexHull(vertices_proj)
+        lhs = np.array(hull.equations)[:, :-1]
+        rhs = - (np.array(hull.equations)[:, -1]).reshape((lhs.shape[0], 1))
+        projected_polytope = Polytope(lhs, rhs)
         projected_polytope.assemble()
         return projected_polytope
 
-    def plot(self, dim_proj=[0,1], color='b'):
+
+
+
+        # projected_V_list = [[1.] + [vertex[i] for i in projection_directions] for vertex in self.vertices]
+        # projected_V_matrix = cdd.Matrix(projected_V_list, number_type='float')
+        # projected_V_matrix.rep_type = cdd.RepType.GENERATOR
+        # projected_polytope = cdd.Polyhedron(projected_V_matrix)
+        # projected_H_matrix = projected_polytope.get_inequalities()
+        # projected_H_list = projected_H_matrix.__getitem__(slice(0, projected_H_matrix.row_size))
+        # lhs = - np.array([list(H[1:]) for H in projected_H_list])
+        # rhs = np.array([[H[0]] for H in projected_H_list])
+        # projected_polytope = Polytope(lhs,rhs)
+        # projected_polytope.assemble()
+        # return projected_polytope
+
+
+    def plot(self, dim_proj=[0,1], largest_ball=False, **kwargs):
         """
         Plots a 2d projection of the polytope.
 
         INPUTS:
             dim_proj: dimensions in which to project the polytope
-
-        OUTPUTS:
-            polytope_plot: figure handle
         """
         if self.empty:
             raise ValueError('Empty polytope!')
@@ -250,11 +255,25 @@ class Polytope:
         # extract vertices components
         vertices_proj = np.vstack(self.vertices)[:,dim_proj]
         hull = spatial.ConvexHull(vertices_proj)
-        for simplex in hull.simplices:
-            polytope_plot, = plt.plot(vertices_proj[simplex, 0], vertices_proj[simplex, 1], color=color)
+        verts = [hull.points[i].tolist() for i in hull.vertices]
+        verts += [verts[0]]
+        codes = [Path.MOVETO] + [Path.LINETO]*(len(verts)-2) + [Path.CLOSEPOLY]
+        path = Path(verts, codes)
+        ax = plt.gca()
+        patch = patches.PathPatch(path, **kwargs)
+        ax.add_patch(patch)
         plt.xlabel(r'$x_' + str(dim_proj[0]+1) + '$')
         plt.ylabel(r'$x_' + str(dim_proj[1]+1) + '$')
-        return polytope_plot
+        x_min = min([vert[0] for vert in verts])
+        x_max = max([vert[0] for vert in verts])
+        y_min = min([vert[1] for vert in verts])
+        y_max = max([vert[1] for vert in verts])
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+        if largest_ball:
+            circle = plt.Circle((self.center[0], self.center[1]), self.radius, facecolor='white', edgecolor='black')
+            ax.add_artist(circle)
+        return
 
     @staticmethod
     def from_bounds(x_max, x_min):
@@ -323,7 +342,7 @@ def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     # check if the problem is trivially unbounded
     A_row_norm = np.linalg.norm(A,axis=1)
     A_zero_rows = np.where(A_row_norm < tol)[0]
-    if any(b[A_zero_rows] < 0):
+    if any(b[A_zero_rows] < 0.):
         radius = np.nan
         center = np.zeros((n_variables,1))
         center[:] = np.nan
@@ -342,7 +361,7 @@ def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
         radius = np.inf
     if any(np.isnan(center)):
         center[:] = np.inf
-    if radius < 0:
+    if radius < tol:
         radius = np.nan
         center[:] = np.nan
     return [center, radius]

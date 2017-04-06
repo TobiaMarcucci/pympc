@@ -1,4 +1,4 @@
-from gurobipy import *
+import gurobipy as grb
 import numpy as np
 
 def linear_program(f, A=None, b=None, C=None, d=None, lb=None, ub=None):
@@ -15,40 +15,40 @@ def linear_program(f, A=None, b=None, C=None, d=None, lb=None, ub=None):
     """
 
     # initialize gurobi model
-    model = Model()
+    model = grb.Model()
 
     # optimization variables
     n_var = f.shape[0]
     vars = []
     if lb is None:
-        lb = [- GRB.INFINITY]*n_var
+        lb = [- grb.GRB.INFINITY]*n_var
     if ub is None:
-        ub = [GRB.INFINITY]*n_var
+        ub = [grb.GRB.INFINITY]*n_var
     for i in range(n_var):
-        vars.append(model.addVar(lb=lb[i], ub=ub[i], vtype=GRB.CONTINUOUS))
+        vars.append(model.addVar(lb=lb[i], ub=ub[i], vtype=grb.GRB.CONTINUOUS))
 
     # inequality constraints
     if A is not None and b is not None:
         n_ineq = A.shape[0]
         for i in range(n_ineq):
-            expr = LinExpr()
+            expr = grb.LinExpr()
             for j in range(n_var):
                 if A[i,j] != 0:
                     expr += A[i,j]*vars[j]
-            model.addConstr(expr, GRB.LESS_EQUAL, b[i])
+            model.addConstr(expr, grb.GRB.LESS_EQUAL, b[i])
 
     # equality constraints
     if C is not None and d is not None:
         n_eq = C.shape[0]
         for i in range(n_eq):
-            expr = LinExpr()
+            expr = grb.LinExpr()
             for j in range(n_var):
                 if C[i,j] != 0:
                     expr += C[i,j]*vars[j]
-            model.addConstr(expr, GRB.EQUAL, d[i])
+            model.addConstr(expr, grb.GRB.EQUAL, d[i])
 
     # cost function
-    obj = LinExpr()
+    obj = grb.LinExpr()
     for i in range(n_var):
         if f[i] != 0:
               obj += f[i,0]*vars[i]
@@ -59,7 +59,7 @@ def linear_program(f, A=None, b=None, C=None, d=None, lb=None, ub=None):
     model.optimize()
 
     # return the result
-    if model.status == GRB.Status.OPTIMAL:
+    if model.status == grb.GRB.Status.OPTIMAL:
         x_min = np.array(model.getAttr('x', vars)).reshape(n_var,1)
         cost_min = obj.getValue()
     else:
@@ -82,40 +82,40 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, lb=None, ub=Non
     """
 
     # initialize gurobi model
-    model = Model()
+    model = grb.Model()
 
     # optimization variables
     n_var = H.shape[0]
     vars = []
     if lb is None:
-        lb = [- GRB.INFINITY]*n_var
+        lb = [- grb.GRB.INFINITY]*n_var
     if ub is None:
-        ub = [GRB.INFINITY]*n_var
+        ub = [grb.GRB.INFINITY]*n_var
     for i in range(n_var):
-        vars.append(model.addVar(lb=lb[i], ub=ub[i], vtype=GRB.CONTINUOUS))
+        vars.append(model.addVar(lb=lb[i], ub=ub[i], vtype=grb.GRB.CONTINUOUS))
 
     # inequality constraints
     if A is not None and b is not None:
         n_ineq = A.shape[0]
         for i in range(n_ineq):
-            expr = LinExpr()
+            expr = grb.LinExpr()
             for j in range(n_var):
                 if A[i,j] != 0:
                     expr += A[i,j]*vars[j]
-            model.addConstr(expr, GRB.LESS_EQUAL, b[i])
+            model.addConstr(expr, grb.GRB.LESS_EQUAL, b[i])
 
     # equality constraints
     if C is not None and d is not None:
         n_eq = C.shape[0]
         for i in range(n_eq):
-            expr = LinExpr()
+            expr = grb.LinExpr()
             for j in range(n_var):
                 if C[i,j] != 0:
                     expr += C[i,j]*vars[j]
-            model.addConstr(expr, GRB.EQUAL, d[i])
+            model.addConstr(expr, grb.GRB.EQUAL, d[i])
 
     # cost function
-    obj = QuadExpr()
+    obj = grb.QuadExpr()
     for i in range(n_var):
         for j in range(n_var):
             if H[i,j] != 0:
@@ -131,7 +131,7 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, lb=None, ub=Non
     model.optimize()
 
     # return the result
-    if model.status == GRB.Status.OPTIMAL:
+    if model.status == grb.GRB.Status.OPTIMAL:
         x_min = np.array(model.getAttr('x', vars)).reshape(n_var,1)
         cost_min = obj.getValue()
     else:

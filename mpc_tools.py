@@ -9,6 +9,8 @@ from optimization.pnnls import linear_program
 from optimization.drake import quadratic_program
 from geometry import Polytope
 import copy
+import gurobipy as grb
+
 
 
 def plot_input_sequence(u_sequence, t_s, N, u_max=None, u_min=None):
@@ -211,6 +213,8 @@ class MPCController:
     def __init__(self, canonical_qp, n_u):
         self.qp = canonical_qp
         self.n_u = n_u
+        self.critical_regions = None
+        self.approximated_critical_regions = None
 
     def feedforward(self, x0):
         u_feedforward = quadratic_program(self.qp.H, (x0.T.dot(self.qp.F)).T, self.qp.G, self.qp.W + self.qp.E.dot(x0))[0]
@@ -225,7 +229,7 @@ class MPCController:
     def compute_explicit_solution(self):
 
         # start clock
-        tic = time.clock()
+        tic = time.time()
 
         # initialize the search with the origin (to which the empty AS is associated)
         active_set = []
@@ -250,7 +254,7 @@ class MPCController:
 
         # collect all the critical regions and report the result
         self.critical_regions = NDPiecewise(explored_cr)
-        toc = time.clock()
+        toc = time.time()
         print('\nExplicit solution successfully computed in ' + str(toc-tic) + ' s:')
         print('parameter space partitioned in ' + str(len(self.critical_regions)) + ' critical regions.')
 
@@ -300,7 +304,7 @@ class MPCController:
 
         # if there is more than one change, nothing can be done...
         if len(active_set_change) > 1:
-            print 'Cannot solve degeneracy with multiple active set changes! The solution of a QP is required...'
+            print('Cannot solve degeneracy with multiple active set changes! The solution of a QP is required...')
             active_set = self.solve_qp_beyond_facet(facet_index, cr)
 
         # if there is one change solve the lp from Theorem 4
@@ -406,8 +410,10 @@ class MPCController:
         return u_feedforward
 
     def feedback_explicit(self, x0):
+
         # select only the first control of the feedforward
         u_feedback = self.feedforward_explicit(x0)[0:self.n_u]
+
         return u_feedback
 
     def optimal_value_function(self, x0):
@@ -444,45 +450,56 @@ class MPCController:
         return
 
 
-    def plot_merged_state_partition(self):
+    def plot_merged_state_partition(self, active_set=False, first_input=False, facet_index=False, **kwargs):
         self.merge_critical_regions()
-
-        first_input_index = np.where(np.isclose(self.qp.G[:,1:], 0.).all(axis=1))[0]
-        asets = [[]]
-        for n in range(1, len(first_input_index)+1):
-            asets_n = itertools.combinations(first_input_index, n)
-            asets += [list(c) for c in asets_n]
-
-        colors = ['b','g','r','c','m','y']*len(self.cr_families)
         fig, ax = plt.subplots()
+        x_min, x_max, y_min, y_max = [0.]*4
         for i, family in enumerate(self.cr_families):
+            color = np.random.rand(3,1)
             for cr in family:
-                cr.polytope.plot(color=colors[i])
+                cr.polytope.plot(facecolor=color, **kwargs)
+                x_min = min(x_min, ax.get_xlim()[0])
+                x_max = max(x_max, ax.get_xlim()[1])
+                y_min = min(y_min, ax.get_ylim()[0])
+                y_max = max(y_max, ax.get_ylim()[1])
+                ax.set_xlim(x_min, x_max)
+                ax.set_ylim(y_min, y_max)
 
-        #         circle = plt.Circle((cr.polytope.center[0], cr.polytope.center[1]), cr.polytope.radius)
-        #         ax.add_artist(circle)
-        #         plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
-                # plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.u_linear[0,:])+str(cr.u_offset[0]))
-        #         for j in range(0, len(cr.polytope.minimal_facets)):
-        #             plt.text(cr.polytope.facet_centers(j)[0], cr.polytope.facet_centers(j)[1], str(cr.polytope.minimal_facets[j]))
-        for family in self.cr_families:
-            for cr in family: 
-                #if cr.active_set in asets:
-                if cr.active_set in asets:
-                    p = Polytope(cr.polytope.A[first_input_index,:], cr.polytope.b[first_input_index])
-                    p.add_bounds(np.array([[.4],[1.]]), np.array([[-.4],[-1.]]))
-                    p.assemble()
-                    p.plot(color='black')
-
+                if active_set:
+                    plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
+                if first_input:
+                    plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.u_linear[0,:])+str(cr.u_offset[0]))
+                if facet_index:
+                    for j in range(0, len(cr.polytope.minimal_facets)):
+                        plt.text(cr.polytope.facet_centers(j)[0], cr.polytope.facet_centers(j)[1], str(cr.polytope.minimal_facets[j]))
         return
 
 
-    def plot_state_partition(self):
-        colors = ['b','g','r','c','m','y']*len(self.critical_regions)
-        plt.figure()
-        for i, cr in enumerate(self.critical_regions):
-            cr.polytope.plot(color=colors[i])
-            #plt.savefig('/Users/tobia/Google Drive/UNIPI/PhD/box_atlas/presentation/figures/cr' + str(i+2) + '.pdf')
+    def plot_state_partition(self, solution_type='exact', active_set=False, **kwargs):
+        if solution_type == 'exact':
+            if self.critical_regions is None:
+                raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
+            else:
+                cr_list = self.critical_regions
+        elif solution_type == 'approximated':
+            if self.approximated_critical_regions is None:
+                raise ValueError('Approximated explicit solution not computed yet! First run .approximated_compute_explicit_solution().')
+            else:
+                cr_list = self.approximated_critical_regions
+        else:
+            raise ValueError('Unknown solution type; available solutions: exact, approximated.')
+        fig, ax = plt.subplots()
+        x_min, x_max, y_min, y_max = [0.]*4
+        for cr in cr_list:
+            cr.polytope.plot(facecolor=np.random.rand(3,1), **kwargs)
+            x_min = min(x_min, ax.get_xlim()[0])
+            x_max = max(x_max, ax.get_xlim()[1])
+            y_min = min(y_min, ax.get_ylim()[0])
+            y_max = max(y_max, ax.get_ylim()[1])
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+            if active_set:
+                 plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
         return
 
     def plot_optimal_control_law(self):
@@ -557,50 +574,44 @@ class MPCController:
 
         return licq
 
-    # def compute_approximated_explicit_solution(self):
+    def compute_approximated_explicit_solution(self):
 
-    #     self.qp.find_feasible_region()
+        tic = time.time()
 
-    #     first_block_indices = np.where(np.isclose(self.qp.G[:,1:], 0.).all(axis=1))[0]
-    #     if first_block_indices != range(0, len(first_block_indices)):
-    #         raise ValueError('Constraint matrix not in lower triangular form!')
-        
-    #     x_beyond_facet =
-    #     first_block_active_set = 
-    #     first_block_inactive_set = sorted(list(set(first_block_indices) - set(first_block_active_set)))
-        
-    #     # remove rows associated with incative contraints
-    #     modified_qp = copy.copy(self.qp)
-    #     modified_qp.G[first_block_inactive_set,:] = []
-    #     modified_qp.W[first_block_inactive_set,:] = []
-    #     modified_qp.S[first_block_inactive_set,:] = []
+        active_set_fragment = []
+        dual_boundaries = []
+        cr0 = FirstInputCriticalRegion(active_set_fragment, dual_boundaries, self.qp, self.n_u)
+        cr_to_be_explored = [cr0]
+        explored_cr = []
+        tested_active_sets =[cr0.active_set_fragment]
 
-    #     # turn active inequaliteis into euqualities
-    #     modified_qp.G = np.vstack((- selg.qp.G[first_block_active_set,:], modified_qp.G))
-    #     modified_qp.W = np.vstack((- selg.qp.W[first_block_active_set,:], modified_qp.W))
-    #     modified_qp.S = np.vstack((- selg.qp.S[first_block_active_set,:], modified_qp.S))
+        # explore the state space
+        while cr_to_be_explored:
 
-    #     # get active set
-    #     f = x_beyond_facet.T.dot(modified_qp.F)
-    #     b = modified_qp.S.dot(x_beyond_facet) + modified_qp.W
-    #     z_star = quadratic_program(modified_qp.H, f, modified_qp.G, b)[0]
-    #     active_set = ???
-    #     inactive_set = sorted(list(set(range(0, qp.G.shape[0])) - set(active_set)))
+            # choose the first candidate in the list and remove it
+            cr = cr_to_be_explored[0]
+            cr_to_be_explored = cr_to_be_explored[1:]
 
-    #     # multipliers explicit solution
-    #     [G_A, W_A, S_A] = [qp.G[active_set,:], qp.W[active_set,:], qp.S[active_set,:]]
-    #     [G_I, W_I, S_I] = [qp.G[inactive_set,:], qp.W[inactive_set,:], qp.S[inactive_set,:]]
-    #     H_A = np.linalg.inv(G_A.dot(qp.H_inv.dot(G_A.T)))
-    #     lambda_A_offset = - H_A.dot(W_A)
-    #     lambda_A_linear = - H_A.dot(S_A)
+            # if the CR is not empty, find all the potential neighbors
+            if cr.active_set is None:
+                print('Empty approximated critical region detected')
+            else:
+                for primal_boundary in cr.primal_boundaries:
+                    active_set_fragment = (cr.active_set_fragment + [primal_boundary[0]])
+                    active_set_fragment.sort()
+                    if active_set_fragment not in tested_active_sets:
+                        dual_boundaries = cr.dual_boundaries + [primal_boundary]
+                        child_cr = FirstInputCriticalRegion(active_set_fragment, dual_boundaries, self.qp, self.n_u)
+                        if child_cr.active_set is not None:
+                            cr_to_be_explored.append(child_cr)
+                            tested_active_sets.append(active_set_fragment)
+                explored_cr.append(cr)
 
-    #     # primal variables explicit solution
-    #     z_offset = - qp.H_inv.dot(G_A.T.dot(lambda_A_offset))
-    #     z_linear = - qp.H_inv.dot(G_A.T.dot(lambda_A_linear))
-        
-    #     # first input primal boundaries
-    #     fipb_lhs = self.qp.G[first_block_inactive_set,:].dot(z_linear) - self.qp.S[first_block_inactive_set,:]
-    #     fipb_rhs = - self.qp.G[first_block_inactive_set,:].dot(z_offset) + self.qp.W[first_block_inactive_set,:]
+        self.approximated_critical_regions = NDPiecewise(explored_cr)
+        toc = time.time()
+        print('\nApproximaterxplicit solution successfully computed in ' + str(toc-tic) + ' s:')
+        print('parameter space partitioned in ' + str(len(self.approximated_critical_regions)) + ' approximated critical regions.')
+        return
 
 
 
@@ -824,45 +835,151 @@ class CriticalRegion:
         return is_inside
 
 
-class ApproximatedCriticalRegion:
+class FirstInputCriticalRegion:
 
-    def __init__(self, active_set, qp, feasible_region):
+    def __init__(self, active_set_fragment, dual_boundaries, qp, n_u):
 
-        # store active set
-        print 'Computing approximated critical region for the active set ' + str(active_set)
-        [self.n_constraints, self.n_parameters] = qp.S.shape
-        self.active_set = active_set
-        self.inactive_set = sorted(list(set(range(0, self.n_constraints)) - set(active_set)))
+        print 'Computing approximated critical region for the active set fragment ' + str(active_set_fragment)
 
-        # find the polytope
-        self.polytope(qp, feasible_region)
-        if self.polytope.empty:
-            return
+        self.active_set_fragment = active_set_fragment
 
+        self.dual_boundaries = dual_boundaries
 
-    def polytope(self, qp, feasible_region):
+        first_input_index = np.where(np.isclose(qp.G[:,n_u:], 0.).all(axis=1))[0]
+        inactive_set_fragment = list(set(first_input_index) - set(active_set_fragment))
+        inactive_set_fragment.sort()
+        if inactive_set_fragment is None:
+            inactive_set_fragment = []
+        self.active_set = self.minimum_cardinality_active_set_completion(qp, active_set_fragment, inactive_set_fragment)[0]
 
-        # multipliers explicit solution
-        [G_A, W_A, S_A] = [qp.G[self.active_set,:], qp.W[self.active_set,:], qp.S[self.active_set,:]]
-        [G_I, W_I, S_I] = [qp.G[self.inactive_set,:], qp.W[self.inactive_set,:], qp.S[self.inactive_set,:]]
-        H_A = np.linalg.inv(G_A.dot(qp.H_inv.dot(G_A.T)))
-        self.lambda_A_offset = - H_A.dot(W_A)
-        self.lambda_A_linear = - H_A.dot(S_A)
+        if self.active_set is not None:
 
-        # primal variables explicit solution
-        self.z_offset = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_offset))
-        self.z_linear = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_linear))
+            # multipliers explicit solution
+            [G_A, W_A, S_A] = [qp.G[self.active_set,:], qp.W[self.active_set,:], qp.S[self.active_set,:]]
+            [G_I, W_I, S_I] = [qp.G[inactive_set_fragment,:], qp.W[inactive_set_fragment,:], qp.S[inactive_set_fragment,:]]
+            H_A = np.linalg.inv(G_A.dot(qp.H_inv.dot(G_A.T)))
+            lambda_A_offset = - H_A.dot(W_A)
+            lambda_A_linear = - H_A.dot(S_A)
 
-        # primal original variables explicit solution
-        self.u_offset = self.z_offset
-        self.u_linear = self.z_linear - np.linalg.inv(qp.H).dot(qp.F.T)
+            # primal variables explicit solution
+            z_offset = - qp.H_inv.dot(G_A.T.dot(lambda_A_offset))
+            z_linear = - qp.H_inv.dot(G_A.T.dot(lambda_A_linear))
 
-        # first input primal boundaries
-        lhs_type_1 = G_I.dot(self.z_linear) - S_I
-        rhs_type_1 = - G_I.dot(self.z_offset) + W_I
+            # first input primal boundaries
+            lhs = G_I.dot(z_linear) - S_I
+            rhs = -G_I.dot(z_offset) + W_I
 
-        # construct polytope
-        self.polytope = Polytope(lhs, rhs)
-        self.polytope.assemble()
+            # construct polytope
+            self.polytope = Polytope(lhs, rhs)
+            for dual_boundary in dual_boundaries:
+                self.polytope.add_facets(- dual_boundary[1], - dual_boundary[2])
+            self.polytope.add_facets(qp.feasible_set.lhs_min, qp.feasible_set.rhs_min)
+            self.polytope.assemble()
+
+            # primal boundaries
+            self.primal_boundaries = []
+            if not self.polytope.empty:
+                for i in self.polytope.minimal_facets:
+                    if i < lhs.shape[0]:
+                        primal_boundary = [inactive_set_fragment[i], lhs[i], rhs[i]]
+                        self.primal_boundaries.append(primal_boundary)
 
         return
+
+    def applies_to(self, x):
+        return self.polytope.applies_to(x)
+    
+    @staticmethod
+    def minimum_cardinality_active_set_completion(qp, active_set_fragment, inactive_set_fragment):
+        """
+        This function has the problem that it can ahppen that it finds an active set whose CR is lower dimensional. One alternative would be to impose the KKT constraints for set of points whose hull is finite dimensional, buth this would sacle very badly with the dimension of the parameter space!!!
+        """
+
+        # parameters
+        M = 1.e4
+
+        # gurobi model
+        model = grb.Model()
+
+        # program dimensions
+        n_z = qp.H.shape[0]
+        n_x = qp.S.shape[1]
+        n_l = qp.G.shape[0]
+        n_d = n_l - len(active_set_fragment) - len(inactive_set_fragment)
+        free_constraints = list(set(range(n_l)) - set(active_set_fragment + inactive_set_fragment))
+        free_constraints.sort()
+
+        # variables
+        z = model.addVars(n_z, lb=[- grb.GRB.INFINITY]*n_z, name='z')
+        x = model.addVars(n_x, lb=[- grb.GRB.INFINITY]*n_x, name='x')
+        l = model.addVars(n_l, lb=[- grb.GRB.INFINITY]*n_l, name='l')
+        d = model.addVars(n_d, vtype=grb.GRB.BINARY, name='d')
+
+        
+        # set objective
+        obj = grb.LinExpr()
+        for i in range(n_d):
+            obj += d[i]
+        model.setObjective(obj)
+
+        # stationarity inner QP
+        for i in range(n_z):
+            expr = grb.LinExpr()
+            for j in range(n_z):
+                if qp.H[i,j] != 0:
+                    expr += qp.H[i,j]*z[j]
+            for j in range(n_l):
+                if qp.G[j,i] != 0:
+                    expr += qp.G[j,i]*l[j]     
+            model.addConstr(expr, grb.GRB.EQUAL, 0.)
+
+        # primal feasibility and complementarity inner QP
+        for i in range(n_l):
+            expr = grb.LinExpr()
+            for j in range(n_z):
+                if qp.G[i,j] != 0:
+                    expr += qp.G[i,j]*z[j]
+            expr -= qp.W[i]
+            for j in range(n_x):
+                if qp.S[i,j] != 0:
+                    expr -= qp.S[i,j]*x[j]
+            if i in active_set_fragment:
+                model.addConstr(expr, grb.GRB.EQUAL, 0.)
+            elif i in inactive_set_fragment:
+                model.addConstr(expr, grb.GRB.LESS_EQUAL, 0.)
+            else:
+                model.addConstr(expr, grb.GRB.LESS_EQUAL, 0.)
+                big_M_relaxation = grb.LinExpr(M*d[free_constraints.index(i)] - M)
+                model.addConstr(expr, grb.GRB.GREATER_EQUAL, big_M_relaxation)
+
+        # dual complementarity inner QP
+        for i in range(n_l):
+            expr = grb.LinExpr(l[i])
+            if i in active_set_fragment:
+                model.addConstr(expr, grb.GRB.GREATER_EQUAL, 0.)
+            elif i in inactive_set_fragment:
+                model.addConstr(expr, grb.GRB.EQUAL, 0.)
+            else:
+                model.addConstr(expr, grb.GRB.GREATER_EQUAL, 0.)
+                big_M_relaxation = grb.LinExpr(M*d[free_constraints.index(i)])
+                model.addConstr(expr, grb.GRB.LESS_EQUAL, big_M_relaxation)
+
+        # run optimization
+        model.setParam('OutputFlag', False)
+        model.optimize()
+
+        # return active set
+        if model.status == grb.GRB.Status.OPTIMAL:
+            z_star = np.array([[model.getAttr('x', z)[i]] for i in range(n_z)])
+            l_star = np.array([[model.getAttr('x', l)[i]] for i in range(n_l)])
+            x_star = np.array([[model.getAttr('x', x)[i]] for i in range(n_x)])
+            d_star = [int(round(model.getAttr('x', d)[i])) for i in range(n_d)]
+            active_set_completion = [free_constraints[i] for i, flag in enumerate(d_star) if flag == 1]
+            active_set = (active_set_fragment + active_set_completion)
+            active_set.sort()
+        else:
+            active_set = None
+            x_star = np.zeros((n_x,1))
+            x_star[:] = np.nan
+
+        return active_set, x_star

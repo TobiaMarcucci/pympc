@@ -455,7 +455,7 @@ class CanonicalMPCQP(object):
         self.T = T
         self._H_inv = None
         self._S = None
-        self.feasible_region = None
+        self._feasible_set = None
 
     def save(self, file):
         np.lib.npyio._savez(file, args=[], kwds={
@@ -562,19 +562,13 @@ class CanonicalMPCQP(object):
             self._S = self.E + self.G.dot(self.H_inv.dot(self.F.T))
         return self._S
 
-    def find_feasible_region(self):
-        if self.feasible_region is None:
-            feasible_polytope = Polytope(np.hstack((- self.E, self.G)), self.W)
-            feasible_polytope.assemble()
-            print 'aaa'
-            self.feasible_region = feasible_polytope.orthogonal_projection(range(0, self.E.shape[1]))
-        return
-
-    def plot_feasible_region(self, **kwargs):
-        if self.feasible_region is None:
-            self.find_feasible_region()
-        self.feasible_region.plot(**kwargs)
-        return
+    @property
+    def feasible_set(self):
+        if self._feasible_set is None:
+            augmented_polytope = Polytope(np.hstack((- self.E, self.G)), self.W)
+            augmented_polytope.assemble()
+            self._feasible_set = augmented_polytope.orthogonal_projection(range(0, self.E.shape[1]))
+        return self._feasible_set
 
 
 class MPCQPFactory(object):
