@@ -1,58 +1,44 @@
 import gurobipy as grb
 import numpy as np
 
-def linear_program(f, A=None, b=None, C=None, d=None, lb=None, ub=None):
+def linear_program(f, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
     """
     Solves the linear program
-    minimize f^T * x
-    s. t.    A * x <= b
-             C * x  = d
-             lb <= x <= ub
+    min  f^T x
+    s.t. A x <= b
+         C x  = d
+         x_lb <= x <= x_ub
 
     OUTPUTS:
-        x_min: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
-        cost_min: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
+        x_star: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
+        V_star: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
     """
 
     # initialize gurobi model
     model = grb.Model()
 
     # optimization variables
-    n_var = f.shape[0]
-    vars = []
-    if lb is None:
-        lb = [- grb.GRB.INFINITY]*n_var
-    if ub is None:
-        ub = [grb.GRB.INFINITY]*n_var
-    for i in range(n_var):
-        vars.append(model.addVar(lb=lb[i], ub=ub[i], vtype=grb.GRB.CONTINUOUS))
+    n_x = f.shape[0]
+    if x_lb is None:
+        x_lb = [- grb.GRB.INFINITY]*n_x
+    if x_ub is None:
+        x_ub = [grb.GRB.INFINITY]*n_x
+    x = model.addVars(n_x, lb=x_lb, ub=x_ub, name='x')
+    x_np = np.array([[x[i]] for i in range(n_x)])
 
     # inequality constraints
     if A is not None and b is not None:
-        n_ineq = A.shape[0]
-        for i in range(n_ineq):
-            expr = grb.LinExpr()
-            for j in range(n_var):
-                if A[i,j] != 0:
-                    expr += A[i,j]*vars[j]
-            model.addConstr(expr, grb.GRB.LESS_EQUAL, b[i])
+        expr = A.dot(x_np) - b
+        model.addConstrs((expr[i,0] <= 0. for i in range(A.shape[0])))
 
     # equality constraints
     if C is not None and d is not None:
-        n_eq = C.shape[0]
-        for i in range(n_eq):
-            expr = grb.LinExpr()
-            for j in range(n_var):
-                if C[i,j] != 0:
-                    expr += C[i,j]*vars[j]
-            model.addConstr(expr, grb.GRB.EQUAL, d[i])
+        expr = C.dot(x_np) - d
+        model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
 
     # cost function
-    obj = grb.LinExpr()
-    for i in range(n_var):
-        if f[i] != 0:
-              obj += f[i,0]*vars[i]
-    model.setObjective(obj)
+    V = f.T.dot(x_np)[0,0]
+    model.setObjective(V)
 
     # run the optimization
     model.setParam('OutputFlag', False)
@@ -60,71 +46,52 @@ def linear_program(f, A=None, b=None, C=None, d=None, lb=None, ub=None):
 
     # return the result
     if model.status == grb.GRB.Status.OPTIMAL:
-        x_min = np.array(model.getAttr('x', vars)).reshape(n_var,1)
-        cost_min = obj.getValue()
+        x_star = np.array([[model.getAttr('x', x)[i]] for i in range(n_x)])
+        V_star = V.getValue()
     else:
-        x_min = np.zeros((n_var,1))
-        x_min[:] = np.nan
-        cost_min = np.nan
-    return x_min, cost_min
+        x_star = np.zeros((n_x,1))
+        x_star[:] = np.nan
+        V_star = np.nan
+    return x_star, V_star
 
-def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, lb=None, ub=None):
+def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
     """
     Solves the convex (H > 0) quadratic program
-    minimize x^T * H * x + f^T * x
-    s. t.    A * x <= b
-             C * x  = d
-             lb <= x <= ub
+    min  .5 x^T H x + f^T x
+    s.t. A x <= b
+         C x  = d
+         x_lb <= x <= x_ub
 
     OUTPUTS:
-        x_min: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
-        cost_min: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
+        x_star: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
+        V_star: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
     """
 
     # initialize gurobi model
     model = grb.Model()
 
     # optimization variables
-    n_var = H.shape[0]
-    vars = []
-    if lb is None:
-        lb = [- grb.GRB.INFINITY]*n_var
-    if ub is None:
-        ub = [grb.GRB.INFINITY]*n_var
-    for i in range(n_var):
-        vars.append(model.addVar(lb=lb[i], ub=ub[i], vtype=grb.GRB.CONTINUOUS))
+    n_x = H.shape[0]
+    if x_lb is None:
+        x_lb = [- grb.GRB.INFINITY]*n_x
+    if x_ub is None:
+        x_ub = [grb.GRB.INFINITY]*n_x
+    x = model.addVars(n_x, lb=x_lb, ub=x_ub, name='x')
+    x_np = np.array([[x[i]] for i in range(n_x)])
 
     # inequality constraints
     if A is not None and b is not None:
-        n_ineq = A.shape[0]
-        for i in range(n_ineq):
-            expr = grb.LinExpr()
-            for j in range(n_var):
-                if A[i,j] != 0:
-                    expr += A[i,j]*vars[j]
-            model.addConstr(expr, grb.GRB.LESS_EQUAL, b[i])
+        expr = A.dot(x_np) - b
+        model.addConstrs((expr[i,0] <= 0. for i in range(A.shape[0])))
 
     # equality constraints
     if C is not None and d is not None:
-        n_eq = C.shape[0]
-        for i in range(n_eq):
-            expr = grb.LinExpr()
-            for j in range(n_var):
-                if C[i,j] != 0:
-                    expr += C[i,j]*vars[j]
-            model.addConstr(expr, grb.GRB.EQUAL, d[i])
+        expr = C.dot(x_np) - d
+        model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
 
     # cost function
-    obj = grb.QuadExpr()
-    for i in range(n_var):
-        for j in range(n_var):
-            if H[i,j] != 0:
-                obj += .5*H[i,j]*vars[i]*vars[j]
-    if f is not None:
-        for i in range(n_var):
-            if f[i] != 0:
-                  obj += f[i]*vars[i]
-    model.setObjective(obj)
+    V = .5*x_np.T.dot(H).dot(x_np)[0,0] + f.T.dot(x_np)[0,0]
+    model.setObjective(V)
 
     # run the optimization
     model.setParam('OutputFlag', False)
@@ -132,10 +99,10 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, lb=None, ub=Non
 
     # return the result
     if model.status == grb.GRB.Status.OPTIMAL:
-        x_min = np.array(model.getAttr('x', vars)).reshape(n_var,1)
-        cost_min = obj.getValue()
+        x_star = np.array([[model.getAttr('x', x)[i]] for i in range(n_x)])
+        V_star = V.getValue()
     else:
-        x_min = np.zeros((n_var,1))
-        x_min[:] = np.nan
-        cost_min = np.nan
-    return x_min, cost_min
+        x_star = np.zeros((n_x,1))
+        x_star[:] = np.nan
+        V_star = np.nan
+    return x_star, V_star
