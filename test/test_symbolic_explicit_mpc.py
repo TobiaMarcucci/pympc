@@ -1,9 +1,9 @@
 import unittest
 import numpy as np
 
-import mpc_tools as mpc
 import mpc_tools.mpcqp as mqp
 import pydrake.solvers.mathematicalprogram as mp
+from mpc_tools.optimization.mpqpsolver import MPQPSolver
 from boxatlas.contactstabilization import MixedIntegerTrajectoryOptimization
 
 
@@ -74,8 +74,7 @@ class TestSymbolicExplicitMPC(unittest.TestCase):
         u = np.vstack(u).T
 
         qp = mqp.CanonicalMPCQP.from_mathematicalprogram(prog, u, x)
-        controller = mpc.MPCController(qp, 2)
-        controller.compute_explicit_solution()
+        MPQPSolver(qp)
 
 
 if __name__ == '__main__':

@@ -1,8 +1,11 @@
 import unittest
 import numpy as np
-#import sys
-import mpc_tools as mpc
+from mpc_tools.dynamical_systems import DTLinearSystem
 import mpc_tools.mpcqp as mqp
+from mpc_tools.optimization.mpqpsolver import CriticalRegion
+from mpc_tools.geometry import Polytope
+from mpc_tools.control import MPCController
+
 
 class TestMPCTools(unittest.TestCase):
 
@@ -14,7 +17,7 @@ class TestMPCTools(unittest.TestCase):
         t_s = 1.
 
         # discrete time from continuous
-        sys = mpc.DTLinearSystem.from_continuous(t_s, A, B)
+        sys = DTLinearSystem.from_continuous(t_s, A, B)
         A_discrete = np.eye(2) + A*t_s
         B_discrete = B*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(B)
         self.assertTrue(all(np.isclose(sys.A.flatten(), A_discrete.flatten())))
@@ -43,13 +46,13 @@ class TestMPCTools(unittest.TestCase):
         minimal_facets = [0,1,2]
         coincident_facets = [[0],[1],[2,3],[2,3],[4]]
         minimal_coincident_facets = [coincident_facets[i] for i in minimal_facets]
-        candidate_active_sets = mpc.CriticalRegion.candidate_active_sets(active_set, minimal_coincident_facets)
+        candidate_active_sets = CriticalRegion.candidate_active_sets(active_set, minimal_coincident_facets)
         true_candidate_active_sets = [[[3,4]],[[0,1,3,4]],[[0,2,4]]]
         self.assertEqual(true_candidate_active_sets, candidate_active_sets)
 
         # test candidate_active_sets method
         weakly_active_constraints = [0,4]
-        candidate_active_sets = mpc.CriticalRegion.expand_candidate_active_sets(candidate_active_sets, weakly_active_constraints)
+        candidate_active_sets = CriticalRegion.expand_candidate_active_sets(candidate_active_sets, weakly_active_constraints)
         true_candidate_active_sets = [
         [[3, 4], [0, 3, 4], [3], [0, 3]],
         [[0, 1, 3, 4], [1, 3, 4], [0, 1, 3], [1, 3]],
@@ -63,28 +66,25 @@ class TestMPCTools(unittest.TestCase):
         A = np.array([[0., 1.],[0., 0.]])
         B = np.array([[0.],[1.]])
         t_s = 1.
-        sys = mpc.DTLinearSystem.from_continuous(t_s, A, B)
+        sys = DTLinearSystem.from_continuous(t_s, A, B)
 
         # mpc controller
         N = 5
         Q = np.eye(A.shape[0])
         R = np.eye(B.shape[1])
-        terminal_cost = 'dare'
-        factory = mqp.MPCQPFactory(sys, N, Q, R, terminal_cost)
-        x_max = np.array([[1.], [1.]])
-        x_min = -x_max
-        factory.add_state_bound(x_max, x_min)
+        P, K = sys.dare(Q, R)
         u_max = np.array([[1.]])
         u_min = -u_max
-        factory.add_input_bound(u_max, u_min)
-        terminal_constraint = 'moas'
-        factory.set_terminal_constraint(terminal_constraint)
-        qp = factory.assemble()
-        controller = mpc.MPCController(qp, 1)
-
+        U = Polytope.from_bounds(u_max, u_min)
+        U.assemble()
+        x_max = np.array([[1.], [1.]])
+        x_min = -x_max
+        X = Polytope.from_bounds(x_max, x_min)
+        X.assemble()
+        X_N = sys.moas(K, X, U)
+        controller = MPCController(sys, N, Q, R, P, X, U, X_N)
         # explicit vs implicit solution vs feasibility region
         controller.compute_explicit_solution()
-        qp.find_feasible_region()
         n_test = 100
         for i in range(0, n_test):
             x0 = np.random.rand(2,1)
@@ -93,11 +93,11 @@ class TestMPCTools(unittest.TestCase):
             if any(np.isnan(u_explicit)) or any(np.isnan(u_implicit)):
                 self.assertTrue(all(np.isnan(u_explicit)))
                 self.assertTrue(all(np.isnan(u_implicit)))
-                self.assertFalse(qp.feasible_region.applies_to(x0))
+                self.assertFalse(controller.canonical_qp.feasible_set.applies_to(x0))
             else:
                 rel_toll = 5.e-2
                 self.assertTrue(all(np.isclose(u_explicit, u_implicit, rel_toll).flatten()))
-                self.assertTrue(qp.feasible_region.applies_to(x0))
+                self.assertTrue(controller.canonical_qp.feasible_set.applies_to(x0))
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,9 +1,6 @@
 import numpy as np
-from sympy import Matrix
 from optimization.pnnls import linear_program
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
-from pyhull.convex_hull import ConvexHull
-import cdd
 import scipy.spatial as spatial
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
@@ -151,21 +148,7 @@ class Polytope:
             b_relaxation[i] += 1
             b_relaxed = (self.b + b_relaxation)[self.minimal_facets];
             # check redundancy
-
-            # # the following lines are needed when using gurobi
-            # if np.linalg.norm(self.A[i,:]) < 1.e-10 and self.b[i] > 0:
-            #     cost_i = 0.
-            # else:
-            #     on_boundary = True
-            #     while on_boundary:
-            #         sol, cost_i = linear_program(-self.A[i,:].T, A_reduced, b_relaxed, x_bound=self.x_bound) # I don't know why sometimes it crashes without the bounds!
-            #         cost_i = -cost_i
-            #         if max(np.absolute(sol)) > self.x_bound*0.9:
-            #             self.x_bound = self.x_bound*10.
-            #         else:
-            #             on_boundary = False
-
-            cost_i = - linear_program(-self.A[i,:].T, A_reduced, b_relaxed)[1]
+            cost_i = - linear_program(-self.A[i,:], A_reduced, b_relaxed)[1]
 
             # remove redundant facets from the list
             if cost_i < self.b[i] + toll or np.isnan(cost_i):
@@ -215,7 +198,7 @@ class Polytope:
 
     def orthogonal_projection(self, dim_proj):
         """
-        Uses cddlib to project the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
+        Projects the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
         """
         vertices_proj = np.vstack(self.vertices)[:,dim_proj]
         hull = spatial.ConvexHull(vertices_proj)
@@ -226,21 +209,6 @@ class Polytope:
         return projected_polytope
 
 
-
-
-        # projected_V_list = [[1.] + [vertex[i] for i in projection_directions] for vertex in self.vertices]
-        # projected_V_matrix = cdd.Matrix(projected_V_list, number_type='float')
-        # projected_V_matrix.rep_type = cdd.RepType.GENERATOR
-        # projected_polytope = cdd.Polyhedron(projected_V_matrix)
-        # projected_H_matrix = projected_polytope.get_inequalities()
-        # projected_H_list = projected_H_matrix.__getitem__(slice(0, projected_H_matrix.row_size))
-        # lhs = - np.array([list(H[1:]) for H in projected_H_list])
-        # rhs = np.array([[H[0]] for H in projected_H_list])
-        # projected_polytope = Polytope(lhs,rhs)
-        # projected_polytope.assemble()
-        # return projected_polytope
-
-
     def plot(self, dim_proj=[0,1], largest_ball=False, **kwargs):
         """
         Plots a 2d projection of the polytope.
@@ -249,7 +217,8 @@ class Polytope:
             dim_proj: dimensions in which to project the polytope
         """
         if self.empty:
-            raise ValueError('Empty polytope!')
+            print('Cannot plot empty polytope')
+            return
         if len(dim_proj) != 2:
             raise ValueError('Only 2d polytopes!')
         # extract vertices components
@@ -313,8 +282,8 @@ class Polytope:
 def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     """
     Finds the Chebyshevcenter of the polytope P := {x | A*x <= b, C*x = d} solving the linear program
-    minimize e
-    s.t.     F * z <= g + g_{\|}e
+    min  e
+    s.t. F * z <= g + g_{\|}e
     where if an equality is not provided F=A, z=x, g=b; whereas if equalities are present F=A*Z, g=b-A*Y*y, with: Z basis of the nullspace of C, Y orthogonal complement to Z, y=(C*Y)^-1*d and x is retrived as x=Z*z+Y*y.
 
     INPUTS:

@@ -37,6 +37,7 @@ def linear_program(f, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
         model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
 
     # cost function
+    f = np.reshape(f, (n_x, 1))
     V = f.T.dot(x_np)[0,0]
     model.setObjective(V)
 
@@ -49,14 +50,14 @@ def linear_program(f, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
         x_star = np.array([[model.getAttr('x', x)[i]] for i in range(n_x)])
         V_star = V.getValue()
     else:
-        x_star = np.zeros((n_x,1))
-        x_star[:] = np.nan
+        x_star = np.full((n_x,1), np.nan)
         V_star = np.nan
+
     return x_star, V_star
 
 def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
     """
-    Solves the convex (H > 0) quadratic program
+    Solves the strictly convex (H > 0) quadratic program
     min  .5 x^T H x + f^T x
     s.t. A x <= b
          C x  = d
@@ -90,6 +91,7 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub
         model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
 
     # cost function
+    f = np.reshape(f, (n_x, 1))
     V = .5*x_np.T.dot(H).dot(x_np)[0,0] + f.T.dot(x_np)[0,0]
     model.setObjective(V)
 
@@ -102,7 +104,7 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub
         x_star = np.array([[model.getAttr('x', x)[i]] for i in range(n_x)])
         V_star = V.getValue()
     else:
-        x_star = np.zeros((n_x,1))
-        x_star[:] = np.nan
+        x_star = np.full((n_x,1), np.nan)
         V_star = np.nan
+        
     return x_star, V_star

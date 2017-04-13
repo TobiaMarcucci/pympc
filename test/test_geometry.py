@@ -29,12 +29,12 @@ class TestGeometry(unittest.TestCase):
         self.assertTrue(np.isclose(true_radius, radius))
         
         # unbounded domain, but finite radius
-        print '--------'
         A = np.array([[1.,0.],[-1.,0.],[0.,1.]])
         b = np.array([[1.],[1.],[0.]])
         [center, radius] = chebyshev_center(A,b)
-        print center, radius
-        print '--------'
+        true_radius = 1.
+        self.assertTrue(np.isclose(true_radius, radius))
+        self.assertTrue(np.isclose(center[0], 0.))
 
     def test_Polytope(self):
 

@@ -2,10 +2,11 @@ import unittest
 import numpy as np
 import pydrake.solvers.mathematicalprogram as mp
 
-from mpc_tools import DTLinearSystem
-from mpc_tools.optimization import quadratic_program
+from mpc_tools.dynamical_systems import DTLinearSystem
+from mpc_tools.optimization.drake import quadratic_program
+from mpc_tools.geometry import Polytope
 import mpc_tools.mpcqp as mqp
-
+from mpc_tools.control import MPCController
 
 class TestQuadraticProgram(unittest.TestCase):
     def test_round_trip(self):
@@ -384,10 +385,12 @@ class TestQuadraticProgram(unittest.TestCase):
             u_min = -u_max
 
             # Construct a QP using the MPC QP factory:
-            factory = mqp.MPCQPFactory(sys, N, Q, R)
-            factory.add_state_bound(x_max, x_min)
-            factory.add_input_bound(u_max, u_min)
-            mpc_qp = factory.assemble()
+            X = Polytope.from_bounds(x_max, x_min)
+            X.assemble()
+            U = Polytope.from_bounds(u_max, u_min)
+            U.assemble()
+            controller = MPCController(sys=sys, N=N, Q=Q, R=R, X=X, U=U)
+            mpc_qp = controller.canonical_qp
 
             # Construct an equivalent symbolic program representing the same QP:
             prog = mp.MathematicalProgram()

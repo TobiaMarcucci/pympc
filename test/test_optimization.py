@@ -50,6 +50,17 @@ class TestMPCTools(unittest.TestCase):
             self.assertTrue(np.isclose(cost_min, true_cost_min))
             self.assertTrue(np.isclose(x_min[1], true_x1_min))
 
+            # lp with equalities
+            f = np.ones((2,1))
+            A = np.array([[1.,0.],[-1.,0.],[0.,1.],[0.,-1.]])
+            b = np.array([[5.],[5.],[1.],[1.]])
+            C = np.array([[1.,0.]])
+            d = np.array([[0.]])
+            true_x_min = np.array([[0.],[-1.]])
+            true_cost_min = -1.
+            [x_min, cost_min] = linear_program(f, A, b, C, d)
+            self.assertTrue(np.isclose(cost_min, true_cost_min))
+
     def test_quadratic_program(self):
 
         for quadratic_program in [qp_gurobi, qp_drake]:
