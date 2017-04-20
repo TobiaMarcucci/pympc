@@ -67,7 +67,7 @@ class DTLinearSystem:
         # derive evolution matrices
         [free_evolution, forced_evolution] = self.evolution_matrices(N)
 
-        # derive state trajectory includion initial state
+        # derive state trajectory including initial state
         if x0.ndim == 1:
             x0 = np.reshape(x0, (x0.shape[0],1))
         x = free_evolution.dot(x0) + forced_evolution.dot(u_sequence)
@@ -178,6 +178,149 @@ class DTLinearSystem:
         sys = DTLinearSystem(A_d, B_d)
         return sys
 
+
+class DTAffineSystem(object):
+    """
+    docstring for DTAffineSystem
+    """
+    def __init__(self, A, B, c):
+        self.A = A
+        self.B = B
+        self.c = c
+        [self.n_x, self.n_u] = np.shape(B)
+
+    @staticmethod
+    def from_continuous(t_s, A, B, c):
+        """
+        Defines a discrete time affine system starting from the continuous time dynamics \dot x = A*x + B*u + c
+        (the exact zero order hold method is used for the discretization).
+
+        INPUTS:
+            t_s: sampling time
+            A: continuous time state transition matrix
+            B: continuous time input to state map
+            c: continuous time offset term
+
+        OUTPUTS:
+            sys: discrete time affine system
+        """
+
+        # system dimensions
+        n_x = np.shape(A)[0]
+        n_u = np.shape(B)[1]
+
+        # zero order hold (see Bicchi - Fondamenti di Automatica 2)
+        mat_c = np.zeros((n_x+n_u+1, n_x+n_u+1))
+        mat_c[0:n_x,:] = np.hstack((A, B, c))
+        mat_d = linalg.expm(mat_c*t_s)
+
+        # discrete time dynamics
+        A_d = mat_d[0:n_x, 0:n_x]
+        B_d = mat_d[0:n_x, n_x:n_x+n_u]
+        c_d = mat_d[0:n_x, n_x+n_u:n_x+n_u+1]
+
+        sys = DTAffineSystem(A_d, B_d, c_d)
+        return sys
+        
+
+
+        
+class DTPWASystem(object):
+    """
+    """
+    def __init__(self, affine_systems, X_list, U_list):
+        self.affine_systems = affine_systems
+        self.X_list = X_list
+        self.U_list = U_list
+        self.n_x = affine_systems[0].n_x
+        self.n_u = affine_systems[0].n_u
+        self.n_sys = len(affine_systems)
+        self.compute_big_M_domains()
+        self.compute_big_M_dynamics()
+        return
+
+    def compute_big_M_domains(self):
+        self.big_M_domains = 0.
+        for i in range(self.n_sys):
+            for j in range(len(self.X_list[i].minimal_facets)):
+                for k in range(self.n_sys):
+                    if k != i:
+                        big_M = - linear_program(-self.X_list[i].lhs_min[j,:], self.X_list[k].lhs_min, self.X_list[k].rhs_min)[1] - self.X_list[i].rhs_min[j,0]
+                        self.big_M_domains = max(self.big_M_domains, big_M)
+            for j in range(len(self.U_list[i].minimal_facets)):
+                for k in range(self.n_sys):
+                    if k != i:
+                        big_M = - linear_program(-self.U_list[i].lhs_min[j,:], self.U_list[k].lhs_min, self.U_list[k].rhs_min)[1] - self.U_list[i].rhs_min[j,0]
+                        self.big_M_domains = max(self.big_M_domains, big_M)
+        return
+
+    def compute_big_M_dynamics(self):
+        self.big_M_dynamics = -np.inf
+        self.small_m_dynamics = np.inf
+        for i in range(self.n_sys):
+            for j in range(self.n_x):
+                for k in range(self.n_sys):
+                    f = np.hstack((self.affine_systems[i].A[j,:], self.affine_systems[i].B[j,:]))
+                    lhs = linalg.block_diag(self.X_list[k].lhs_min, self.U_list[k].lhs_min)
+                    rhs = np.vstack((self.X_list[k].rhs_min, self.U_list[k].rhs_min))
+                    big_M = -linear_program(-f, lhs, rhs)[1] + self.affine_systems[i].c[j,0]
+                    small_m = linear_program(f, lhs, rhs)[1] + self.affine_systems[i].c[j,0]
+                    self.big_M_dynamics = max(self.big_M_dynamics, big_M)
+                    self.small_m_dynamics = min(self.small_m_dynamics, small_m)
+        return
+
+    def simulate(self, x0, u_sequence):
+        N = len(u_sequence)
+        x_trajectory = [x0]
+        switching_sequence = []
+        for k in range(N):
+            for i in range(self.n_sys):
+                if self.X_list[i].applies_to(x_trajectory[k]) and self.U_list[i].applies_to(u_sequence[k]):
+                    switching_sequence.append(i)
+                    sys = self.affine_systems[i]
+                    x_next = sys.A.dot(x_trajectory[k]) + sys.B.dot(u_sequence[k]) + sys.c
+                    x_trajectory.append(x_next)
+                    break
+        return x_trajectory, switching_sequence
+
+    def evolution_matrices(self, switching_sequence):
+        N = len(switching_sequence)
+        A_sequence = [self.affine_systems[switching_sequence[i]].A for i in range(N)]
+        B_sequence = [self.affine_systems[switching_sequence[i]].B for i in range(N)]
+        c_sequence = [self.affine_systems[switching_sequence[i]].c for i in range(N)]
+
+        # free evolution of the system
+        free_evolution = np.vstack([productory(A_sequence[i::-1]) for i in range(N)])
+
+        # forced evolution of the system
+        forced_evolution = np.zeros((self.n_x*N,self.n_u*N))
+        for i in range(0, N):
+            for j in range(0, i):
+                forced_evolution[self.n_x*i:self.n_x*(i+1), self.n_u*j:self.n_u*(j+1)] = productory(A_sequence[i:j:-1]).dot(B_sequence[j])
+            forced_evolution[self.n_x*i:self.n_x*(i+1), self.n_u*i:self.n_u*(i+1)] = B_sequence[i]
+
+        # evolution related to the offset term
+        offset_evolution = c_sequence[0]
+        for i in range(1, N):
+            offset_i = sum([productory(A_sequence[i:j:-1]).dot(c_sequence[j]) for j in range(0,i)]) + c_sequence[i]
+            offset_evolution = np.vstack((offset_evolution, offset_i))
+
+        return free_evolution, forced_evolution, offset_evolution
+
+
+
+def productory(matrix_list):
+    prod = matrix_list[0]
+    for i in range(1, len(matrix_list)):
+        prod = prod.dot(matrix_list[i])
+    return prod
+
+
+
+
+
+### PLOT FUNCTIONS ###
+
 def plot_input_sequence(u_sequence, t_s, N, u_max=None, u_min=None):
     """
     Plots the input sequence and its bounds as functions of time.
@@ -276,25 +419,13 @@ def plot_state_space_trajectory(x_trajectory, state_components=[0,1], **kwargs):
         N: time steps
         state_components: components of the state vector to be plotted.
     """
-    ax = plt.axes()
+    for k in range(len(x_trajectory)-1):
+        plt.plot([x_trajectory[k][state_components[0]], x_trajectory[k+1][state_components[0]]], [x_trajectory[k][state_components[1]], x_trajectory[k+1][state_components[1]]], **kwargs)
+        # plt.text(x_trajectory[k][0], x_trajectory[k][1], r'$x('+str(k)+')$')
+    # ax = plt.axes()
     x_0 = (x_trajectory[0][state_components[0]][0], x_trajectory[0][state_components[1]][0])
     plt.scatter(x_0[0], x_0[1], color='b')
     plt.text(x_0[0], x_0[1], r'$x(0)$')
-    for i in range(len(x_trajectory)-1):
-        head_size = np.linalg.norm(x_trajectory[i+1]-x_trajectory[i])/10.
-        x_i = x_trajectory[i][state_components[0]][0]
-        y_i = x_trajectory[i][state_components[1]][0]
-        x_ip1 = x_trajectory[i+1][state_components[0]][0] - x_i
-        y_ip1 = x_trajectory[i+1][state_components[1]][0] - y_i
-        traj = ax.arrow(x_i, y_i, x_ip1, y_ip1, head_width=head_size, head_length=head_size*2., fc='b', ec='b')
-    # x_min = min([x[state_components[0]][0] for x in x_trajectory])
-    # x_max = max([x[state_components[0]][0] for x in x_trajectory])
-    # y_min = min([x[state_components[1]][0] for x in x_trajectory])
-    # y_max = max([x[state_components[1]][0] for x in x_trajectory])
-    # x_frame = (x_max - x_min)/5.
-    # y_frame = (y_max - y_min)/5.
-    # plt.xlim([x_min-x_frame, x_max+x_frame])
-    # plt.ylim([y_min-y_frame, y_max+y_frame])
     plt.xlabel(r'$x_{' + str(state_components[0]+1) + '}$')
     plt.ylabel(r'$x_{' + str(state_components[1]+1) + '}$')
     return

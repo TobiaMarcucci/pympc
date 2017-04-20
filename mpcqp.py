@@ -567,5 +567,5 @@ class CanonicalMPCQP(object):
         if self._feasible_set is None:
             augmented_polytope = Polytope(np.hstack((- self.E, self.G)), self.W)
             augmented_polytope.assemble()
-            self._feasible_set = augmented_polytope.orthogonal_projection(range(0, self.E.shape[1]))
+            self._feasible_set = augmented_polytope.orthogonal_projection(range(self.E.shape[1]))
         return self._feasible_set

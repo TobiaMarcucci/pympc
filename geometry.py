@@ -5,6 +5,7 @@ import scipy.spatial as spatial
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import matplotlib.patches as patches
+import copy
 
 class Polytope:
     """
@@ -90,6 +91,7 @@ class Polytope:
         self.center, self.radius = chebyshev_center(self.A, self.b)
         if np.isnan(self.radius):
             self.empty = True
+            print('Empty polytope!')
         return
 
     def check_boundedness(self, toll=1.e-9):
@@ -99,7 +101,7 @@ class Polytope:
         self.bounded = True
         # if the Chebyshev radius is infinite
         if np.isinf(self.radius):
-            print 'Infinite Chebyshev center or radius!'
+            print('Infinite Chebyshev center or radius!')
             self.bounded = False
             return
         # if ker(A) != 0
@@ -233,12 +235,7 @@ class Polytope:
         ax.add_patch(patch)
         plt.xlabel(r'$x_' + str(dim_proj[0]+1) + '$')
         plt.ylabel(r'$x_' + str(dim_proj[1]+1) + '$')
-        x_min = min([vert[0] for vert in verts])
-        x_max = max([vert[0] for vert in verts])
-        y_min = min([vert[1] for vert in verts])
-        y_max = max([vert[1] for vert in verts])
-        ax.set_xlim(x_min, x_max)
-        ax.set_ylim(y_min, y_max)
+        ax.autoscale_view()
         if largest_ball:
             circle = plt.Circle((self.center[0], self.center[1]), self.radius, facecolor='white', edgecolor='black')
             ax.add_artist(circle)
@@ -277,6 +274,59 @@ class Polytope:
         is_inside = np.max(self.lhs_min.dot(x) - self.rhs_min) <= 0
 
         return is_inside
+
+
+    # def fourier_motzkin_elimination(self, variable, tol=1.e-12):
+    #     [n_facets, n_variables] = self.lhs_min.shape
+    #     lhs_leq = np.zeros((0, n_variables-1))
+    #     rhs_leq = np.zeros((0, 1))
+    #     lhs_geq = np.zeros((0, n_variables-1))
+    #     rhs_geq = np.zeros((0, 1))
+    #     lhs = np.zeros((0, n_variables-1))
+    #     rhs = np.zeros((0, 1))
+    #     for i in range(n_facets):
+    #         pivot = self.lhs_min[i, variable]
+    #         lhs_row = np.hstack((self.lhs_min[i,:variable], self.lhs_min[i,variable+1:]))
+    #         rhs_row = self.rhs_min[i, 0]
+    #         if pivot > tol:
+    #             lhs_leq = np.vstack((lhs_leq, lhs_row/pivot))
+    #             rhs_leq = np.vstack((rhs_leq, rhs_row/pivot))
+    #         elif pivot < -tol:
+    #             lhs_geq = np.vstack((lhs_geq, lhs_row/pivot))
+    #             rhs_geq = np.vstack((rhs_geq, rhs_row/pivot))
+    #         else:
+    #             lhs = np.vstack((lhs, lhs_row))
+    #             rhs = np.vstack((rhs, rhs_row))
+    #     for i in range(lhs_leq.shape[0]):
+    #         for j in range(lhs_geq.shape[0]):
+    #             lhs_row = lhs_leq[i,:] - lhs_geq[j,:]
+    #             rhs_row = rhs_leq[i,0] - rhs_geq[j,0]
+    #             lhs = np.vstack((lhs, lhs_row))
+    #             rhs = np.vstack((rhs, rhs_row))
+    #     p = Polytope(lhs,rhs)
+    #     p.assemble()
+    #     return p
+
+
+
+    # def orthogonal_projection(self, projection_dimensions):
+    #     """
+    #     Projects the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
+    #     """
+    #     remove_dimensions = sorted(list(set(range(self.lhs_min.shape[1])) - set(projection_dimensions)))
+    #     p = self
+    #     for dimension in reversed(remove_dimensions):
+    #         p = p.fourier_motzkin_elimination(dimension)
+    #     return p
+
+
+
+
+
+
+
+
+
 
 
 def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):

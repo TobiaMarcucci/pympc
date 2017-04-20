@@ -104,6 +104,18 @@ class TestGeometry(unittest.TestCase):
         true_vertices = [[.5,.5],[-.2,.5],[-.2,-1.],[.5,-1.]]
         self.assertTrue(all([any(np.all(np.isclose(vertex, true_vertices),axis=1)) for vertex in p.vertices]))
 
+        # # test fourier_motzkin_elimination
+        # lhs = np.array([[1.,1.],[-1.,1.],[-1.,-9.]])
+        # rhs = np.array([[1.],[3.],[3.]])
+        # p = Polytope(lhs,rhs)
+        # p.assemble()
+        # row_0 = [1., max(p.vertices[:,1])]
+        # row_1 = [-1., min(p.vertices[:,1])]
+        # p_proj = p.fourier_motzkin_elimination(0)
+        # rows = np.hstack((p_proj.lhs_min, p_proj.rhs_min))
+        # self.assertTrue(row_0 in rows)
+        # self.assertTrue(row_1 in rows)
+        
         return
 
 if __name__ == '__main__':

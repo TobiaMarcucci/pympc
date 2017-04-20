@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from mpc_tools.dynamical_systems import DTLinearSystem
+from mpc_tools.dynamical_systems import DTLinearSystem, DTAffineSystem
 import mpc_tools.mpcqp as mqp
 from mpc_tools.optimization.mpqpsolver import CriticalRegion
 from mpc_tools.geometry import Polytope
@@ -37,7 +37,23 @@ class TestMPCTools(unittest.TestCase):
         real_x_trajectory = [[x0[0] + x0[1]*i*t_s + u[0,0]*(i*t_s)**2/2., x0[1] + u*i*t_s] for i in range(0,N+1)]
         self.assertTrue(all(np.isclose(x_trajectory, real_x_trajectory).flatten()))
 
+    def test_DTAffineSystem(self):
 
+        # constinuous time double integrator
+        A = np.array([[0., 1.],[0., 0.]])
+        B = np.array([[0.],[1.]])
+        c = np.array([[1.],[1.]])
+        t_s = 1.
+
+        # discrete time from continuous
+        sys = DTAffineSystem.from_continuous(t_s, A, B, c)
+        A_discrete = np.eye(2) + A*t_s
+        B_discrete = B*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(B)
+        c_discrete = c*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(c)
+        self.assertTrue(all(np.isclose(sys.A.flatten(), A_discrete.flatten())))
+        self.assertTrue(all(np.isclose(sys.B.flatten(), B_discrete.flatten())))
+        self.assertTrue(all(np.isclose(sys.c.flatten(), c_discrete.flatten())))
+        return
 
     def test_CriticalRegion(self):
 
