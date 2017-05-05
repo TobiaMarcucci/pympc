@@ -1,13 +1,17 @@
 import time
+import sys, os
 import numpy as np
 import scipy.linalg as linalg
 import matplotlib.pyplot as plt
-from optimization.gurobi import linear_program, quadratic_program
+import gurobipy as grb
+from contextlib import contextmanager
+from optimization.pnnls import linear_program
+from optimization.gurobi import quadratic_program
 from geometry import Polytope
 from dynamical_systems import DTAffineSystem, DTPWASystem
 from mpcqp import CanonicalMPCQP
 from optimization.mpqpsolver import MPQPSolver
-import gurobipy as grb
+
 
 
 class MPCController:
@@ -64,129 +68,53 @@ class MPCController:
         u_feedback = u_feedforward[0:self.sys.n_u]
         return u_feedback
 
-    # def compute_explicit_solution(self):
-    #     mpqp_solution = MPQPSolver(self.canonical_qp)
-    #     self.critical_regions = mpqp_solution.critical_regions
-    #     return
+class MPCExplicitController:
 
-    # def feedforward_explicit(self, x0):
+    def __init__(self, mpqp):
+        mpqp.remove_linear_terms()
+        self.mpqp = mpqp
+        mpqp_solution = MPQPSolver(mpqp)
+        self.critical_regions = mpqp_solution.critical_regions
+        return
 
-    #     # check that the explicit solution is available
-    #     if self.critical_regions is None:
-    #         raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
+    def feedforward(self, x0):
+        cr_x0 = self.critical_regions.lookup(x0)
+        if cr_x0 is not None:
+            u_feedforward = cr_x0.u_offset + cr_x0.u_linear.dot(x0)
+            cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
+            cost = cost[0,0]
+        else:
+            print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+            u_feedforward = np.full((self.mpqp.G.shape[1], 1), np.nan)
+            cost = np.nan
+        return u_feedforward, cost
 
-    #     # find the CR to which the given state belongs
-    #     cr_where_x0 = self.critical_regions.lookup(x0)
+    def feedback(self, x0):
+        return self.feedforward(x0)[0:self.sys.n_u]
 
-    #     # derive explicit solution
-    #     if cr_where_x0 is not None:
-    #         u_feedforward = cr_where_x0.u_offset + cr_where_x0.u_linear.dot(x0)
+    def optimal_value_function(self, x0):
+        cr_x0 = self.critical_regions.lookup(x0)
+        if cr_x0 is not None:
+            cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
+        else:
+            #print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+            cost = np.nan
+        return cost
 
-    #     # if unfeasible return nan
-    #     else:
-    #         print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
-    #         u_feedforward = np.zeros((self.G.shape[1], 1))
-    #         u_feedforward[:] = np.nan
-
-    #     return u_feedforward
-
-    # def feedback_explicit(self, x0):
-
-    #     # select only the first control of the feedforward
-    #     u_feedback = self.feedforward_explicit(x0)[0:self.sys.n_u]
-
-    #     return u_feedback
-
-    # def optimal_value_function(self, x0):
-
-    #     # check that the explicit solution is available
-    #     if self.critical_regions is None:
-    #         raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
-
-    #     # find the CR to which the given state belongs
-    #     cr_where_x0 = self.critical_regions.lookup(x0)
-
-    #     # derive explicit solution
-    #     if cr_where_x0 is not None:
-    #         V = cr_where_x0.V_offset + cr_where_x0.V_linear.dot(x0) + .5*x0.T.dot(cr_where_x0.V_quadratic).dot(x0)
-    #         V = V[0]
-    #     else:
-    #         V = np.nan
-
-    #     return V
-
-    # def merge_critical_regions(self):
-    #     self.u_offset_list = []
-    #     self.u_linear_list = []
-    #     self.cr_families = []
-    #     for cr in self.critical_regions:
-    #         cr_family = np.where(np.isclose(cr.u_offset[0], self.u_offset_list))[0]
-    #         if cr_family and all(np.isclose(cr.u_linear[0,:], self.u_linear_list[cr_family[0]])):
-    #             self.cr_families[cr_family[0]].append(cr)
-    #         else:
-    #             self.cr_families.append([cr])
-    #             self.u_offset_list.append(cr.u_offset[0])
-    #             self.u_linear_list.append(cr.u_linear[0,:])
-    #     print 'Critical regions merged in ', str(len(self.cr_families)), ' sets.'
-    #     return
-
-    # def plot_state_partition(self, active_set=False, facet_index=False, **kwargs):
-
-    #     if self.critical_regions is None:
-    #         raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
-
-    #     fig, ax = plt.subplots()
-    #     for cr in self.critical_regions:
-    #         cr.polytope.plot(facecolor=np.random.rand(3,1), **kwargs)
-    #         ax.autoscale_view()
-    #         if active_set:
-    #             plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
-    #         if facet_index:
-    #             for j in range(0, len(cr.polytope.minimal_facets)):
-    #                 plt.text(cr.polytope.facet_centers(j)[0], cr.polytope.facet_centers(j)[1], str(cr.polytope.minimal_facets[j]))
-    #     return
-
-    # def plot_merged_state_partition(self, active_set=False, first_input=False, facet_index=False, **kwargs):
-    #     self.merge_critical_regions()
-    #     fig, ax = plt.subplots()
-    #     for i, family in enumerate(self.cr_families):
-    #         color = np.random.rand(3,1)
-    #         for cr in family:
-    #             cr.polytope.plot(facecolor=color, **kwargs)
-    #             ax.autoscale_view()
-    #             if active_set:
-    #                 plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
-    #             if first_input:
-    #                 plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.u_linear[0,:])+str(cr.u_offset[0]))
-    #             if facet_index:
-    #                 for j in range(0, len(cr.polytope.minimal_facets)):
-    #                     plt.text(cr.polytope.facet_centers(j)[0], cr.polytope.facet_centers(j)[1], str(cr.polytope.minimal_facets[j]))
-
-    # def plot_optimal_value_function(self):
-    #     if self.critical_regions is None:
-    #         raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
-    #     vertices = np.zeros((0,2))
-    #     for cr in self.critical_regions:
-    #         vertices = np.vstack((vertices, cr.polytope.vertices))
-    #     x_max = max([vertex[0] for vertex in vertices])
-    #     x_min = min([vertex[0] for vertex in vertices])
-    #     y_max = max([vertex[1] for vertex in vertices])
-    #     y_min = min([vertex[1] for vertex in vertices])
-    #     x = np.arange(x_min, x_max, (x_max-x_min)/100.)
-    #     y = np.arange(y_min, y_max, (y_max-y_min)/100.)
-    #     X, Y = np.meshgrid(x, y)
-    #     zs = np.array([self.optimal_value_function(np.array([[x],[y]])) for x,y in zip(np.ravel(X), np.ravel(Y))])
-    #     Z = zs.reshape(X.shape)
-    #     cp = plt.contour(X, Y, Z)
-    #     plt.colorbar(cp)
-    #     plt.xlabel(r'$x_1$')
-    #     plt.ylabel(r'$x_2$')
-    #     plt.title(r'$V^*(x)$')
-    #     return
-
-
-
-
+    def group_critical_regions(self):
+        self.u_offset_list = []
+        self.u_linear_list = []
+        self.cr_families = []
+        for cr in self.critical_regions:
+            cr_family = np.where(np.isclose(cr.u_offset[0], self.u_offset_list))[0]
+            if cr_family and all(np.isclose(cr.u_linear[0,:], self.u_linear_list[cr_family[0]])):
+                self.cr_families[cr_family[0]].append(cr)
+            else:
+                self.cr_families.append([cr])
+                self.u_offset_list.append(cr.u_offset[0])
+                self.u_linear_list.append(cr.u_linear[0,:])
+        print 'Critical regions grouped in ', str(len(self.cr_families)), ' sets.'
+        return
 
 
 
@@ -281,16 +209,18 @@ class MPCHybridController:
         model.setParam('OutputFlag', False)
         model.optimize()
 
-        # return active set
+        # return solution
         if model.status != grb.GRB.Status.OPTIMAL:
             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
-            u_feedforward = [np.full((self.sys.n_u,1), np.nan) for i in range(self.N)]
+            u_feedforward = np.full((self.sys.n_u*self.N,1), np.nan)
+            cost = np.nan
+            switching_sequence = [np.nan]*self.N
         else:
-            #print model.objVal
-            u_feedforward = [np.array([[model.getAttr('x', u)[k,i]] for i in range(self.sys.n_u)]) for k in range(self.N)]
+            cost = model.objVal
+            u_feedforward = np.array([[model.getAttr('x', u)[k,i] for i in range(self.sys.n_u)] for k in range(self.N)])
             d_star = [np.array([[model.getAttr('x', d)[k,i]] for i in range(self.sys.n_sys)]) for k in range(self.N)]
             switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
-        return u_feedforward, switching_sequence
+        return u_feedforward, cost, switching_sequence
 
     def mip_objective(self, model, x_np, u_np):
 
@@ -314,73 +244,74 @@ class MPCHybridController:
                 for i in range(self.sys.n_u):
                     model.addConstr(psi[k,i] >= self.R[i,:].dot(u_np[k])[0])
                     model.addConstr(psi[k,i] >= - self.R[i,:].dot(u_np[k])[0])
-            model.addConstr(phi[self.N,i] >= self.P[i,:].dot(x_np[self.N])[0])
-            model.addConstr(phi[self.N,i] >= - self.P[i,:].dot(x_np[self.N])[0])
+            for i in range(self.sys.n_x):
+                model.addConstr(phi[self.N,i] >= self.P[i,:].dot(x_np[self.N])[0])
+                model.addConstr(phi[self.N,i] >= - self.P[i,:].dot(x_np[self.N])[0])
 
        # quadratic objective 
         elif self.objective_norm == 'two':
             V = 0.
             for k in range(self.N):
-                V += .5*(x_np[k].T.dot(self.Q).dot(x_np[k]) + u_np[k].T.dot(self.R).dot(u_np[k]))
-            V += .5*x_np[self.N].T.dot(self.P).dot(x_np[self.N])
+                V += x_np[k].T.dot(self.Q).dot(x_np[k]) + u_np[k].T.dot(self.R).dot(u_np[k])
+            V += x_np[self.N].T.dot(self.P).dot(x_np[self.N])
             model.setObjective(V[0,0])
 
         return model
 
     def mip_constraints(self, model, x_np, u_np, z, d):
 
-        # disjuction
-        for k in range(self.N):
-            model.addConstr(np.sum([d[k,i] for i in range(self.sys.n_sys)]) == 1.)
+        with suppress_stdout():
 
-        # relaxation of the domains
-        for k in range(self.N):
-            for i in range(self.sys.n_sys):
-                expr_x = self.sys.state_domains[i].lhs_min.dot(x_np[k]) - self.sys.state_domains[i].rhs_min
-                expr_u = self.sys.input_domains[i].lhs_min.dot(u_np[k]) - self.sys.input_domains[i].rhs_min
-                expr_xu = np.vstack((expr_x, expr_u))
-                expr_big_M = np.sum([self.big_M_domains[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                expr = expr_xu - expr_big_M
-                model.addConstrs((expr[j][0] <= 0. for j in range(len(expr))))
+            # disjuction
+            for k in range(self.N):
+                model.addConstr(np.sum([d[k,i] for i in range(self.sys.n_sys)]) == 1.)
 
-        # state transition
-        for k in range(self.N):
-            for j in range(self.sys.n_x):
-                expr = 0.
+            # relaxation of the domains
+            for k in range(self.N):
                 for i in range(self.sys.n_sys):
-                    expr += z[k,i,j]
-                model.addConstr(x_np[k+1][j,0] == expr)
+                    expr_x = self.sys.state_domains[i].lhs_min.dot(x_np[k]) - self.sys.state_domains[i].rhs_min
+                    expr_u = self.sys.input_domains[i].lhs_min.dot(u_np[k]) - self.sys.input_domains[i].rhs_min
+                    expr_xu = np.vstack((expr_x, expr_u))
+                    expr_big_M = np.sum([self.big_M_domains[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                    expr = expr_xu - expr_big_M
+                    model.addConstrs((expr[j][0] <= 0. for j in range(len(expr))))
 
-        # relaxation of the dynamics, part 1
-        for k in range(self.N):
-            for i in range(self.sys.n_sys):
-                expr_big_M = self.big_M_dynamics[i][i]*d[k,i]
-                expr_small_m = self.small_m_dynamics[i][i]*d[k,i]
+            # state transition
+            for k in range(self.N):
                 for j in range(self.sys.n_x):
-                    model.addConstr(z[k,i,j] <= expr_big_M[j,0])
-                    model.addConstr(z[k,i,j] >= expr_small_m[j,0])
-        
-        # relaxation of the dynamics, part 2
-        for k in range(self.N):
-            for i in range(self.sys.n_sys):
-                expr = self.sys.affine_systems[i].A.dot(x_np[k]) + self.sys.affine_systems[i].B.dot(u_np[k]) + self.sys.affine_systems[i].c
-                expr_big_M = expr - np.sum([self.big_M_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                expr_small_m = expr - np.sum([self.small_m_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                for j in range(self.sys.n_x):
-                    model.addConstr(z[k,i,j] >= expr_big_M[j,0])
-                    model.addConstr(z[k,i,j] <= expr_small_m[j,0])
+                    expr = 0.
+                    for i in range(self.sys.n_sys):
+                        expr += z[k,i,j]
+                    model.addConstr(x_np[k+1][j,0] == expr)
 
-        # terminal constraint
-        expr = self.X_N.lhs_min.dot(x_np[self.N]) - self.X_N.rhs_min
-        model.addConstrs((expr[i,0] <= 0. for i in range(len(self.X_N.minimal_facets))))
+            # relaxation of the dynamics, part 1
+            for k in range(self.N):
+                for i in range(self.sys.n_sys):
+                    expr_big_M = self.big_M_dynamics[i][i]*d[k,i]
+                    expr_small_m = self.small_m_dynamics[i][i]*d[k,i]
+                    for j in range(self.sys.n_x):
+                        model.addConstr(z[k,i,j] <= expr_big_M[j,0])
+                        model.addConstr(z[k,i,j] >= expr_small_m[j,0])
+            
+            # relaxation of the dynamics, part 2
+            for k in range(self.N):
+                for i in range(self.sys.n_sys):
+                    expr = self.sys.affine_systems[i].A.dot(x_np[k]) + self.sys.affine_systems[i].B.dot(u_np[k]) + self.sys.affine_systems[i].c
+                    expr_big_M = expr - np.sum([self.big_M_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                    expr_small_m = expr - np.sum([self.small_m_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                    for j in range(self.sys.n_x):
+                        model.addConstr(z[k,i,j] >= expr_big_M[j,0])
+                        model.addConstr(z[k,i,j] <= expr_small_m[j,0])
+
+            # terminal constraint
+            expr = self.X_N.lhs_min.dot(x_np[self.N]) - self.X_N.rhs_min
+            model.addConstrs((expr[i,0] <= 0. for i in range(len(self.X_N.minimal_facets))))
 
         return model
 
 
     def feedback(self, x0):
-        u_feedforward = self.feedforward(x0)[0]
-        u_feedback = u_feedforward[0]
-        return u_feedback
+        return self.feedforward(x0)[0][0:self.sys.n_u]
 
     def condense_program(self, switching_sequence):
         return OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
@@ -445,9 +376,107 @@ class MPCHybridController:
 
 
 
+class parametric_lp:
+
+    def __init__(self, F_u, F_x, F, C_u, C_x, C):
+        """
+        QP in the form:
+        min  \sum_i | (F_u u + F_x x + F)_i |
+        s.t. C_u u <= C_x x + C
+        """
+        self.F_u = F_u
+        self.F_x = F_x
+        self.F = F
+        self.C_u = C_u
+        self.C_x = C_x
+        self.C = C
+        return
+
+    def solve(self, x0):
+        n_slack = self.F.shape[0]
+        C_u_slack = np.vstack((
+            np.hstack((self.C_u, np.zeros((self.C_u.shape[0], n_slack)))),
+            np.hstack((self.F_u, -np.eye(n_slack))),
+            np.hstack((-self.F_u, -np.eye(n_slack)))
+            ))
+        C_x_slack = np.vstack((self.C_x, -self.F_x, self.F_x))
+        C_slack = np.vstack((self.C, -self.F, self.F))
+        f = np.vstack((
+            np.zeros((self.F_u.shape[1],1)),
+            np.ones((n_slack,1))
+            ))
+        A = C_u_slack
+        b = C_slack + C_x_slack.dot(x0)
+        u_star, V_star =  linear_program(f, A, b)
+        u_star = u_star[0:self.F_u.shape[1]]
+        return u_star, V_star
 
 
-######################
+class parametric_qp:
+
+    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):
+        """
+        QP in the form:
+        min  .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
+        s.t. C_u u <= C_x x + C
+        """
+        self.F_uu = F_uu
+        self.F_xx = F_xx
+        self.F_xu = F_xu
+        self.F_u = F_u
+        self.F_x = F_x
+        self.F = F
+        self.C_u = C_u
+        self.C_x = C_x
+        self.C = C
+        self._feasible_set = None
+        return
+
+    def solve(self, x0):
+        H = self.F_uu
+        f = x0.T.dot(self.F_xu) + self.F_u.T
+        A = self.C_u
+        b = self.C + self.C_x.dot(x0)
+        u_star, cost = quadratic_program(H, f, A, b)
+        cost += .5*x0.T.dot(self.F_xx).dot(x0) + self.F_x.T.dot(x0) + self.F
+        return u_star, cost[0,0]
+
+    def remove_linear_terms(self):
+        """
+        Applies the change of variables z = u + F_uu^-1 (F_xu' x + F_u')
+        """
+        self.H_inv = np.linalg.inv(self.F_uu)
+        self.H = self.F_uu
+        self.F_xx_q = (self.F_xx - self.F_xu.dot(self.H_inv).dot(self.F_xu.T))
+        self.F_x_q = self.F_x - self.F_u.T.dot(self.H_inv).dot(self.F_xu.T)
+        self.F_q = self.F - .5*self.F_u.T.dot(self.H_inv).dot(self.
+            F_u)
+        self.G = self.C_u
+        self.S = self.C_x + self.C_u.dot(self.H_inv).dot(self.F_xu.T)
+        self.W = self.C + self.C_u.dot(self.H_inv).dot(self.F_u)
+        return
+
+    @property
+    def feasible_set(self):
+        if self._feasible_set is None:
+            augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
+            augmented_polytope.assemble()
+            self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
+        return self._feasible_set
+
+
+
+### AUXILIARY FUNCTIONS
+
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:  
+            yield
+        finally:
+            sys.stdout = old_stdout
 
 def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
     N = len(switching_sequence)
@@ -523,89 +552,3 @@ def quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
     F = c_bar.T.dot(Q_bar).dot(c_bar)
     return F_uu, F_xu, F_xx, F_u, F_x, F
 
-
-class parametric_lp:
-
-    def __init__(self, F_u, F_x, F, C_u, C_x, C):
-        """
-        QP in the form:
-        min  \sum_i | (F_u u + F_x x + F)_i |
-        s.t. C_u u <= C_x x + C
-        """
-        self.F_u = F_u
-        self.F_x = F_x
-        self.F = F
-        self.C_u = C_u
-        self.C_x = C_x
-        self.C = C
-        return
-
-    def solve(self, x0):
-        n_slack = self.F.shape[0]
-        C_u_slack = np.vstack((
-            np.hstack((self.C_u, np.zeros((self.C_u.shape[0], n_slack)))),
-            np.hstack((self.F_u, -np.eye(n_slack))),
-            np.hstack((-self.F_u, -np.eye(n_slack)))
-            ))
-        C_x_slack = np.vstack((self.C_x, -self.F_x, self.F_x))
-        C_slack = np.vstack((self.C, -self.F, self.F))
-        f = np.vstack((
-            np.zeros((self.F_u.shape[1],1)),
-            np.ones((n_slack,1))
-            ))
-        A = C_u_slack
-        b = C_slack + C_x_slack.dot(x0)
-        u_star, V_star =  linear_program(f, A, b)
-        u_star = u_star[0:self.F_u.shape[1]]
-        return u_star, V_star
-
-
-class parametric_qp:
-
-    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):
-        """
-        QP in the form:
-        min  .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
-        s.t. C_u u <= C_x x + C
-        """
-        self.F_uu = F_uu
-        self.F_xx = F_xx
-        self.F_xu = F_xu
-        self.F_u = F_u
-        self.F_x = F_x
-        self.F = F
-        self.C_u = C_u
-        self.C_x = C_x
-        self.C = C
-        # self._feasible_set = None
-        return
-
-    def solve(self, x0):
-        H = self.F_uu
-        f = x0.T.dot(self.F_xu) + self.F_u.T
-        A = self.C_u
-        b = self.C + self.C_x.dot(x0)
-        return quadratic_program(H, f, A, b)
-
-    # @property
-    # def feasible_set(self):
-    #     if self._feasible_set is None:
-    #         augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
-    #         augmented_polytope.assemble()
-    #         self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
-    #     return self._feasible_set
-
-    # def remove_linear_terms(self):
-    #     """
-    #     Applies the change of variables z = u + F_uu^-1 (F_xu' x + F_u')
-    #     """
-    #     F_uu_inv = np.linalg.inv(self.F_uu)
-    #     self.F_uu_quad = self.F_uu
-    #     self.F_xx_quad = (self.F_xx - self.F_xu.dot(F_uu_inv).dot(self.F_xu.T))
-    #     self.F_x_quad = self.F_x - self.F_u.dot(F_uu_inv).dot(self.F_xu.T)
-    #     self.F_quad = self.F - .5*self.F_u.dot(F_uu_inv).dot(self.
-    #         F_u.T)
-    #     self.C_u_quad = self.C_u
-    #     self.C_x_quad = self.C_x + self.C_u.dot(F_uu_inv).dot(self.F_xu.T)
-    #     self.C_quad = self.C + self.C_u.dot(F_uu_inv).dot(self.F_u.T)
-    #     return

@@ -118,10 +118,17 @@ class DTPWASystem(object):
                     domain = i
                     sys = self.affine_systems[i]
                     x_next = sys.A.dot(x_list[k]) + sys.B.dot(u_list[k]) + sys.c
+                    if x_next.shape != x0.shape:
+                        raise ValueError('Something wrong with vector sizes in the simulation method.')
                     x_list.append(x_next)
                     break
             if domain is None:
-                raise ValueError('Unfeasible input sequence or initial state!')
+                error = 'Unfeasible '
+                if not self.state_domains[i].applies_to(x_list[k]):
+                    error += 'state ' + str(x_list[k].flatten()) + ' '
+                if not self.input_domains[i].applies_to(u_list[k]):
+                    error += 'input ' + str(u_list[k].flatten())
+                raise ValueError(error)
             else:
                 switching_sequence.append(domain)
         return x_list, switching_sequence
@@ -221,10 +228,7 @@ def moas_closed_loop(A, B, K, X, U):
 
 def moas(A, X):
     """
-    Returns the maximum output admissible set (see Gilbert, Tan - Linear Systems with State and
-    Control Constraints, The Theory and Application of Maximal Output Admissible Sets) for a
-    non-actuated linear system with state constraints (the output vector is supposed to be the
-    entire state of the system, i.e. y=x and C=I).
+    Returns the maximum output admissible set (see Gilbert, Tan - Linear Systems with State and Control Constraints, The Theory and Application of Maximal Output Admissible Sets) for a non-actuated linear system with state constraints (the output vector is supposed to be the entire state of the system, i.e. y=x and C=I).
 
     INPUTS:
         A: state transition matrix
@@ -269,112 +273,3 @@ def moas(A, X):
     moas.assemble()
 
     return moas
-
-
-### PLOT FUNCTIONS ###
-
-def plot_input_sequence(u_sequence, t_s, N, u_bounds=None):
-    """
-    Plots the input sequence and its bounds as functions of time.
-
-    INPUTS:
-        u_sequence: list with N inputs (2D numpy vectors) of dimension (n_u,1) each
-        t_s: sampling time
-        N: number of steps
-        u_bounds: list of bound on the input (2D numpy vectors of dimension (n_u,1))
-    """
-
-    # dimension of the input
-    n_u = u_sequence[0].shape[0]
-
-    # time axis
-    t = np.linspace(0,N*t_s,N+1)
-
-    # plot each input element separately
-    for i in range(n_u):
-        plt.subplot(n_u, 1, i+1)
-
-        # plot input sequence
-        u_i_sequence = [u_sequence[j][i] for j in range(0,N)]
-        input_plot, = plt.step(t, [u_i_sequence[0]] + u_i_sequence, 'b')
-
-        # plot bounds if provided
-        if u_bounds is not None:
-            for bound in u_bounds:
-                bound_plot, = plt.step(t, bound[i,0]*np.ones(t.shape), 'r')
-
-        # miscellaneous options
-        plt.ylabel(r'$u_{' + str(i+1) + '}$')
-        plt.xlim((0.,N*t_s))
-        if i == 0:
-            if u_bounds is not None:
-                plt.legend([input_plot, bound_plot], ['Optimal control', 'Control bounds'], loc=1)
-            else:
-                plt.legend([input_plot], ['Optimal control'], loc=1)
-    plt.xlabel(r'$t$')
-
-    return
-
-def plot_state_trajectory(x_trajectory, t_s, N, x_bounds=None):
-    """
-    Plots the state trajectory and its bounds as functions of time.
-
-    INPUTS:
-        x_trajectory: list with N+1 states (2D numpy vectors) of dimension (n_x,1) each
-        t_s: sampling time
-        N: number of steps
-        x_bounds: list of bound on the state (2D numpy vectors of dimension (n_x,1))
-    """
-
-    # dimension of the state
-    n_x = x_trajectory[0].shape[0]
-
-    # time axis
-    t = np.linspace(0,N*t_s,N+1)
-
-    # plot each state element separately
-    for i in range(n_x):
-        plt.subplot(n_x, 1, i+1)
-
-        # plot state trajectory
-        x_i_trajectory = [x_trajectory[j][i] for j in range(0,N+1)]
-        state_plot, = plt.plot(t, x_i_trajectory, 'b')
-
-        # plot bounds if provided
-        if x_bounds is not None:
-            for bound in x_bounds:
-                bound_plot, = plt.step(t, bound[i,0]*np.ones(t.shape),'r')
-
-        # miscellaneous options
-        plt.ylabel(r'$x_{' + str(i+1) + '}$')
-        plt.xlim((0.,N*t_s))
-        if i == 0:
-            if x_bounds is not None:
-                plt.legend([state_plot, bound_plot], ['Optimal trajectory', 'State bounds'], loc=1)
-            else:
-                plt.legend([state_plot], ['Optimal trajectory'], loc=1)
-    plt.xlabel(r'$t$')
-
-    return
-
-
-def plot_state_space_trajectory(x_trajectory, state_components=[0,1], **kwargs):
-    """
-    Plots the state trajectories as functions of time (2d plot).
-
-    INPUTS:
-        x_trajectory: state trajectory \in R^((N+1)*n_x)
-        N: time steps
-        state_components: components of the state vector to be plotted.
-    """
-    for k in range(len(x_trajectory)-1):
-        plt.plot([x_trajectory[k][state_components[0]], x_trajectory[k+1][state_components[0]]], [x_trajectory[k][state_components[1]], x_trajectory[k+1][state_components[1]]], **kwargs)
-        # plt.text(x_trajectory[k][0], x_trajectory[k][1], r'$x('+str(k)+')$')
-    # ax = plt.axes()
-    x_0 = (x_trajectory[0][state_components[0]][0], x_trajectory[0][state_components[1]][0])
-    plt.scatter(x_0[0], x_0[1], color='b')
-    plt.text(x_0[0], x_0[1], r'$x(0)$')
-    plt.xlabel(r'$x_{' + str(state_components[0]+1) + '}$')
-    plt.ylabel(r'$x_{' + str(state_components[1]+1) + '}$')
-    return
-

@@ -268,13 +268,13 @@ class CriticalRegion:
         self.z_linear = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_linear))
 
         # primal original variables explicit solution
-        self.u_offset = self.z_offset
-        self.u_linear = self.z_linear - np.linalg.inv(qp.H).dot(qp.F.T)
+        self.u_offset = self.z_offset - qp.H_inv.dot(qp.F_u)
+        self.u_linear = self.z_linear - qp.H_inv.dot(qp.F_xu.T)
 
-        # optimal value function explicit solution
-        self.V_offset = .5*self.u_offset.T.dot(qp.H).dot(self.u_offset)
-        self.V_linear = self.u_offset.T.dot(qp.H).dot(self.u_linear) + self.u_offset.T.dot(qp.F.T)
-        self.V_quadratic = self.u_linear.T.dot(qp.H).dot(self.u_linear) + qp.Q + 2.*qp.F.dot(self.u_linear)
+        # optimal value function explicit solution: V_star = .5 x' V_quadratic x + V_linear x + V_offset
+        self.V_quadratic = self.u_linear.T.dot(qp.F_uu).dot(self.u_linear) + qp.F_xx + 2.*qp.F_xu.dot(self.u_linear)
+        self.V_linear = self.u_offset.T.dot(qp.F_uu).dot(self.u_linear) + self.u_offset.T.dot(qp.F_xu.T) + qp.F_u.T.dot(self.u_linear) + qp.F_x.T
+        self.V_offset = .5*self.u_offset.T.dot(qp.F_uu).dot(self.u_offset) + qp.F_u.T.dot(self.u_offset) + qp.F
 
         # equation (12) (modified: only inactive indices considered)
         lhs_type_1 = G_I.dot(self.z_linear) - S_I
