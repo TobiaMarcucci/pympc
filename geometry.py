@@ -183,6 +183,9 @@ class Polytope:
         Calls qhull for determining the vertices of the polytope (it computes the vertices only when called).
         """
         if self._vertices is None:
+            if self.n_variables == 1:
+                self._vertices = [np.array([[self.rhs_min[i,0]/self.lhs_min[i,0]]]) for i in [0,1]]
+                return self._vertices
             if self.empty:
                 self._vertices = []
                 return self._vertices
@@ -201,15 +204,16 @@ class Polytope:
         """
         Projects the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
         """
-        
         vertices_proj = np.vstack(self.vertices)[:,dim_proj]
-        hull = spatial.ConvexHull(vertices_proj)
-        lhs = np.array(hull.equations)[:, :-1]
-        rhs = - (np.array(hull.equations)[:, -1]).reshape((lhs.shape[0], 1))
-        #print 't1:',time.time() - tic
+        if len(dim_proj) > 1:
+            hull = spatial.ConvexHull(vertices_proj)
+            lhs = np.array(hull.equations)[:, :-1]
+            rhs = - (np.array(hull.equations)[:, -1]).reshape((lhs.shape[0], 1))
+        else:
+            lhs = np.array([[1.],[-1.]])
+            rhs = np.array([[max(vertices_proj)[0]],[-min(vertices_proj)[0]]])
         projected_polytope = Polytope(lhs, rhs)
         projected_polytope.assemble()
-        #print 't2:',time.time() - tic
         return projected_polytope
 
 

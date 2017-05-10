@@ -50,7 +50,7 @@ class MPCController:
     def remove_intial_state_contraints(self, tol=1e-10):
         C_u_rows_norm = list(np.linalg.norm(self.condensed_program.C_u, axis=1))
         intial_state_contraints = [i for i, row_norm in enumerate(C_u_rows_norm) if row_norm < tol]
-        if len(intial_state_contraints) != self.X.lhs_min.shape[0]:
+        if len(intial_state_contraints) > self.X.lhs_min.shape[0]:
             raise ValueError('Wrong number of zero rows in the constrinats')
         self.condensed_program.C_u = np.delete(self.condensed_program.C_u,intial_state_contraints, 0)
         self.condensed_program.C_x = np.delete(self.condensed_program.C_x,intial_state_contraints, 0)
@@ -183,12 +183,9 @@ class MPCHybridController:
         model = grb.Model()
 
         # variables
-        lb_x = [[-grb.GRB.INFINITY]*(self.N+1)]*self.sys.n_x
-        lb_u = [[-grb.GRB.INFINITY]*self.N]*self.sys.n_u
-        lb_z = [[[-grb.GRB.INFINITY]*self.N]*self.sys.n_sys]*self.sys.n_x
-        x = model.addVars(self.N+1, self.sys.n_x, lb=lb_x, name='x')
-        u = model.addVars(self.N, self.sys.n_u, lb=lb_u, name='u')
-        z = model.addVars(self.N, self.sys.n_sys, self.sys.n_x, lb=lb_z, name='z')
+        x, model = grb_real_var(model, [self.N+1, self.sys.n_x])
+        u, model = grb_real_var(model, [self.N, self.sys.n_u])
+        z, model = grb_real_var(model, [self.N, self.sys.n_sys, self.sys.n_x])
         d = model.addVars(self.N, self.sys.n_sys, vtype=grb.GRB.BINARY, name='d')
         model.update()
 
@@ -309,52 +306,82 @@ class MPCHybridController:
 
         return model
 
-
     def feedback(self, x0):
         return self.feedforward(x0)[0][0:self.sys.n_u]
 
     def condense_program(self, switching_sequence):
+        if len(switching_sequence) != self.N:
+            raise ValueError('Switching sequence not coherent with the controller horizon.')
         return OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
 
+    def backward_reachability_analysis(self, switching_sequence):
+        if self.X_N is None:
+            raise ValueError('A terminal constraint is needed for the backward reachability analysis!')
+        if len(switching_sequence) != self.N:
+            raise ValueError('Switching sequence not coherent with the controller horizon.')
+        print('Computing feasible set for the switching sequence ' + str(switching_sequence))
+        tic = time.time()
+        feasible_set = self.X_N
+        A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
+        B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
+        c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
+        U_sequence = [self.sys.input_domains[switch] for switch in switching_sequence]
+        X_sequence = [self.sys.state_domains[switch] for switch in switching_sequence]
+        for i in range(self.N-1,-1,-1):
+            lhs_x = feasible_set.lhs_min.dot(A_sequence[i])
+            lhs_u = feasible_set.lhs_min.dot(B_sequence[i])
+            lhs = np.hstack((lhs_x, lhs_u))
+            rhs = feasible_set.rhs_min - feasible_set.lhs_min.dot(c_sequence[i])
+            feasible_set = Polytope(lhs, rhs)
+            lhs = linalg.block_diag(X_sequence[i].lhs_min, U_sequence[i].lhs_min)
+            rhs = np.vstack((X_sequence[i].rhs_min, U_sequence[i].rhs_min))
+            feasible_set.add_facets(lhs, rhs)
+            feasible_set.assemble()
+            feasible_set = feasible_set.orthogonal_projection(range(self.sys.n_x))
+        toc = time.time()
+        print('Feasible set computed in ' + str(toc-tic) + ' s')
+        return feasible_set
+
+    def plot_feasible_set(self, switching_sequence, **kwargs):
+        feasible_set = self.backward_reachability_analysis(switching_sequence)
+        feasible_set.plot(**kwargs)
+        plt.text(feasible_set.center[0], feasible_set.center[1], str(switching_sequence))
+        return
+
+    # def bound_optimal_value_function(self, switching_sequence, X):
+
+    #     prog = self.condense_program(switching_sequence)
+
+    #     # lower bound
+    #     H = np.vstack((
+    #         np.hstack((prog.F_xx, prog.F_xu)),
+    #         np.hstack((prog.F_xu.T, prog.F_uu))
+    #         ))
+    #     f = np.vstack((prog.F_x, prog.F_u))
+    #     A = np.vstack((
+    #         np.hstack((- prog.C_x, prog.C_u)),
+    #         np.hstack((X.lhs_min, np.zeros((X.lhs_min.shape[0], prog.C_u.shape[1]))))
+    #         ))
+    #     b = np.vstack((prog.C, X.rhs_min))
+    #     x_min, lb = quadratic_program(H, f, A, b)
+    #     #x_min = x_min[0:self.sys.n_x,:]
+    #     lb += prog.F[0,0]
+
+    #     # upper bound
+    #     cost_vertices = []
+    #     for vertex in X.vertices:
+    #         u_star, cost = prog.solve(vertex)
+    #         cost_vertices.append(cost)
+    #         # tol = 1.e-5
+    #         # residuals = np.abs(prog.C_u.dot(u_star) - prog.C_x.dot(vertex) - prog.C).flatten()
+    #         # active_set = np.where(residuals > tol)[0]
+    #     ub = max(cost_vertices)
+    #     return lb, ub
 
 
 
 
-    # def backward_reachability_analysis(self, switching_sequence):
-    #     tic = time.time()
-    #     if self.X_N is None:
-    #         print('A terminal constraint is needed for the backward reachability analysis!')
-    #         return
-    #     N = len(switching_sequence)
-    #     X = self.X_N
 
-    #     A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
-    #     B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
-    #     c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
-
-    #     U_sequence = [self.sys.U_list[switch] for switch in switching_sequence]
-    #     X_sequence = [self.sys.X_list[switch] for switch in switching_sequence]
-
-    #     for i in range(N-1,-1,-1):
-    #         lhs_x = X.lhs_min.dot(A_sequence[i])
-    #         lhs_u = X.lhs_min.dot(B_sequence[i])
-    #         lhs = np.hstack((lhs_x, lhs_u))
-    #         rhs = X.rhs_min - X.lhs_min.dot(c_sequence[i])
-    #         feasible_set = Polytope(lhs, rhs)
-    #         lhs = linalg.block_diag(X_sequence[i].lhs_min, U_sequence[i].lhs_min)
-    #         rhs = np.vstack((X_sequence[i].rhs_min, U_sequence[i].rhs_min))
-    #         feasible_set.add_facets(lhs, rhs)
-    #         feasible_set.assemble()
-    #         X = feasible_set.orthogonal_projection(range(self.sys.n_x))
-    #     toc = time.time()
-    #     print('Feasible set computed in ' + str(toc-tic) + ' s')
-    #     return X
-
-    # def plot_feasible_set(self, switching_sequence, **kwargs):
-    #     X = self.backward_reachability_analysis(switching_sequence)
-    #     X.plot(**kwargs)
-    #     plt.text(X.center[0], X.center[1], str(switching_sequence))
-    #     return
 
     # def plot_feasible_set(self, switching_sequence, **kwargs):
     #     tic = time.time()
@@ -380,7 +407,7 @@ class parametric_lp:
 
     def __init__(self, F_u, F_x, F, C_u, C_x, C):
         """
-        QP in the form:
+        LP in the form:
         min  \sum_i | (F_u u + F_x x + F)_i |
         s.t. C_u u <= C_x x + C
         """
@@ -390,24 +417,35 @@ class parametric_lp:
         self.C_u = C_u
         self.C_x = C_x
         self.C = C
+        self.add_slack_variables()
         return
 
-    def solve(self, x0):
+    def add_slack_variables(self):
+        """
+        Reformulates the LP as:
+        min f^T z
+        s.t. A z <= B x + c
+        """
         n_slack = self.F.shape[0]
-        C_u_slack = np.vstack((
+        n_u = self.F_u.shape[1]
+        self.f = np.vstack((
+            np.zeros((n_u,1)),
+            np.ones((n_slack,1))
+            ))
+        self.A = np.vstack((
             np.hstack((self.C_u, np.zeros((self.C_u.shape[0], n_slack)))),
             np.hstack((self.F_u, -np.eye(n_slack))),
             np.hstack((-self.F_u, -np.eye(n_slack)))
             ))
-        C_x_slack = np.vstack((self.C_x, -self.F_x, self.F_x))
-        C_slack = np.vstack((self.C, -self.F, self.F))
-        f = np.vstack((
-            np.zeros((self.F_u.shape[1],1)),
-            np.ones((n_slack,1))
-            ))
-        A = C_u_slack
-        b = C_slack + C_x_slack.dot(x0)
-        u_star, V_star =  linear_program(f, A, b)
+        self.B = np.vstack((self.C_x, -self.F_x, self.F_x))
+        self.c = np.vstack((self.C, -self.F, self.F))
+        self.n_var = n_u + n_slack
+        self.n_cons = self.A.shape[0]
+        return
+
+    def solve(self, x0):
+        x0 = np.reshape(x0, (x0.shape[0], 1))
+        u_star, V_star =  linear_program(self.f, self.A, self.B.dot(x0)+self.c)
         u_star = u_star[0:self.F_u.shape[1]]
         return u_star, V_star
 
@@ -416,7 +454,7 @@ class parametric_qp:
 
     def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):
         """
-        QP in the form:
+        Multiparametric QP in the form:
         min  .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
         s.t. C_u u <= C_x x + C
         """
@@ -433,6 +471,7 @@ class parametric_qp:
         return
 
     def solve(self, x0):
+        x0 = np.reshape(x0, (x0.shape[0], 1))
         H = self.F_uu
         f = x0.T.dot(self.F_xu) + self.F_u.T
         A = self.C_u
@@ -552,3 +591,9 @@ def quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
     F = c_bar.T.dot(Q_bar).dot(c_bar)
     return F_uu, F_xu, F_xx, F_u, F_x, F
 
+def grb_real_var(model, dimensions):
+    lb_x = [-grb.GRB.INFINITY]
+    for dimension in dimensions:
+        lb_x = [lb_x * dimension]
+    x = model.addVars(*dimensions, lb=lb_x, name='x')
+    return x, model
