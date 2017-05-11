@@ -4,8 +4,8 @@ python:
   - "2.7"
 notifications: 
   email: false
-install: "pip install -r requirements.txt"
-after_install: 
+install: 
+  - "pip install -r requirements.txt"
   - "pip install nose"
   - "touch gurobipy.py"
 script: "python -m nose pympc"
