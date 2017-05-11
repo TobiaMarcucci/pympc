@@ -44,7 +44,7 @@ class Polytope:
             raise ValueError('Polytope already assembled, cannot add facets!')
         self.A = np.vstack((self.A, A))
         self.b = np.vstack((self.b, b))
-        return
+        return self
 
     def add_bounds(self, x_max, x_min):
         if self.assembled:
@@ -53,7 +53,7 @@ class Polytope:
         A = np.vstack((np.eye(n_variables), -np.eye(n_variables)))
         b = np.vstack((x_max, -x_min))
         self.add_facets(A, b)
-        return
+        return self
 
     def assemble(self):
         if self.assembled:
@@ -72,7 +72,7 @@ class Polytope:
         self._facet_centers = [None] * len(self.minimal_facets)
         self._facet_radii = [None] * len(self.minimal_facets)
         self._vertices = None
-        return
+        return self
 
     def normalize(self, toll=1e-9):
         """
@@ -83,7 +83,7 @@ class Polytope:
             if norm_factor > toll:
                 self.A[i,:] = self.A[i,:]/norm_factor
                 self.b[i] = self.b[i]/norm_factor
-        return
+        return self
 
     def check_emptiness(self):
         """
