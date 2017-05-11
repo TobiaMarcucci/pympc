@@ -114,7 +114,7 @@ def state_partition(explicit_controller, active_set=False, facet_index=False, **
 
     fig, ax = plt.subplots()
     for cr in explicit_controller.critical_regions:
-        cr.polytope.plot(facecolor=np.random.rand(3,1), **kwargs)
+        cr.polytope.plot(facecolor=np.random.rand(3), **kwargs)
         ax.autoscale_view()
         if active_set:
             plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
@@ -127,7 +127,7 @@ def grouped_state_partition(explicit_controller, active_set=False, first_input=F
     explicit_controller.group_critical_regions()
     fig, ax = plt.subplots()
     for i, family in enumerate(explicit_controller.cr_families):
-        color = np.random.rand(3,1)
+        color = np.random.rand(3)
         for cr in family:
             cr.polytope.plot(facecolor=color, **kwargs)
             ax.autoscale_view()
