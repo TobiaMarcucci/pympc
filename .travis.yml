@@ -5,5 +5,7 @@ python:
 notifications: 
   email: false
 install: "pip install -r requirements.txt"
-after_install: "pip install nose"
+after_install: 
+  - "pip install nose"
+  - "touch gurobipy.py"
 script: "python -m nose pympc"
