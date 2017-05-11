@@ -1,1 +1,4 @@
 pyhull
+scipy
+numpy
+matplotlib
