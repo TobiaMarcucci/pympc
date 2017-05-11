@@ -6,10 +6,9 @@ import matplotlib.pyplot as plt
 import gurobipy as grb
 from contextlib import contextmanager
 from optimization.pnnls import linear_program
-from optimization.gurobi import quadratic_program
+from optimization.gurobi import quadratic_program, real_variable
 from geometry import Polytope
 from dynamical_systems import DTAffineSystem, DTPWASystem
-from mpcqp import CanonicalMPCQP
 from optimization.mpqpsolver import MPQPSolver
 
 
@@ -183,9 +182,9 @@ class MPCHybridController:
         model = grb.Model()
 
         # variables
-        x, model = grb_real_var(model, [self.N+1, self.sys.n_x])
-        u, model = grb_real_var(model, [self.N, self.sys.n_u])
-        z, model = grb_real_var(model, [self.N, self.sys.n_sys, self.sys.n_x])
+        x, model = real_variable(model, [self.N+1, self.sys.n_x])
+        u, model = real_variable(model, [self.N, self.sys.n_u])
+        z, model = real_variable(model, [self.N, self.sys.n_sys, self.sys.n_x])
         d = model.addVars(self.N, self.sys.n_sys, vtype=grb.GRB.BINARY, name='d')
         model.update()
 
@@ -590,10 +589,3 @@ def quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
     F_x = 2.*A_bar.T.dot(Q_bar).dot(c_bar)
     F = c_bar.T.dot(Q_bar).dot(c_bar)
     return F_uu, F_xu, F_xx, F_u, F_x, F
-
-def grb_real_var(model, dimensions):
-    lb_x = [-grb.GRB.INFINITY]
-    for dimension in dimensions:
-        lb_x = [lb_x * dimension]
-    x = model.addVars(*dimensions, lb=lb_x, name='x')
-    return x, model

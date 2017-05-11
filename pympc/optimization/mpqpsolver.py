@@ -2,10 +2,10 @@ import numpy as np
 import scipy.linalg as linalg
 import itertools
 import time
-from utils.ndpiecewise import NDPiecewise
+from pympc.ndpiecewise import NDPiecewise
 from pnnls import linear_program
 from gurobi import quadratic_program
-from mpc_tools.geometry import Polytope
+from pympc.geometry import Polytope
 
 class MPQPSolver:
     """

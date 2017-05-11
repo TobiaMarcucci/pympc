@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from mpc_tools.geometry import Polytope, chebyshev_center
+from pympc.geometry import Polytope, chebyshev_center
 import matplotlib.pyplot as plt
 
 
@@ -103,6 +103,33 @@ class TestGeometry(unittest.TestCase):
         self.assertTrue(p.bounded)
         true_vertices = [[.5,.5],[-.2,.5],[-.2,-1.],[.5,-1.]]
         self.assertTrue(all([any(np.all(np.isclose(vertex, true_vertices),axis=1)) for vertex in p.vertices]))
+
+        # intersection and inclusion
+        x_max = np.ones((2,1))
+        x_min = -x_max
+        p1 = Polytope.from_bounds(x_max, x_min)
+        p1.assemble()
+        x_max = np.ones((2,1))*2.
+        x_min = -x_max
+        p2 = Polytope.from_bounds(x_max, x_min)
+        p2.assemble()
+        x_min = np.zeros((2,1))
+        p3 = Polytope.from_bounds(x_max, x_min)
+        p3.assemble()
+        x_max = np.ones((2,1))*5.
+        x_min = np.ones((2,1))*4.
+        p4 = Polytope.from_bounds(x_max, x_min)
+        p4.assemble()
+
+        # intersection
+        self.assertTrue(p1.intesect_with(p2))
+        self.assertTrue(p1.intesect_with(p3))
+        self.assertFalse(p1.intesect_with(p4))
+
+        # inclusion
+        self.assertTrue(p1.included_in(p2))
+        self.assertFalse(p1.included_in(p3))
+        self.assertFalse(p1.included_in(p4))
 
         # # test fourier_motzkin_elimination
         # lhs = np.array([[1.,1.],[-1.,1.],[-1.,-9.]])

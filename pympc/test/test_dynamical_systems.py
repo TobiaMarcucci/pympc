@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
-from mpc_tools.dynamical_systems import DTLinearSystem, DTPWASystem, DTAffineSystem, dare, moas_closed_loop
-from mpc_tools.geometry import Polytope
+from pympc.dynamical_systems import DTLinearSystem, DTPWASystem, DTAffineSystem, dare, moas_closed_loop
+from pympc.geometry import Polytope
 
 class TestDynamicalSystems(unittest.TestCase):
 

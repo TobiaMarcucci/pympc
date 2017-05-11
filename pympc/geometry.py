@@ -1,6 +1,8 @@
 import numpy as np
 from optimization.pnnls import linear_program
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
+import gurobipy as grb
+from optimization.gurobi import point_inside_polyhedron, real_variable, iff_point_in_polyhedron
 import scipy.spatial as spatial
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
@@ -216,6 +218,89 @@ class Polytope:
         projected_polytope.assemble()
         return projected_polytope
 
+    def intersect_with(self, p):
+        """
+        Checks if the polytope intersect the other polytope p (returns True or False).
+        """
+        intersection = True
+        A = np.vstack((self.lhs_min, p.lhs_min))
+        b = np.vstack((self.rhs_min, p.rhs_min))
+        f = np.zeros((A.shape[1],1))
+        feasible_point = linear_program(f, A, b)[0]
+        if any(np.isnan(feasible_point)):
+            intersection = False
+        return intersection
+
+    def included_in(self, p, tol=1.e-6):
+        """
+        Checks if the polytope is a subset of the polytope p (returns True or False).
+        """
+        inclusion = True
+        for i in range(p.lhs_min.shape[0]):
+            penetration = - linear_program(-p.lhs_min[i,:], self.lhs_min, self.rhs_min)[1] - p.rhs_min[i]
+            if penetration > tol:
+                inclusion = False
+                break
+        return inclusion
+
+    def included_in_union_of(self, p_list):
+        """
+        Checks if the polytope is a subset of the union of the polytopes in p_list (returns True or False).
+        """
+
+        # check if it is included in one
+        for p in p_list:
+            if self.included_in(p):
+                return True
+
+        # list of polytope with which it has non-empty intersection
+        intersection_list = []
+        for i, p in enumerate(p_list):
+            if self.intersect_with(p):
+                intersection_list.append(i)
+        print intersection_list
+
+        # milp
+        model = grb.Model()
+        x, model = real_variable(model, [self.n_variables])
+
+        # domain
+        model = point_inside_polyhedron(model, self.lhs_min, self.rhs_min, x)
+
+        # point not in polyhedra
+        d = []
+        s = []
+        for i in intersection_list:
+            p = p_list[i]
+            model, d_i, s_i = iff_point_in_polyhedron(model, p.lhs_min, p.rhs_min, x, self)
+            d.append(d_i)
+            s.append(s_i)
+
+        # objective
+        objective = sum(d) + sum(s)
+        model.setObjective(objective)
+
+        # run optimization
+        model.setParam('OutputFlag', False)
+        model.optimize()
+
+        # return solution
+        inclusion = True
+        if model.status == grb.GRB.Status.OPTIMAL:
+            d_star = model.getAttr('x', d)
+            print 'cost', model.objVal
+            print 's', model.getAttr('x', s)
+            x_star = model.getAttr('x', x)[0]
+            print 'max residuals',[np.max(p_list[i].lhs_min*x_star - p_list[i].rhs_min) for i in intersection_list]
+            print 'd', d_star
+            print 'x', x_star
+
+            if round(sum(d_star)) == 0:
+                inclusion = False
+        else:
+            raise ValueError('Unfeasible milp')
+
+        return inclusion
 
     def plot(self, dim_proj=[0,1], largest_ball=False, **kwargs):
         """
@@ -408,10 +493,7 @@ class Polytope:
 
 
 
-
-
-
-
+### AUXILIARY FUNCTIONS
 
 def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     """

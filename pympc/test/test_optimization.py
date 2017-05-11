@@ -1,16 +1,14 @@
 import unittest
 import numpy as np
-from mpc_tools.optimization.pnnls import linear_program as lp_pnnls
-from mpc_tools.optimization.gurobi import linear_program as lp_gurobi
-from mpc_tools.optimization.drake import linear_program as lp_drake
-from mpc_tools.optimization.gurobi import quadratic_program as qp_gurobi
-from mpc_tools.optimization.drake import quadratic_program as qp_drake
+from pympc.optimization.pnnls import linear_program as lp_pnnls
+from pympc.optimization.gurobi import linear_program as lp_gurobi
+from pympc.optimization.gurobi import quadratic_program as qp_gurobi
 
 class TestMPCTools(unittest.TestCase):
 
     def test_linear_program(self):
 
-        for linear_program in [lp_pnnls, lp_gurobi, lp_drake]:
+        for linear_program in [lp_pnnls, lp_gurobi]:
 
             # trivial lp
             f = np.ones((2,1))
@@ -63,7 +61,7 @@ class TestMPCTools(unittest.TestCase):
 
     def test_quadratic_program(self):
 
-        for quadratic_program in [qp_gurobi, qp_drake]:
+        for quadratic_program in [qp_gurobi]:
 
             # trivial qp
             H = np.eye(2)

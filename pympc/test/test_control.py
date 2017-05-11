@@ -1,9 +1,9 @@
 import unittest
 import numpy as np
-import mpc_tools.dynamical_systems as ds
-from mpc_tools.optimization.mpqpsolver import CriticalRegion
-from mpc_tools.geometry import Polytope
-from mpc_tools.control import MPCController, MPCExplicitController, MPCHybridController
+import pympc.dynamical_systems as ds
+from pympc.optimization.mpqpsolver import CriticalRegion
+from pympc.geometry import Polytope
+from pympc.control import MPCController, MPCExplicitController, MPCHybridController
 
 
 class TestMPCTools(unittest.TestCase):
