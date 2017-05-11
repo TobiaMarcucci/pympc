@@ -8,4 +8,4 @@ install:
   - "pip install -r requirements.txt"
   - "pip install nose"
   - "touch gurobipy.py"
-script: "python -m nose pympc"
+script: "python -m nose pympc --exclude=test_MPCController --exclude=test__MPCHybridController --exclude=test_linear_program --exclude=test_quadratic_program"
