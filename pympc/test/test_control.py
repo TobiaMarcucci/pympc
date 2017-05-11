@@ -45,11 +45,11 @@ class TestMPCTools(unittest.TestCase):
         P, K = ds.dare(sys.A, sys.B, Q, R)
         u_max = np.array([[1.]])
         u_min = -u_max
-        U = Polytope.from_bounds(u_max, u_min)
+        U = Polytope.from_bounds(u_min, u_max)
         U.assemble()
         x_max = np.array([[1.], [1.]])
         x_min = -x_max
-        X = Polytope.from_bounds(x_max, x_min)
+        X = Polytope.from_bounds(x_min, x_max)
         X.assemble()
         X_N = ds.moas_closed_loop(sys.A, sys.B, K, X, U)
         controller = MPCController(sys, N, objective_norm, Q, R, P, X, U, X_N)
@@ -92,16 +92,16 @@ class TestMPCTools(unittest.TestCase):
         x_max_2 = np.array([[2.],[x_max_1[1,0]]])
         x_min_1 = -x_max_2
         x_min_2 = np.array([[x_max_1[0,0]], [x_min_1[1,0]]])
-        X_1 = Polytope.from_bounds(x_max_1, x_min_1)
+        X_1 = Polytope.from_bounds(x_min_1, x_max_1)
         X_1.assemble()
-        X_2 = Polytope.from_bounds(x_max_2, x_min_2)
+        X_2 = Polytope.from_bounds(x_min_2, x_max_2)
         X_2.assemble()
         X = [X_1, X_2]
 
         # PWA input domains
         u_max = np.array([[1.]])
         u_min = -u_max
-        U_1 = Polytope.from_bounds(u_max, u_min)
+        U_1 = Polytope.from_bounds(u_min, u_max)
         U_1.assemble()
         U_2 = U_1
         U = [U_1, U_2]

@@ -93,8 +93,8 @@ class TestGeometry(unittest.TestCase):
         # from_ and add_ methods
         x_max = np.ones((2,1))
         x_min = -x_max
-        p = Polytope.from_bounds(x_max, x_min)
-        p.add_bounds(x_max/2.,x_min*2.)
+        p = Polytope.from_bounds(x_min, x_max)
+        p.add_bounds(x_min*2.,x_max/2.)
         A = np.array([[-1.,0.],[0.,-1.]])
         b = np.array([[.2],[2.]])
         p.add_facets(A, b)
@@ -107,18 +107,18 @@ class TestGeometry(unittest.TestCase):
         # intersection and inclusion
         x_max = np.ones((2,1))
         x_min = -x_max
-        p1 = Polytope.from_bounds(x_max, x_min)
+        p1 = Polytope.from_bounds(x_min, x_max)
         p1.assemble()
         x_max = np.ones((2,1))*2.
         x_min = -x_max
-        p2 = Polytope.from_bounds(x_max, x_min)
+        p2 = Polytope.from_bounds(x_min, x_max)
         p2.assemble()
         x_min = np.zeros((2,1))
-        p3 = Polytope.from_bounds(x_max, x_min)
+        p3 = Polytope.from_bounds(x_min, x_max)
         p3.assemble()
         x_max = np.ones((2,1))*5.
         x_min = np.ones((2,1))*4.
-        p4 = Polytope.from_bounds(x_max, x_min)
+        p4 = Polytope.from_bounds(x_min, x_max)
         p4.assemble()
 
         # intersection

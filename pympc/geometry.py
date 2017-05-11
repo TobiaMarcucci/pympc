@@ -2,7 +2,8 @@ import numpy as np
 from optimization.pnnls import linear_program
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
 import gurobipy as grb
-from optimization.gurobi import point_inside_polyhedron, real_variable, iff_point_in_polyhedron
+from optimization.gurobi import point_inside_polyhedron, real_variable
+# from optimization.gurobi import iff_point_in_polyhedron
 import scipy.spatial as spatial
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
@@ -46,7 +47,7 @@ class Polytope:
         self.b = np.vstack((self.b, b))
         return self
 
-    def add_bounds(self, x_max, x_min):
+    def add_bounds(self, x_min, x_max):
         if self.assembled:
             raise ValueError('Polytope already assembled, cannot add bounds!')
         n_variables = x_max.shape[0]
@@ -243,64 +244,64 @@ class Polytope:
                 break
         return inclusion
 
-    def included_in_union_of(self, p_list):
-        """
-        Checks if the polytope is a subset of the union of the polytopes in p_list (returns True or False).
-        """
+    # def included_in_union_of(self, p_list):
+    #     """
+    #     Checks if the polytope is a subset of the union of the polytopes in p_list (returns True or False).
+    #     """
 
-        # check if it is included in one
-        for p in p_list:
-            if self.included_in(p):
-                return True
+    #     # check if it is included in one
+    #     for p in p_list:
+    #         if self.included_in(p):
+    #             return True
 
-        # list of polytope with which it has non-empty intersection
-        intersection_list = []
-        for i, p in enumerate(p_list):
-            if self.intersect_with(p):
-                intersection_list.append(i)
-        print intersection_list
+    #     # list of polytope with which it has non-empty intersection
+    #     intersection_list = []
+    #     for i, p in enumerate(p_list):
+    #         if self.intersect_with(p):
+    #             intersection_list.append(i)
+    #     print intersection_list
 
-        # milp
-        model = grb.Model()
-        x, model = real_variable(model, [self.n_variables])
+    #     # milp
+    #     model = grb.Model()
+    #     x, model = real_variable(model, [self.n_variables])
 
-        # domain
-        model = point_inside_polyhedron(model, self.lhs_min, self.rhs_min, x)
+    #     # domain
+    #     model = point_inside_polyhedron(model, self.lhs_min, self.rhs_min, x)
 
-        # point not in polyhedra
-        d = []
-        s = []
-        for i in intersection_list:
-            p = p_list[i]
-            model, d_i, s_i = iff_point_in_polyhedron(model, p.lhs_min, p.rhs_min, x, self)
-            d.append(d_i)
-            s.append(s_i)
+    #     # point not in polyhedra
+    #     d = []
+    #     s = []
+    #     for i in intersection_list:
+    #         p = p_list[i]
+    #         model, d_i, s_i = iff_point_in_polyhedron(model, p.lhs_min, p.rhs_min, x, self)
+    #         d.append(d_i)
+    #         s.append(s_i)
 
-        # objective
-        objective = sum(d) + sum(s)
-        model.setObjective(objective)
+    #     # objective
+    #     objective = sum(d) + sum(s)
+    #     model.setObjective(objective)
 
-        # run optimization
-        model.setParam('OutputFlag', False)
-        model.optimize()
+    #     # run optimization
+    #     model.setParam('OutputFlag', False)
+    #     model.optimize()
 
-        # return solution
-        inclusion = True
-        if model.status == grb.GRB.Status.OPTIMAL:
-            d_star = model.getAttr('x', d)
-            print 'cost', model.objVal
-            print 's', model.getAttr('x', s)
-            x_star = model.getAttr('x', x)[0]
-            print 'max residuals',[np.max(p_list[i].lhs_min*x_star - p_list[i].rhs_min) for i in intersection_list]
-            print 'd', d_star
-            print 'x', x_star
+    #     # return solution
+    #     inclusion = True
+    #     if model.status == grb.GRB.Status.OPTIMAL:
+    #         d_star = model.getAttr('x', d)
+    #         print 'cost', model.objVal
+    #         print 's', model.getAttr('x', s)
+    #         x_star = model.getAttr('x', x)[0]
+    #         print 'max residuals',[np.max(p_list[i].lhs_min*x_star - p_list[i].rhs_min) for i in intersection_list]
+    #         print 'd', d_star
+    #         print 'x', x_star
 
-            if round(sum(d_star)) == 0:
-                inclusion = False
-        else:
-            raise ValueError('Unfeasible milp')
+    #         if round(sum(d_star)) == 0:
+    #             inclusion = False
+    #     else:
+    #         raise ValueError('Unfeasible milp')
 
-        return inclusion
+    #     return inclusion
 
     def plot(self, dim_proj=[0,1], largest_ball=False, **kwargs):
         """
@@ -333,7 +334,7 @@ class Polytope:
         return
 
     @staticmethod
-    def from_bounds(x_max, x_min):
+    def from_bounds(x_min, x_max):
         """
         Returns a polytope defines through the its bounds.
 

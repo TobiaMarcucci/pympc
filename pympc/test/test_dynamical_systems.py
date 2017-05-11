@@ -34,11 +34,11 @@ class TestDynamicalSystems(unittest.TestCase):
         P, K = dare(sys.A, sys.B, Q, R)
         x_max = np.ones((2,1))
         x_min = - x_max
-        X = Polytope.from_bounds(x_max, x_min)
+        X = Polytope.from_bounds(x_min, x_max)
         X.assemble()
         u_max = np.ones((1,1))
         u_min = - u_max
-        U = Polytope.from_bounds(u_max, u_min)
+        U = Polytope.from_bounds(u_min, u_max)
         U.assemble()
         moas = moas_closed_loop(A, B, K, X, U)
         sys_cl = DTLinearSystem(A + B.dot(K), np.zeros((2,1)))
@@ -95,16 +95,16 @@ class TestDynamicalSystems(unittest.TestCase):
         x_max_2 = np.array([[.2],[x_max_1[1,0]]])
         x_min_1 = -x_max_2
         x_min_2 = np.array([[x_max_1[0,0]], [x_min_1[1,0]]])
-        X_1 = Polytope.from_bounds(x_max_1, x_min_1)
+        X_1 = Polytope.from_bounds(x_min_1, x_max_1)
         X_1.assemble()
-        X_2 = Polytope.from_bounds(x_max_2, x_min_2)
+        X_2 = Polytope.from_bounds(x_min_2, x_max_2)
         X_2.assemble()
         X = [X_1, X_2]
 
         # PWA input domains
         u_max = np.array([[4.]])
         u_min = -u_max
-        U_1 = Polytope.from_bounds(u_max, u_min)
+        U_1 = Polytope.from_bounds(u_min, u_max)
         U_1.assemble()
         U_2 = U_1
         U = [U_1, U_2]
