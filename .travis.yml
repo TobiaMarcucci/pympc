@@ -5,7 +5,10 @@ python:
 notifications: 
   email: false
 install: 
-  - "pip install -r requirements.txt"
-  - "pip install nose"
-  - "touch gurobipy.py"
-script: "python -m nose pympc --exclude=test_MPCController --exclude=test_MPCHybridController --exclude=test_linear_program --exclude=test_quadratic_program"
+  - pip install -r requirements.txt
+  - pip install nose
+  - pip install codecov
+  - touch gurobipy.py
+script: "python -m nose pympc --with-coverage --exclude=test_MPCController --exclude=test_MPCHybridController --exclude=test_linear_program --exclude=test_quadratic_program"
+after_success:
+  - codecov
