@@ -122,9 +122,9 @@ class TestGeometry(unittest.TestCase):
         p4.assemble()
 
         # intersection
-        self.assertTrue(p1.intesect_with(p2))
-        self.assertTrue(p1.intesect_with(p3))
-        self.assertFalse(p1.intesect_with(p4))
+        self.assertTrue(p1.intersect_with(p2))
+        self.assertTrue(p1.intersect_with(p3))
+        self.assertFalse(p1.intersect_with(p4))
 
         # inclusion
         self.assertTrue(p1.included_in(p2))
