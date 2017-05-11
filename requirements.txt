@@ -2,3 +2,4 @@ pyhull
 scipy
 numpy
 matplotlib
+gurobipy
