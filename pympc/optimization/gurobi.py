@@ -26,20 +26,22 @@ def linear_program(f, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
     x = model.addVars(n_x, lb=x_lb, ub=x_ub, name='x')
     x_np = np.array([[x[i]] for i in range(n_x)])
 
-    # inequality constraints
-    if A is not None and b is not None:
-        expr = A.dot(x_np) - b
-        model.addConstrs((expr[i,0] <= 0. for i in range(A.shape[0])))
+    with suppress_stdout():
 
-    # equality constraints
-    if C is not None and d is not None:
-        expr = C.dot(x_np) - d
-        model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
+        # inequality constraints
+        if A is not None and b is not None:
+            expr = A.dot(x_np) - b
+            model.addConstrs((expr[i,0] <= 0. for i in range(A.shape[0])))
 
-    # cost function
-    f = np.reshape(f, (n_x, 1))
-    V = f.T.dot(x_np)[0,0]
-    model.setObjective(V)
+        # equality constraints
+        if C is not None and d is not None:
+            expr = C.dot(x_np) - d
+            model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
+
+        # cost function
+        f = np.reshape(f, (n_x, 1))
+        V = f.T.dot(x_np)[0,0]
+        model.setObjective(V)
 
     # run the optimization
     model.setParam('OutputFlag', False)
@@ -148,7 +150,7 @@ def point_inside_polyhedron(model, A, b, x):
 
 #     # bigMs
 #     alpha = 0.
-#     beta = 1.1 # this has to be greater than 1 !!!
+#     beta = 0.
 #     for i in range(n_f):
 #         alpha_i = linear_program(A[i,:], X.lhs_min, X.rhs_min)[1] - b[i,0]
 #         beta_i = - linear_program(-A[i,:], X.lhs_min, X.rhs_min)[1] - b[i,0]
@@ -176,3 +178,53 @@ def point_inside_polyhedron(model, A, b, x):
 #     # model.addConstr(d <= (s-beta)/(1.-beta))
     
 #     return model, d, s
+
+def iff_point_in_halfspace(model, A, b, x, X, eps=1.e-4):
+    """
+    Adds to the model the logical constraint
+    [d = 1] <-> [A x <= b]
+    where H := {x | A x <= b} is an halfspace.
+    """
+    x_np = np.array([[x[i]] for i in range(len(x))])
+    d = model.addVar(vtype=grb.GRB.BINARY)
+    model.update()
+    m = linear_program(A.T, X.lhs_min, X.rhs_min)[1] - b[0,0]
+    M = - linear_program(- A.T, X.lhs_min, X.rhs_min)[1] - b[0,0]
+    expr = (A.dot(x_np) - b)[0,0]
+    model.addConstr(expr >= m*d + eps)
+    model.addConstr(expr <= M*(1.-d))
+    return model, d
+
+
+def iff_point_in_polyhedron(model, A, b, x, X):
+    """
+    Adds to the model the logical constraint
+    [d = 1] <-> [A x <= b]
+    where P := {x | A x <= b} is a polyhedron.
+    """
+    x_np = np.array([[x[i]] for i in range(len(x))])
+    d = model.addVar(vtype=grb.GRB.BINARY)
+    model.update()
+    n_f = A.shape[0]
+    d_list = []
+    for i in range(n_f):
+        model, d_i = iff_point_in_halfspace(model, A[i:i+1,:], b[i:i+1,:], x, X)
+        d_list.append(d_i)
+    model.addConstr(d >= sum(d_list) - n_f + .5)
+    model.addConstr(d <= sum(d_list)/n_f)
+
+    return model, d, d_list
+
+
+import sys, os
+from contextlib import contextmanager
+
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:  
+            yield
+        finally:
+            sys.stdout = old_stdout

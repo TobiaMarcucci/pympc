@@ -102,6 +102,8 @@ class DTPWASystem(object):
         self.n_x = affine_systems[0].n_x
         self.n_u = affine_systems[0].n_u
         self.n_sys = len(affine_systems)
+        self._x_min = None
+        self._x_max = None
         return
 
     def condense(self, switching_sequence):
@@ -132,6 +134,20 @@ class DTPWASystem(object):
             else:
                 switching_sequence.append(domain)
         return x_list, switching_sequence
+
+    @property
+    def x_min(self):
+        if self._x_min is None:
+            min_list = [X.x_min for X in self.state_domains]
+            self._x_min = np.array([[min([x[i,0] for x in min_list])] for i in range(self.n_x)])
+        return self._x_min
+
+    @property
+    def x_max(self):
+        if self._x_max is None:
+            max_list = [X.x_max for X in self.state_domains]
+            self._x_max = np.array([[max([x[i,0] for x in max_list])] for i in range(self.n_x)])
+        return self._x_max
 
 
 

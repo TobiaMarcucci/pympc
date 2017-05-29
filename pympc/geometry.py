@@ -1,8 +1,8 @@
 import numpy as np
-from optimization.pnnls import linear_program
+from optimization.gurobi import linear_program
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
 import gurobipy as grb
-from optimization.gurobi import point_inside_polyhedron, real_variable
+from optimization.gurobi import point_inside_polyhedron, real_variable, iff_point_in_halfspace
 # from optimization.gurobi import iff_point_in_polyhedron
 import scipy.spatial as spatial
 import matplotlib.pyplot as plt
@@ -73,6 +73,8 @@ class Polytope:
         self._facet_centers = [None] * len(self.minimal_facets)
         self._facet_radii = [None] * len(self.minimal_facets)
         self._vertices = None
+        self._x_min = None
+        self._x_max = None
         return self
 
     def normalize(self, toll=1e-9):
@@ -203,6 +205,30 @@ class Polytope:
             self._vertices += np.repeat(self.center.T, self._vertices.shape[0], axis=0)
         return self._vertices
 
+    @property
+    def x_min(self):
+        if self._x_min is None:
+            self._x_min = []
+            for i in range(self.n_variables):
+                f = np.zeros((self.n_variables, 1))
+                f[i,:] += 1.
+                x_min_i = linear_program(f, self.lhs_min, self.rhs_min)[1]
+                self._x_min.append([x_min_i])
+            self._x_min = np.array(self._x_min)
+        return self._x_min
+
+    @property
+    def x_max(self):
+        if self._x_max is None:
+            self._x_max = []
+            for i in range(self.n_variables):
+                f = np.zeros((self.n_variables, 1))
+                f[i,:] += 1.
+                x_max_i = -linear_program(-f, self.lhs_min, self.rhs_min)[1]
+                self._x_max.append([x_max_i])
+            self._x_max = np.array(self._x_max)
+        return self._x_max
+
     def orthogonal_projection(self, dim_proj):
         """
         Projects the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
@@ -243,6 +269,56 @@ class Polytope:
                 inclusion = False
                 break
         return inclusion
+
+    def included_in_union_of(self, p_list):
+        """
+        Checks if the polytope is a subset of the union of the polytopes in p_list (returns True or False).
+        """
+
+        # check if it is included in one
+        for p in p_list:
+            if self.included_in(p):
+                return True
+
+        # list of polytope with which it has non-empty intersection
+        intersection_list = []
+        for i, p in enumerate(p_list):
+            if self.intersect_with(p):
+                intersection_list.append(i)
+
+        # milp
+        model = grb.Model()
+        x, model = real_variable(model, [self.n_variables])
+
+        # domain
+        model = point_inside_polyhedron(model, self.lhs_min, self.rhs_min, x)
+
+        # point not in polyhedra
+        d = []
+        for i in intersection_list:
+            p_i = p_list[i]
+            d_i = []
+            for j in range(p_i.lhs_min.shape[0]):
+                model, d_ij = iff_point_in_halfspace(model, p_i.lhs_min[j:j+1,:], p_i.rhs_min[j:j+1,:], x, self)
+                d_i.append(d_ij)
+            model.addConstr(sum(d_i) <= len(d_i) - 1.)
+            d += d_i
+
+        # objective
+        model.setObjective(0.)
+
+        # run optimization
+        model.setParam('OutputFlag', False)
+        model.optimize()
+
+        # return solution
+        inclusion = True
+        if model.status == grb.GRB.Status.OPTIMAL:
+            inclusion = False
+
+        return inclusion
+
+
 
     # def included_in_union_of(self, p_list):
     #     """

@@ -231,7 +231,7 @@ class CriticalRegion:
         print 'Computing critical region for the active set ' + str(active_set)
         [self.n_constraints, self.n_parameters] = qp.S.shape
         self.active_set = active_set
-        self.inactive_set = sorted(list(set(range(0, self.n_constraints)) - set(active_set)))
+        self.inactive_set = sorted(list(set(range(self.n_constraints)) - set(active_set)))
 
         # find the polytope
         self.polytope(qp)
