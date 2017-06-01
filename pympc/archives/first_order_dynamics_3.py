@@ -10,54 +10,54 @@ import time
 
 t_s = .1
 
-A_0 = np.array([[-1.]])
-B_0 = np.array([[1.]])
-c_0 = np.array([[-2.]])
-sys_0 = ds.DTAffineSystem.from_continuous(A_0, B_0, c_0, t_s)
-
-A_1 = np.array([[1.]])
+A_1 = np.array([[-1.]])
 B_1 = np.array([[1.]])
-c_1 = np.array([[0.]])
+c_1 = np.array([[-2.]])
 sys_1 = ds.DTAffineSystem.from_continuous(A_1, B_1, c_1, t_s)
 
-A_2 = np.array([[-1.]])
+A_2 = np.array([[1.]])
 B_2 = np.array([[1.]])
-c_2 = np.array([[2.]])
+c_2 = np.array([[0.]])
 sys_2 = ds.DTAffineSystem.from_continuous(A_2, B_2, c_2, t_s)
 
-sys = [sys_0, sys_1, sys_2]
+A_3 = np.array([[-1.]])
+B_3 = np.array([[1.]])
+c_3 = np.array([[2.]])
+sys_3 = ds.DTAffineSystem.from_continuous(A_3, B_3, c_3, t_s)
+
+sys = [sys_1, sys_2, sys_3]
 
 # state domains
 
-x_min_0 = np.array([[-3.]])
-x_max_0 = np.array([[-1.]])
-X_0 = Polytope.from_bounds(x_min_0, x_max_0)
-X_0.assemble()
-
-x_min_1 = x_max_0
-x_max_1 =  - x_max_0
+x_min_1 = np.array([[-3.]])
+x_max_1 = np.array([[-1.]])
 X_1 = Polytope.from_bounds(x_min_1, x_max_1)
 X_1.assemble()
 
 x_min_2 = x_max_1
-x_max_2 = - x_min_0
+x_max_2 =  - x_max_1
 X_2 = Polytope.from_bounds(x_min_2, x_max_2)
 X_2.assemble()
 
-X = [X_0, X_1, X_2]
+x_min_3 = x_max_2
+x_max_3 = - x_min_1
+X_3 = Polytope.from_bounds(x_min_3, x_max_3)
+X_3.assemble()
+
+X = [X_1, X_2, X_3]
 
 # inoput domains
 
 u_max = np.array([[5.]])
 u_min = -u_max
 
-U_0 = Polytope.from_bounds(u_min, u_max)
-U_0.assemble()
+U_1 = Polytope.from_bounds(u_min, u_max)
+U_1.assemble()
 
-U_1 = U_0
-U_2 = U_0
+U_2 = U_1
+U_3 = U_1
 
-U = [U_0, U_1, U_2]
+U = [U_1, U_2, U_3]
 
 # pwa system
 
@@ -66,13 +66,13 @@ pwa_sys = ds.DTPWASystem(sys, X, U)
 # controller
 
 N = 10
-Q = np.eye(A_1.shape[0])
-R = np.eye(B_1.shape[1])
+Q = np.eye(A_2.shape[0])
+R = np.eye(B_2.shape[1])
 P = Q
 objective_norm = 'two'
 
-P, K = ds.dare(sys_1.A, sys_1.B, Q, R)
-X_N = ds.moas_closed_loop(sys_1.A, sys_1.B, K, X_1, U_1)
+P, K = ds.dare(sys_2.A, sys_2.B, Q, R)
+X_N = ds.moas_closed_loop(sys_2.A, sys_2.B, K, X_2, U_2)
 
 controller = MPCHybridController(pwa_sys, N, objective_norm, Q, R, P, X_N)
 
@@ -87,30 +87,19 @@ policy.sample_policy_randomly(n_samples)
 terminal_domain = 1
 policy.add_shifted_sequences(terminal_domain)
 
-# upper bounds
+# bounds
 
 policy.add_vertices_of_feasible_regions()
 policy.bound_cost_from_above()
+policy.bound_cost_from_below()
 
-# lower bounds
-
-for ss, ss_values in policy.library.items():
-    for as_values in ss_values['active_sets'].values():
-        for i, x in enumerate(as_values['x']):
-            if as_values['optimal'][i]:
-                fss = policy.feasible_switching_sequences(x)
-                fss.remove(ss)
-                for ss_lb in fss:
-                    lb = policy.get_lower_bound(ss_lb, x)
-                    if lb < as_values['V'][i]:
-                        policy.sample_policy([x], ss_lb, True)
 
 ### plot
 
 # sample hybrid optuimal value function
 
-x_lb = x_min_0
-x_ub = x_max_2
+x_lb = x_min_1
+x_ub = x_max_3
 n_samples = 100
 x_samples = list(np.linspace(x_lb[0,0], x_ub[0,0], n_samples))
 V_samples = [controller.feedforward(np.array([[x]]))[1] for x in x_samples]
@@ -154,7 +143,7 @@ x = []
 u_miqp = []
 my_times = []
 miqp_times = []
-x.append(x_0)
+x.append(x_1)
 for k in range(N_sim):
     tic = time.time()
     u.append(policy.feedback(x[k]))
@@ -175,5 +164,5 @@ print 'max feedback error', max([np.linalg.norm(u[i] - u_miqp[i]) for i in range
 
 mpc_plt.input_sequence(u, t_s, N_sim, (u_min, u_max))
 plt.show()
-mpc_plt.state_trajectory(x, t_s, N_sim, (x_min_0, x_min_1, x_min_2, x_max_2))
+mpc_plt.state_trajectory(x, t_s, N_sim, (x_min_1, x_min_2, x_min_3, x_max_3))
 plt.show()

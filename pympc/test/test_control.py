@@ -3,7 +3,7 @@ import numpy as np
 import pympc.dynamical_systems as ds
 from pympc.optimization.mpqpsolver import CriticalRegion
 from pympc.geometry import Polytope
-from pympc.control import MPCController, MPCExplicitController, MPCHybridController
+from pympc.control import MPCController, MPCHybridController
 
 
 class TestMPCTools(unittest.TestCase):
@@ -55,13 +55,14 @@ class TestMPCTools(unittest.TestCase):
         controller = MPCController(sys, N, objective_norm, Q, R, P, X, U, X_N)
 
         # explicit vs implicit solution + feasibility region
-        mpqp = controller.condensed_program
-        explicit_controller = MPCExplicitController(mpqp)
+        controller.get_explicit_solution()
         n_test = 100
         for i in range(n_test):
             x0 = np.random.rand(2,1)
-            u_explicit, V_explicit = controller.feedforward(x0)
+            u_explicit, V_explicit = controller.feedforward_explicit(x0)
             u_implicit, V_implicit = controller.feedforward(x0)
+            u_explicit = np.vstack(u_explicit)
+            u_implicit = np.vstack(u_implicit)
             if any(np.isnan(u_explicit)) or any(np.isnan(u_implicit)):
                 self.assertTrue(all(np.isnan(u_explicit)))
                 self.assertTrue(all(np.isnan(u_implicit)))
@@ -69,8 +70,8 @@ class TestMPCTools(unittest.TestCase):
                 self.assertTrue(np.isnan(V_implicit))
                 self.assertFalse(controller.condensed_program.feasible_set.applies_to(x0))
             else:
-                self.assertTrue(all(np.isclose(u_explicit, u_implicit).flatten()))
-                self.assertTrue(np.isclose(V_explicit, V_implicit))
+                self.assertTrue(all(np.isclose(u_explicit, u_implicit, rtol=1.e-04).flatten()))
+                self.assertTrue(np.isclose(V_explicit, V_implicit, rtol=1.e-04))
                 self.assertTrue(controller.condensed_program.feasible_set.applies_to(x0))
 
     def test_MPCHybridController(self):

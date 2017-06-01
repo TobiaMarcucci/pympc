@@ -32,6 +32,7 @@ class MPCController:
         else:
             self.X_N = X_N
         self.condense_program()
+        self.critical_regions = None
         return
 
     def condense_program(self):
@@ -58,40 +59,41 @@ class MPCController:
 
     def feedforward(self, x0):
         u_feedforward, cost = self.condensed_program.solve(x0)
+        u_feedforward = [u_feedforward[self.sys.n_u*i:self.sys.n_u*(i+1),:] for i in range(self.N)]
         if any(np.isnan(u_feedforward).flatten()):
             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
         return u_feedforward, cost
 
     def feedback(self, x0):
-        u_feedforward = self.feedforward(x0)[0]
-        u_feedback = u_feedforward[0:self.sys.n_u]
-        return u_feedback
+        return self.feedforward(x0)[0][0]
 
-class MPCExplicitController:
-
-    def __init__(self, mpqp):
-        mpqp.remove_linear_terms()
-        self.mpqp = mpqp
-        mpqp_solution = MPQPSolver(mpqp)
+    def get_explicit_solution(self):
+        self.condensed_program.remove_linear_terms()
+        mpqp_solution = MPQPSolver(self.condensed_program)
         self.critical_regions = mpqp_solution.critical_regions
         return
 
-    def feedforward(self, x0):
+    def feedforward_explicit(self, x0):
+        if self.critical_regions is None:
+            raise ValueError('Explicit solution not available, call .get_explicit_solution()')
         cr_x0 = self.critical_regions.lookup(x0)
         if cr_x0 is not None:
             u_feedforward = cr_x0.u_offset + cr_x0.u_linear.dot(x0)
+            u_feedforward = [u_feedforward[self.sys.n_u*i:self.sys.n_u*(i+1),:] for i in range(self.N)]
             cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
             cost = cost[0,0]
         else:
             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
-            u_feedforward = np.full((self.mpqp.G.shape[1], 1), np.nan)
+            u_feedforward = [np.full((self.sys.n_u, 1), np.nan) for i in range(self.N)]
             cost = np.nan
         return u_feedforward, cost
 
-    def feedback(self, x0):
-        return self.feedforward(x0)[0:self.sys.n_u]
+        def feedback_explicit(self, x0):
+            return self.feedforward(x0)[0][0]
 
     def optimal_value_function(self, x0):
+        if self.critical_regions is None:
+            raise ValueError('Explicit solution not available, call .get_explicit_solution()')
         cr_x0 = self.critical_regions.lookup(x0)
         if cr_x0 is not None:
             cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
@@ -100,20 +102,69 @@ class MPCExplicitController:
             cost = np.nan
         return cost
 
-    def group_critical_regions(self):
-        self.u_offset_list = []
-        self.u_linear_list = []
-        self.cr_families = []
-        for cr in self.critical_regions:
-            cr_family = np.where(np.isclose(cr.u_offset[0], self.u_offset_list))[0]
-            if cr_family and all(np.isclose(cr.u_linear[0,:], self.u_linear_list[cr_family[0]])):
-                self.cr_families[cr_family[0]].append(cr)
-            else:
-                self.cr_families.append([cr])
-                self.u_offset_list.append(cr.u_offset[0])
-                self.u_linear_list.append(cr.u_linear[0,:])
-        print 'Critical regions grouped in ', str(len(self.cr_families)), ' sets.'
-        return
+    # def group_critical_regions(self):
+    #     self.u_offset_list = []
+    #     self.u_linear_list = []
+    #     self.cr_families = []
+    #     for cr in self.critical_regions:
+    #         cr_family = np.where(np.isclose(cr.u_offset[0], self.u_offset_list))[0]
+    #         if cr_family and all(np.isclose(cr.u_linear[0,:], self.u_linear_list[cr_family[0]])):
+    #             self.cr_families[cr_family[0]].append(cr)
+    #         else:
+    #             self.cr_families.append([cr])
+    #             self.u_offset_list.append(cr.u_offset[0])
+    #             self.u_linear_list.append(cr.u_linear[0,:])
+    #     print 'Critical regions grouped in ', str(len(self.cr_families)), ' sets.'
+    #     return
+
+
+# class MPCExplicitController:
+
+#     def __init__(self, mpqp):
+#         mpqp.remove_linear_terms()
+#         self.mpqp = mpqp
+#         mpqp_solution = MPQPSolver(mpqp)
+#         self.critical_regions = mpqp_solution.critical_regions
+#         return
+
+#     def feedforward(self, x0):
+#         cr_x0 = self.critical_regions.lookup(x0)
+#         if cr_x0 is not None:
+#             u_feedforward = cr_x0.u_offset + cr_x0.u_linear.dot(x0)
+#             cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
+#             cost = cost[0,0]
+#         else:
+#             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+#             u_feedforward = np.full((self.mpqp.G.shape[1], 1), np.nan)
+#             cost = np.nan
+#         return u_feedforward, cost
+
+#     # def feedback(self, x0): # now i don't know n_u anymore!
+#     #     return self.feedforward(x0)[0:self.sys.n_u]
+
+#     def optimal_value_function(self, x0):
+#         cr_x0 = self.critical_regions.lookup(x0)
+#         if cr_x0 is not None:
+#             cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
+#         else:
+#             #print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+#             cost = np.nan
+#         return cost
+
+#     def group_critical_regions(self):
+#         self.u_offset_list = []
+#         self.u_linear_list = []
+#         self.cr_families = []
+#         for cr in self.critical_regions:
+#             cr_family = np.where(np.isclose(cr.u_offset[0], self.u_offset_list))[0]
+#             if cr_family and all(np.isclose(cr.u_linear[0,:], self.u_linear_list[cr_family[0]])):
+#                 self.cr_families[cr_family[0]].append(cr)
+#             else:
+#                 self.cr_families.append([cr])
+#                 self.u_offset_list.append(cr.u_offset[0])
+#                 self.u_linear_list.append(cr.u_linear[0,:])
+#         print 'Critical regions grouped in ', str(len(self.cr_families)), ' sets.'
+#         return
 
 
 
@@ -127,53 +178,62 @@ class MPCHybridController:
         self.R = R
         self.P = P
         self.X_N = X_N
-        self.compute_big_M_domains()
-        self.compute_big_M_dynamics()
+        self.compute_M_domains()
+        self.compute_M_dynamics()
         return
 
-    def compute_big_M_domains(self):
-        self.big_M_domains = []
+    def compute_M_domains(self):#, M_min=1.):
+        """
+        Denoting with s the number of affine systems, M_domains is a list with s elements, each element has other s elements, each one of these is a bigM vector.
+        """
+        self.M_domains = []
         for i in range(self.sys.n_sys):
-            big_M_i = []
+            M_i = []
             lhs_i = linalg.block_diag(self.sys.state_domains[i].lhs_min, self.sys.input_domains[i].lhs_min)
             rhs_i = np.vstack((self.sys.state_domains[i].rhs_min, self.sys.input_domains[i].rhs_min))
             for j in range(self.sys.n_sys):
-                big_M_ij = []
+                M_ij = []
                 if i != j:
                     lhs_j = linalg.block_diag(self.sys.state_domains[j].lhs_min, self.sys.input_domains[j].lhs_min)
                     rhs_j = np.vstack((self.sys.state_domains[j].rhs_min, self.sys.input_domains[j].rhs_min))
                     for k in range(lhs_i.shape[0]):
-                        big_M_ijk = - linear_program(-lhs_i[k,:], lhs_j, rhs_j)[1] - rhs_i[k]
-                        big_M_ij.append(big_M_ijk[0])
-                big_M_ij = np.reshape(big_M_ij, (len(big_M_ij), 1))
-                big_M_i.append(big_M_ij)
-            self.big_M_domains.append(big_M_i)
+                        M_ijk = (- linear_program(-lhs_i[k,:], lhs_j, rhs_j)[1] - rhs_i[k])[0]
+                        #M_ijk += 100.
+                        #M_ijk = max(M_ijk, M_min)
+                        M_ij.append(M_ijk)
+                M_ij = np.reshape(M_ij, (len(M_ij), 1))
+                M_i.append(M_ij)
+            self.M_domains.append(M_i)
         return
 
-    def compute_big_M_dynamics(self):
-        self.big_M_dynamics = []
-        self.small_m_dynamics = []
+    def compute_M_dynamics(self):#, M_min=1., m_max=-1.):
+        self.M_dynamics = []
+        self.m_dynamics = []
         for i in range(self.sys.n_sys):
-            big_M_i = []
-            small_m_i = []
+            M_i = []
+            m_i = []
             lhs_i = np.hstack((self.sys.affine_systems[i].A, self.sys.affine_systems[i].B))
             rhs_i = self.sys.affine_systems[i].c
             for j in range(self.sys.n_sys):
-                big_M_ij = []
-                small_m_ij = []
+                M_ij = []
+                m_ij = []
                 lhs_j = linalg.block_diag(self.sys.state_domains[j].lhs_min, self.sys.input_domains[j].lhs_min)
                 rhs_j = np.vstack((self.sys.state_domains[j].rhs_min, self.sys.input_domains[j].rhs_min))
                 for k in range(lhs_i.shape[0]):
-                    big_M_ijk = - linear_program(-lhs_i[k,:], lhs_j, rhs_j)[1] + rhs_i[k]
-                    big_M_ij.append(big_M_ijk[0])
-                    small_m_ijk = linear_program(lhs_i[k,:], lhs_j, rhs_j)[1] + rhs_i[k]
-                    small_m_ij.append(small_m_ijk[0])
-                big_M_ij = np.reshape(big_M_ij, (len(big_M_ij), 1))
-                small_m_ij = np.reshape(small_m_ij, (len(small_m_ij), 1))
-                big_M_i.append(big_M_ij)
-                small_m_i.append(np.array(small_m_ij))
-            self.big_M_dynamics.append(big_M_i)
-            self.small_m_dynamics.append(small_m_i)
+                    M_ijk = (- linear_program(-lhs_i[k,:], lhs_j, rhs_j)[1] + rhs_i[k])[0]
+                    #M_ijk += 100.
+                    #M_ijk = max(M_ijk, M_min)
+                    M_ij.append(M_ijk)
+                    m_ijk = (linear_program(lhs_i[k,:], lhs_j, rhs_j)[1] + rhs_i[k])[0]
+                    #m_ijk -= 100.
+                    #m_ijk = min(m_ijk, m_max)
+                    m_ij.append(m_ijk)
+                M_ij = np.reshape(M_ij, (len(M_ij), 1))
+                m_ij = np.reshape(m_ij, (len(m_ij), 1))
+                M_i.append(M_ij)
+                m_i.append(np.array(m_ij))
+            self.M_dynamics.append(M_i)
+            self.m_dynamics.append(m_i)
         return
 
     def feedforward(self, x0):
@@ -201,22 +261,31 @@ class MPCHybridController:
         # set constraints
         model = self.mip_constraints(model, x_np, u_np, z, d)
 
-        # run optimization
+        # set parameters
         model.setParam('OutputFlag', False)
+        model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
+        model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
+        model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
+        model.setParam(grb.GRB.Param.MIPGap, 1.e-9)
+
+        # run optimization
         model.optimize()
 
         # return solution
         if model.status != grb.GRB.Status.OPTIMAL:
             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
-            u_feedforward = np.full((self.sys.n_u*self.N,1), np.nan)
+            u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
+            # x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
             cost = np.nan
             switching_sequence = [np.nan]*self.N
         else:
             cost = model.objVal
-            u_feedforward = np.array([[model.getAttr('x', u)[k,i] for i in range(self.sys.n_u)] for k in range(self.N)])
+            u_feedforward = [np.array([[model.getAttr('x', u)[k,i]] for i in range(self.sys.n_u)]) for k in range(self.N)]
+            # x_trajectory = [np.array([[model.getAttr('x', x)[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
+            # u_feedforward = np.array([[model.getAttr('x', u)[k,i] for i in range(self.sys.n_u)] for k in range(self.N)])
             d_star = [np.array([[model.getAttr('x', d)[k,i]] for i in range(self.sys.n_sys)]) for k in range(self.N)]
             switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
-        return u_feedforward, cost, tuple(switching_sequence)
+        return u_feedforward, cost, tuple(switching_sequence)#, x_trajectory
 
     def mip_objective(self, model, x_np, u_np):
 
@@ -268,8 +337,8 @@ class MPCHybridController:
                     expr_x = self.sys.state_domains[i].lhs_min.dot(x_np[k]) - self.sys.state_domains[i].rhs_min
                     expr_u = self.sys.input_domains[i].lhs_min.dot(u_np[k]) - self.sys.input_domains[i].rhs_min
                     expr_xu = np.vstack((expr_x, expr_u))
-                    expr_big_M = np.sum([self.big_M_domains[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                    expr = expr_xu - expr_big_M
+                    expr_M = np.sum([self.M_domains[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                    expr = expr_xu - expr_M
                     model.addConstrs((expr[j][0] <= 0. for j in range(len(expr))))
 
             # state transition
@@ -283,21 +352,21 @@ class MPCHybridController:
             # relaxation of the dynamics, part 1
             for k in range(self.N):
                 for i in range(self.sys.n_sys):
-                    expr_big_M = self.big_M_dynamics[i][i]*d[k,i]
-                    expr_small_m = self.small_m_dynamics[i][i]*d[k,i]
+                    expr_M = self.M_dynamics[i][i]*d[k,i]
+                    expr_m = self.m_dynamics[i][i]*d[k,i]
                     for j in range(self.sys.n_x):
-                        model.addConstr(z[k,i,j] <= expr_big_M[j,0])
-                        model.addConstr(z[k,i,j] >= expr_small_m[j,0])
+                        model.addConstr(z[k,i,j] <= expr_M[j,0])
+                        model.addConstr(z[k,i,j] >= expr_m[j,0])
             
             # relaxation of the dynamics, part 2
             for k in range(self.N):
                 for i in range(self.sys.n_sys):
                     expr = self.sys.affine_systems[i].A.dot(x_np[k]) + self.sys.affine_systems[i].B.dot(u_np[k]) + self.sys.affine_systems[i].c
-                    expr_big_M = expr - np.sum([self.big_M_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                    expr_small_m = expr - np.sum([self.small_m_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                    expr_M = expr - np.sum([self.M_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                    expr_m = expr - np.sum([self.m_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
                     for j in range(self.sys.n_x):
-                        model.addConstr(z[k,i,j] >= expr_big_M[j,0])
-                        model.addConstr(z[k,i,j] <= expr_small_m[j,0])
+                        model.addConstr(z[k,i,j] >= expr_M[j,0])
+                        model.addConstr(z[k,i,j] <= expr_m[j,0])
 
             # terminal constraint
             expr = self.X_N.lhs_min.dot(x_np[self.N]) - self.X_N.rhs_min
@@ -306,7 +375,8 @@ class MPCHybridController:
         return model
 
     def feedback(self, x0):
-        return self.feedforward(x0)[0][0:self.sys.n_u]
+        return self.feedforward(x0)[0][0]
+
 
     def condense_program(self, switching_sequence):
         if len(switching_sequence) != self.N:
@@ -512,12 +582,25 @@ class HybridPolicyLibrary:
                 self.add_sample_to_library(x, u, V, ss)
         return
 
+    # def bound_cost_from_below(self):
+    #     for ss, ss_values in self.library.items():
+    #         ss_values['lower_bound_planes'] = []
+    #         for active_set, as_values in ss_values['active_sets'].items():
+    #             plane_list = ss_values['program'].get_cost_sensitivity(as_values['x'], active_set)
+    #             ss_values['lower_bound_planes'] += plane_list
+    #     return
+
     def bound_cost_from_below(self):
         for ss, ss_values in self.library.items():
-            ss_values['lower_bound_planes'] = []
-            for active_set, as_values in ss_values['active_sets'].items():
-                plane_list = ss_values['program'].get_cost_sensitivity(as_values['x'], active_set)
-                ss_values['lower_bound_planes'] += plane_list
+            for as_values in ss_values['active_sets'].values():
+                for i, x in enumerate(as_values['x']):
+                    if as_values['optimal'][i]:
+                        fss = self.feasible_switching_sequences(x)
+                        fss.remove(ss)
+                        for ss_lb in fss:
+                            lb = self.get_lower_bound(ss_lb, x)
+                            if lb < as_values['V'][i]:
+                                self.sample_policy([x], ss_lb, True)
         return
 
     def bound_cost_from_above(self):
@@ -530,7 +613,7 @@ class HybridPolicyLibrary:
                 vertices_active_set = [np.vstack((as_values['x'][i], np.array([[as_values['V'][i]]]))) for i in range(len(as_values['x']))]
                 vertices += vertices_active_set
 
-            # porcata
+            # add an auxiliary vetex when the number of samples in not enough to generate a simplex
             if len(vertices) == vertices[0].shape[0]:
                 auxiliary_vertex = sum([vertex[:-1,:] for vertex in vertices])/len(vertices)
                 max_cost = max([vertex[-1,0] for vertex in vertices])

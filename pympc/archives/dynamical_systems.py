@@ -76,7 +76,7 @@ class DTAffineSystem:
 
     @staticmethod
     def from_continuous(A, B, c, t_s):
-        A_d, B_d, c_d = forward_euler(A, B, c, t_s)
+        A_d, B_d, c_d = zero_order_hold(A, B, c, t_s)
         return DTAffineSystem(A_d, B_d, c_d)
 
 
@@ -114,20 +114,26 @@ class DTPWASystem(object):
         x_list = [x0]
         switching_sequence = []
         for k in range(N):
-            domain = self.find_domain(x_list[k], u_list[k])
+            domain = None
+            for i in range(self.n_sys):
+                if self.state_domains[i].applies_to(x_list[k]) and self.input_domains[i].applies_to(u_list[k]):
+                    domain = i
+                    sys = self.affine_systems[i]
+                    x_next = sys.A.dot(x_list[k]) + sys.B.dot(u_list[k]) + sys.c
+                    if x_next.shape != x0.shape:
+                        raise ValueError('Something wrong with vector sizes in the simulation method.')
+                    x_list.append(x_next)
+                    break
             if domain is None:
-                raise ValueError('Unfeasible state x = ' + str(x_list[k].flatten()) + ' or input u = ' + str(u_list[k].flatten()))
+                error = 'Unfeasible '
+                if not self.state_domains[i].applies_to(x_list[k]):
+                    error += 'state ' + str(x_list[k].flatten()) + ' '
+                if not self.input_domains[i].applies_to(u_list[k]):
+                    error += 'input ' + str(u_list[k].flatten())
+                raise ValueError(error)
             else:
-                sys = self.affine_systems[domain]
-                x_list.append(sys.A.dot(x_list[k]) + sys.B.dot(u_list[k]) + sys.c)
                 switching_sequence.append(domain)
         return x_list, switching_sequence
-
-    def find_domain(self, x, u):
-        for i in range(self.n_sys):
-            if self.state_domains[i].applies_to(x) and self.input_domains[i].applies_to(u):
-                return i
-        return None
 
     @property
     def x_min(self):
@@ -217,13 +223,6 @@ def zero_order_hold(A, B, c, t_s):
     c_d = mat_d[0:n_x, n_x+n_u:n_x+n_u+1]
 
     return A_d, B_d, c_d
-
-def forward_euler(A, B, c, t_s):
-    A_d = A*t_s + np.eye(A.shape[0])
-    B_d = B*t_s
-    c_d = c*t_s
-    return A_d, B_d, c_d
-
 
 def dare(A, B, Q, R):
     # cost to go
