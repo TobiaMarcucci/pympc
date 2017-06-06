@@ -203,6 +203,7 @@ class Polytope:
             polyhedron_qhull = HalfspaceIntersection(halfspaces, np.zeros(self.center.shape).flatten().tolist())
             self._vertices = polyhedron_qhull.vertices
             self._vertices += np.repeat(self.center.T, self._vertices.shape[0], axis=0)
+            self._vertices = [np.reshape(vertex, (vertex.shape[0],1)) for vertex in self._vertices]
         return self._vertices
 
     @property
@@ -233,7 +234,7 @@ class Polytope:
         """
         Projects the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
         """
-        vertices_proj = np.vstack(self.vertices)[:,dim_proj]
+        vertices_proj = np.hstack(self.vertices).T[:,dim_proj]
         if len(dim_proj) > 1:
             hull = spatial.ConvexHull(vertices_proj)
             lhs = np.array(hull.equations)[:, :-1]
@@ -392,7 +393,7 @@ class Polytope:
         if len(dim_proj) != 2:
             raise ValueError('Only 2d polytopes!')
         # extract vertices components
-        vertices_proj = np.vstack(self.vertices)[:,dim_proj]
+        vertices_proj = np.hstack(self.vertices).T[:,dim_proj]
         hull = spatial.ConvexHull(vertices_proj)
         verts = [hull.points[i].tolist() for i in hull.vertices]
         verts += [verts[0]]

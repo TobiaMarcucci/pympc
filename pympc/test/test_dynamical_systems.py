@@ -13,7 +13,7 @@ class TestDynamicalSystems(unittest.TestCase):
         t_s = 1.
 
         # discrete time from continuous
-        sys = DTLinearSystem.from_continuous(A, B, t_s)
+        sys = DTLinearSystem.from_continuous(A, B, t_s, 'zoh')
         A_discrete = np.eye(2) + A*t_s
         B_discrete = B*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(B)
         self.assertTrue(all(np.isclose(sys.A.flatten(), A_discrete.flatten())))
@@ -67,7 +67,7 @@ class TestDynamicalSystems(unittest.TestCase):
         t_s = 1.
 
         # discrete time from continuous
-        sys = DTAffineSystem.from_continuous(A, B, c, t_s)
+        sys = DTAffineSystem.from_continuous(A, B, c, t_s, 'zoh')
         A_discrete = np.eye(2) + A*t_s
         B_discrete = B*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(B)
         c_discrete = c*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(c)
@@ -83,11 +83,11 @@ class TestDynamicalSystems(unittest.TestCase):
         A_1 = np.array([[0., 1.],[10., 0.]])
         B_1 = np.array([[0.],[1.]])
         c_1 = np.array([[0.],[0.]])
-        sys_1 = DTAffineSystem.from_continuous(A_1, B_1, c_1, t_s)
+        sys_1 = DTAffineSystem.from_continuous(A_1, B_1, c_1, t_s, 'zoh')
         A_2 = np.array([[0., 1.],[-100., 0.]])
         B_2 = B_1
         c_2 = np.array([[0.],[10.]])
-        sys_2 = DTAffineSystem.from_continuous(A_2, B_2, c_2, t_s)
+        sys_2 = DTAffineSystem.from_continuous(A_2, B_2, c_2, t_s, 'zoh')
         sys = [sys_1, sys_2]
 
         # PWA state domains
@@ -108,7 +108,7 @@ class TestDynamicalSystems(unittest.TestCase):
         U_1.assemble()
         U_2 = U_1
         U = [U_1, U_2]
-        sys = DTPWASystem(sys, X, U)
+        sys = DTPWASystem.from_orthogonal_domains(sys, X, U)
 
         # simualate
         N = 10

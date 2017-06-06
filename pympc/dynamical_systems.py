@@ -38,9 +38,12 @@ class DTLinearSystem:
         return simulate_affine_dynamics(A_bar, B_bar, c_bar, x0, u_list)
 
     @staticmethod
-    def from_continuous(A, B, t_s):
+    def from_continuous(A, B, t_s, method='zoh'):
         c = np.zeros((A.shape[0], 1))
-        A_d, B_d, _ = zero_order_hold(A, B, c, t_s)
+        if method == 'zoh':
+            A_d, B_d, _ = zero_order_hold(A, B, c, t_s)
+        elif method == 'explicit_euler':
+            A_d, B_d, _ = explicit_euler(A, B, c, t_s)
         return DTLinearSystem(A_d, B_d)
 
 
@@ -75,10 +78,12 @@ class DTAffineSystem:
         return simulate_affine_dynamics(A_bar, B_bar, c_bar, x0, u_list)
 
     @staticmethod
-    def from_continuous(A, B, c, t_s):
-        A_d, B_d, c_d = forward_euler(A, B, c, t_s)
+    def from_continuous(A, B, c, t_s, method='zoh'):
+        if method == 'zoh':
+            A_d, B_d, c_d = zero_order_hold(A, B, c, t_s)
+        elif method == 'explicit_euler':
+            A_d, B_d, c_d = explicit_euler(A, B, c, t_s)
         return DTAffineSystem(A_d, B_d, c_d)
-
 
 
 class DTPWASystem(object):
@@ -95,10 +100,9 @@ class DTPWASystem(object):
         n_sys: number of affine subsystems
     """
 
-    def __init__(self, affine_systems, state_domains, input_domains):
+    def __init__(self, affine_systems, domains):
         self.affine_systems = affine_systems
-        self.state_domains = state_domains
-        self.input_domains = input_domains
+        self.domains = domains
         self.n_x = affine_systems[0].n_x
         self.n_u = affine_systems[0].n_u
         self.n_sys = len(affine_systems)
@@ -125,23 +129,36 @@ class DTPWASystem(object):
 
     def find_domain(self, x, u):
         for i in range(self.n_sys):
-            if self.state_domains[i].applies_to(x) and self.input_domains[i].applies_to(u):
+            if self.domains[i].applies_to(np.vstack((x, u))):
                 return i
         return None
 
     @property
     def x_min(self):
         if self._x_min is None:
-            min_list = [X.x_min for X in self.state_domains]
+            min_list = [domain.x_min[0:self.n_x,:] for domain in self.domains]
             self._x_min = np.array([[min([x[i,0] for x in min_list])] for i in range(self.n_x)])
         return self._x_min
 
     @property
     def x_max(self):
         if self._x_max is None:
-            max_list = [X.x_max for X in self.state_domains]
+            max_list = [domain.x_max[0:self.n_x,:] for domain in self.domains]
             self._x_max = np.array([[max([x[i,0] for x in max_list])] for i in range(self.n_x)])
         return self._x_max
+
+    @staticmethod
+    def from_orthogonal_domains(affine_systems, state_domains, input_domains):
+        domains = []
+        for i in range(len(state_domains)):
+            A_i = linalg.block_diag(state_domains[i].lhs_min, input_domains[i].lhs_min)
+            b_i = np.vstack((state_domains[i].rhs_min, input_domains[i].rhs_min))
+            domain_i = Polytope(A_i, b_i)
+            domain_i.assemble()
+            domains.append(domain_i)
+        return DTPWASystem(affine_systems, domains)
+
+
 
 
 
@@ -218,7 +235,7 @@ def zero_order_hold(A, B, c, t_s):
 
     return A_d, B_d, c_d
 
-def forward_euler(A, B, c, t_s):
+def explicit_euler(A, B, c, t_s):
     A_d = A*t_s + np.eye(A.shape[0])
     B_d = B*t_s
     c_d = c*t_s

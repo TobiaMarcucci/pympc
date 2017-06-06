@@ -42,7 +42,7 @@ class MPCController:
         X_list = [self.X]*self.N
         U_list = [self.U]*self.N
         switching_sequence = [0]*self.N
-        pwa_sys = DTPWASystem(sys_list, X_list, U_list)
+        pwa_sys = DTPWASystem.from_orthogonal_domains(sys_list, X_list, U_list)
         self.condensed_program = OCP_condenser(pwa_sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
         self.remove_intial_state_contraints()
         return
@@ -118,55 +118,6 @@ class MPCController:
     #     return
 
 
-# class MPCExplicitController:
-
-#     def __init__(self, mpqp):
-#         mpqp.remove_linear_terms()
-#         self.mpqp = mpqp
-#         mpqp_solution = MPQPSolver(mpqp)
-#         self.critical_regions = mpqp_solution.critical_regions
-#         return
-
-#     def feedforward(self, x0):
-#         cr_x0 = self.critical_regions.lookup(x0)
-#         if cr_x0 is not None:
-#             u_feedforward = cr_x0.u_offset + cr_x0.u_linear.dot(x0)
-#             cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
-#             cost = cost[0,0]
-#         else:
-#             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
-#             u_feedforward = np.full((self.mpqp.G.shape[1], 1), np.nan)
-#             cost = np.nan
-#         return u_feedforward, cost
-
-#     # def feedback(self, x0): # now i don't know n_u anymore!
-#     #     return self.feedforward(x0)[0:self.sys.n_u]
-
-#     def optimal_value_function(self, x0):
-#         cr_x0 = self.critical_regions.lookup(x0)
-#         if cr_x0 is not None:
-#             cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
-#         else:
-#             #print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
-#             cost = np.nan
-#         return cost
-
-#     def group_critical_regions(self):
-#         self.u_offset_list = []
-#         self.u_linear_list = []
-#         self.cr_families = []
-#         for cr in self.critical_regions:
-#             cr_family = np.where(np.isclose(cr.u_offset[0], self.u_offset_list))[0]
-#             if cr_family and all(np.isclose(cr.u_linear[0,:], self.u_linear_list[cr_family[0]])):
-#                 self.cr_families[cr_family[0]].append(cr)
-#             else:
-#                 self.cr_families.append([cr])
-#                 self.u_offset_list.append(cr.u_offset[0])
-#                 self.u_linear_list.append(cr.u_linear[0,:])
-#         print 'Critical regions grouped in ', str(len(self.cr_families)), ' sets.'
-#         return
-
-
 
 class MPCHybridController:
 
@@ -182,31 +133,25 @@ class MPCHybridController:
         self.compute_M_dynamics()
         return
 
-    def compute_M_domains(self):#, M_min=1.):
+    def compute_M_domains(self):
         """
         Denoting with s the number of affine systems, M_domains is a list with s elements, each element has other s elements, each one of these is a bigM vector.
         """
         self.M_domains = []
-        for i in range(self.sys.n_sys):
+        for i, domain_i in enumerate(self.sys.domains):
             M_i = []
-            lhs_i = linalg.block_diag(self.sys.state_domains[i].lhs_min, self.sys.input_domains[i].lhs_min)
-            rhs_i = np.vstack((self.sys.state_domains[i].rhs_min, self.sys.input_domains[i].rhs_min))
-            for j in range(self.sys.n_sys):
+            for j, domain_j in enumerate(self.sys.domains):
                 M_ij = []
                 if i != j:
-                    lhs_j = linalg.block_diag(self.sys.state_domains[j].lhs_min, self.sys.input_domains[j].lhs_min)
-                    rhs_j = np.vstack((self.sys.state_domains[j].rhs_min, self.sys.input_domains[j].rhs_min))
-                    for k in range(lhs_i.shape[0]):
-                        M_ijk = (- linear_program(-lhs_i[k,:], lhs_j, rhs_j)[1] - rhs_i[k])[0]
-                        #M_ijk += 100.
-                        #M_ijk = max(M_ijk, M_min)
+                    for k in range(domain_i.lhs_min.shape[0]):
+                        M_ijk = (- linear_program(-domain_i.lhs_min[k,:], domain_j.lhs_min, domain_j.rhs_min)[1] - domain_i.rhs_min[k])[0]
                         M_ij.append(M_ijk)
                 M_ij = np.reshape(M_ij, (len(M_ij), 1))
                 M_i.append(M_ij)
             self.M_domains.append(M_i)
         return
 
-    def compute_M_dynamics(self):#, M_min=1., m_max=-1.):
+    def compute_M_dynamics(self):
         self.M_dynamics = []
         self.m_dynamics = []
         for i in range(self.sys.n_sys):
@@ -214,19 +159,13 @@ class MPCHybridController:
             m_i = []
             lhs_i = np.hstack((self.sys.affine_systems[i].A, self.sys.affine_systems[i].B))
             rhs_i = self.sys.affine_systems[i].c
-            for j in range(self.sys.n_sys):
+            for domain_j in self.sys.domains:
                 M_ij = []
                 m_ij = []
-                lhs_j = linalg.block_diag(self.sys.state_domains[j].lhs_min, self.sys.input_domains[j].lhs_min)
-                rhs_j = np.vstack((self.sys.state_domains[j].rhs_min, self.sys.input_domains[j].rhs_min))
                 for k in range(lhs_i.shape[0]):
-                    M_ijk = (- linear_program(-lhs_i[k,:], lhs_j, rhs_j)[1] + rhs_i[k])[0]
-                    #M_ijk += 100.
-                    #M_ijk = max(M_ijk, M_min)
+                    M_ijk = (- linear_program(-lhs_i[k,:], domain_j.lhs_min, domain_j.rhs_min)[1] + rhs_i[k])[0]
                     M_ij.append(M_ijk)
-                    m_ijk = (linear_program(lhs_i[k,:], lhs_j, rhs_j)[1] + rhs_i[k])[0]
-                    #m_ijk -= 100.
-                    #m_ijk = min(m_ijk, m_max)
+                    m_ijk = (linear_program(lhs_i[k,:], domain_j.lhs_min, domain_j.rhs_min)[1] + rhs_i[k])[0]
                     m_ij.append(m_ijk)
                 M_ij = np.reshape(M_ij, (len(M_ij), 1))
                 m_ij = np.reshape(m_ij, (len(m_ij), 1))
@@ -334,9 +273,7 @@ class MPCHybridController:
             # relaxation of the domains
             for k in range(self.N):
                 for i in range(self.sys.n_sys):
-                    expr_x = self.sys.state_domains[i].lhs_min.dot(x_np[k]) - self.sys.state_domains[i].rhs_min
-                    expr_u = self.sys.input_domains[i].lhs_min.dot(u_np[k]) - self.sys.input_domains[i].rhs_min
-                    expr_xu = np.vstack((expr_x, expr_u))
+                    expr_xu = self.sys.domains[i].lhs_min.dot(np.vstack((x_np[k], u_np[k]))) - self.sys.domains[i].rhs_min
                     expr_M = np.sum([self.M_domains[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
                     expr = expr_xu - expr_M
                     model.addConstrs((expr[j][0] <= 0. for j in range(len(expr))))
@@ -383,28 +320,25 @@ class MPCHybridController:
             raise ValueError('Switching sequence not coherent with the controller horizon.')
         return OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
 
-    def backward_reachability_analysis(self, switching_sequence):
+    def backwards_reachability_analysis(self, switching_sequence):
         if self.X_N is None:
             raise ValueError('A terminal constraint is needed for the backward reachability analysis!')
         if len(switching_sequence) != self.N:
             raise ValueError('Switching sequence not coherent with the controller horizon.')
-        print('Computing feasible set for the switching sequence ' + str(switching_sequence))
+        print('Backwards reachability analysis for the switching sequence ' + str(switching_sequence))
         tic = time.time()
         feasible_set = self.X_N
         A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
         B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
         c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
-        U_sequence = [self.sys.input_domains[switch] for switch in switching_sequence]
-        X_sequence = [self.sys.state_domains[switch] for switch in switching_sequence]
+        D_sequence = [self.sys.domains[switch] for switch in switching_sequence]
         for i in range(self.N-1,-1,-1):
             lhs_x = feasible_set.lhs_min.dot(A_sequence[i])
             lhs_u = feasible_set.lhs_min.dot(B_sequence[i])
             lhs = np.hstack((lhs_x, lhs_u))
             rhs = feasible_set.rhs_min - feasible_set.lhs_min.dot(c_sequence[i])
             feasible_set = Polytope(lhs, rhs)
-            lhs = linalg.block_diag(X_sequence[i].lhs_min, U_sequence[i].lhs_min)
-            rhs = np.vstack((X_sequence[i].rhs_min, U_sequence[i].rhs_min))
-            feasible_set.add_facets(lhs, rhs)
+            feasible_set.add_facets(D_sequence[i].lhs_min, D_sequence[i].rhs_min)
             feasible_set.assemble()
             feasible_set = feasible_set.orthogonal_projection(range(self.sys.n_x))
         toc = time.time()
@@ -412,7 +346,7 @@ class MPCHybridController:
         return feasible_set
 
     def plot_feasible_set(self, switching_sequence, **kwargs):
-        feasible_set = self.backward_reachability_analysis(switching_sequence)
+        feasible_set = self.backwards_reachability_analysis(switching_sequence)
         feasible_set.plot(**kwargs)
         plt.text(feasible_set.center[0], feasible_set.center[1], str(switching_sequence))
         return
@@ -469,6 +403,239 @@ class MPCHybridController:
     #         print('Unfeasible switching sequence!')
     #     return
 
+# class HybridPolicyLibrary:
+#     """
+#     library (dict)
+#         ss 0,...,n (dicts)
+#             'program' (parametric_qp instance)
+#             'feasible_set'
+#             'active_sets'
+#                 active_set 0,...,m (dicts)
+#                     'x' (list of states)
+#                     'V' (list of optimal values)
+#     """
+
+#     def __init__(self, controller):
+#         self.controller = controller
+#         self.library = dict()
+#         self.lower_bound = None
+#         self.upper_bound = None
+#         return
+
+#     def sample_policy(self, x_list, ss=None, update_lb=False):
+#         if ss is None:
+#             for x in x_list:
+#                 u, V, ss = self.controller.feedforward(x)
+#                 self.add_sample_to_library(x, u, V, ss, True)
+#                 if update_lb:
+#                     self.add_lower_bound(ss, x, u)
+#         else:
+#             for x in x_list:
+#                 u, V = self.library[ss]['program'].solve(x)
+#                 self.add_sample_to_library(x, u, V, ss, False)
+#                 if update_lb:
+#                     self.add_lower_bound(ss, x, u)
+#         return
+
+
+#     def sample_policy_randomly(self, n_samples=1, ss=None):
+#         if ss is None:
+#             for i in range(n_samples):
+#                 feasible = False
+#                 while not feasible:
+#                     x = self.generate_random_sample()
+#                     u, V, ss = self.controller.feedforward(x)
+#                     if not np.isnan(V):
+#                         feasible = True
+#                 self.add_sample_to_library(x, u, V, ss, True)
+#         else:
+#             for i in range(n_samples):
+#                 x = self.generate_random_sample(ss)
+#                 u, V = self.library[ss]['program'].solve(x)
+#                 self.add_sample_to_library(x, u, V, ss, False)
+#         return
+
+
+#     def generate_random_sample(self, ss=None):
+
+#         if ss is None:
+#             x_min = self.controller.sys.x_min
+#             x_max = self.controller.sys.x_max
+#         else:
+#             if not self.library[ss].has_key('feasible_set'):
+#                 self.library[ss]['feasible_set'] = self.controller.backwards_reachability_analysis(ss)
+#             x_min = self.library[ss]['feasible_set'].x_min
+#             x_max = self.library[ss]['feasible_set'].x_max
+
+#         # scaled random sample
+#         is_inside = False
+#         while not is_inside:
+#             x = np.random.rand(self.controller.Q.shape[0],1)
+#             x = np.multiply(x, (x_max - x_min)) + x_min
+#             if ss is None:
+#                 is_inside = any([X.applies_to(x) for X in self.controller.sys.state_domains])
+#             else:
+#                 is_inside = self.library[ss]['feasible_set'].applies_to(x)
+
+#         return x
+
+#     def add_sample_to_library(self, x, u, V, ss, optimal=False):
+
+#         if self.library.has_key(ss):
+#             prog = self.library[ss]['program']
+#             active_set = prog.get_active_set(x, u)
+
+#             if self.library[ss]['active_sets'].has_key(active_set):
+#                 self.library[ss]['active_sets'][active_set]['x'].append(x)
+#                 self.library[ss]['active_sets'][active_set]['V'].append(V)
+#                 self.library[ss]['active_sets'][active_set]['optimal'].append(optimal)
+
+#             else:
+#                 active_set_dict = {'x': [x], 'V': [V], 'optimal': [optimal]}
+#                 self.library[ss]['active_sets'][active_set] = active_set_dict
+
+#         else:
+#             prog = self.controller.condense_program(ss)
+#             active_set = prog.get_active_set(x, u)
+#             active_set_dict = {'x': [x], 'V': [V], 'optimal': [optimal]}
+#             active_sets_dict = {active_set: active_set_dict}
+#             switching_sequence_dict = {'program': prog, 'active_sets': active_sets_dict}
+#             self.library[ss] = switching_sequence_dict
+
+#         return
+
+#     def add_vertices_of_feasible_regions(self, eps=1.e-4):
+#         for ss, ss_values in self.library.items():
+#             if not ss_values.has_key('feasible_set'):
+#                 fs = self.controller.backwards_reachability_analysis(ss)
+#                 ss_values['feasible_set'] = fs
+#             x_list = ss_values['feasible_set'].vertices
+#             x_list = [x + (ss_values['feasible_set'].center - x)*eps for x in x_list]
+#             for x in x_list:
+#                 u, V = ss_values['program'].solve(x)
+#                 self.add_sample_to_library(x, u, V, ss)
+#         return
+
+#     # def bound_cost_from_below(self):
+#     #     for ss, ss_values in self.library.items():
+#     #         ss_values['lower_bound_planes'] = []
+#     #         for active_set, as_values in ss_values['active_sets'].items():
+#     #             plane_list = ss_values['program'].get_cost_sensitivity(as_values['x'], active_set)
+#     #             ss_values['lower_bound_planes'] += plane_list
+#     #     return
+
+#     def bound_cost_from_below(self):
+#         for ss, ss_values in self.library.items():
+#             for as_values in ss_values['active_sets'].values():
+#                 for i, x in enumerate(as_values['x']):
+#                     if as_values['optimal'][i]:
+#                         fss = self.feasible_switching_sequences(x)
+#                         fss.remove(ss)
+#                         for ss_lb in fss:
+#                             lb = self.get_lower_bound(ss_lb, x)
+#                             if lb < as_values['V'][i]:
+#                                 self.sample_policy([x], ss_lb, True)
+#         return
+
+#     def bound_cost_from_above(self):
+
+#         for ss, ss_values in self.library.items():
+#             ss_values['upper_bound_planes'] = []
+
+#             vertices = []
+#             for as_values in ss_values['active_sets'].values():
+#                 vertices_active_set = [np.vstack((as_values['x'][i], np.array([[as_values['V'][i]]]))) for i in range(len(as_values['x']))]
+#                 vertices += vertices_active_set
+
+#             # add an auxiliary vetex when the number of samples in not enough to generate a simplex
+#             if len(vertices) == vertices[0].shape[0]:
+#                 auxiliary_vertex = sum([vertex[:-1,:] for vertex in vertices])/len(vertices)
+#                 max_cost = max([vertex[-1,0] for vertex in vertices])
+#                 auxiliary_vertex = np.vstack((auxiliary_vertex, np.array([[10.*max_cost]])))
+#                 vertices.append(auxiliary_vertex)
+
+#             hull = ConvexHull(np.hstack(vertices).T)
+#             lhs = np.array(hull.equations)[:, :-1]
+#             rhs = (np.array(hull.equations)[:, -1]).reshape((lhs.shape[0], 1))
+#             facets_to_keep = [i for i in range(lhs.shape[0]) if lhs[i,-1] < 0.]
+#             for i in facets_to_keep:
+#                 A = - lhs[i:i+1,:-1]/lhs[i,-1]
+#                 b = - rhs[i:i+1,:]/lhs[i,-1]
+#                 ss_values['upper_bound_planes'].append([A,b])
+#         return
+
+#     def get_lower_bound(self, ss, x):
+#         is_inside = self.library[ss]['feasible_set'].applies_to(x)
+#         if is_inside and self.library[ss].has_key('lower_bound_planes'):
+#             return max([(plane[0].dot(x) + plane[1])[0,0] for plane in self.library[ss]['lower_bound_planes']])
+#         else:
+#             return -np.inf
+
+#     def get_upper_bound(self, ss, x):
+#         is_inside = self.library[ss]['feasible_set'].applies_to(x)
+#         if is_inside and self.library[ss].has_key('upper_bound_planes'):
+#             return max([(plane[0].dot(x) + plane[1])[0,0] for plane in self.library[ss]['upper_bound_planes']])
+#         else:
+#             return np.inf
+
+#     def add_lower_bound(self, ss, x, u):
+#         active_set = self.library[ss]['program'].get_active_set(x, u)
+#         plane = self.library[ss]['program'].get_cost_sensitivity([x], active_set)
+#         if self.library[ss].has_key('lower_bound_planes'):
+#             self.library[ss]['lower_bound_planes'] += plane
+#         else:
+#             self.library[ss]['lower_bound_planes'] = plane
+#         return
+
+#     def feasible_switching_sequences(self, x):
+#         fss = []
+#         for ss, ss_values in self.library.items():
+#             if ss_values['feasible_set'].applies_to(x):
+#                 fss.append(ss)
+#         return fss
+
+#     def add_shifted_sequences(self, terminal_domain):
+#         for ss in self.library.keys():
+#             ss_shifted = ss
+#             for i in range(len(ss)):
+#                 ss_shifted = ss_shifted[1:] + (terminal_domain,)
+#                 if not self.library.has_key(ss_shifted):
+#                     prog = self.controller.condense_program(ss_shifted)
+#                     self.library[ss_shifted] = {'program': prog, 'active_sets': dict()}
+#         return
+
+#     def get_candidate_switching_sequences(self, x):
+#         css = []
+#         fss = self.feasible_switching_sequences(x)
+#         ub = min([self.get_upper_bound(ss, x) for ss in fss])
+#         for ss in fss:
+#             lb = self.get_lower_bound(ss, x)
+#             if lb < ub:
+#                 css.append(ss)
+#         return css
+
+#     def feedforward(self, x):
+#         css = self.get_candidate_switching_sequences(x)
+#         print len(css), 'candidate switching sequences'
+#         if not css:
+#             V_star = np.nan
+#             u_star = np.full((self.controller.sys.n_u, 1), np.nan)
+#             return u_star, V_star
+#         V_star = np.inf
+#         for ss in css:
+#             u, V = self.library[ss]['program'].solve(x)
+#             if V < V_star:
+#                 V_star = V
+#                 u_star = u
+#         return u_star, V_star
+
+#     def feedback(self, x):
+#         u_feedforward = self.feedforward(x)[0]
+#         u_feedback = u_feedforward[0:self.controller.sys.n_u]
+#         return u_feedback
+
+
+            
 class HybridPolicyLibrary:
     """
     library (dict)
@@ -484,200 +651,133 @@ class HybridPolicyLibrary:
     def __init__(self, controller):
         self.controller = controller
         self.library = dict()
-        self.lower_bound = None
-        self.upper_bound = None
         return
 
-    def sample_policy(self, x_list, ss=None, update_lb=False):
-        if ss is None:
-            for x in x_list:
-                u, V, ss = self.controller.feedforward(x)
-                self.add_sample_to_library(x, u, V, ss, True)
-                if update_lb:
-                    self.add_lower_bound(ss, x, u)
-        else:
-            for x in x_list:
-                u, V = self.library[ss]['program'].solve(x)
-                self.add_sample_to_library(x, u, V, ss, False)
-                if update_lb:
-                    self.add_lower_bound(ss, x, u)
+    def sample_policy(self, n_samples, terminal_domain):
+        n_unfeasible = 0
+        for i in range(n_samples):
+            x = self.random_sample()
+            if not self.sampling_rejection(x):
+                with suppress_stdout():
+                    ss_star = self.controller.feedforward(x) [2]
+                if not any(np.isnan(ss_star)):
+                    ss_list = [ss_star]
+                    ss_list += self.shift_switching_sequence(ss_list[0], terminal_domain)
+                    for ss in ss_list:
+                        if not self.library.has_key(ss):
+                            self.library[ss] = {
+                            'feasible_set': self.controller.backwards_reachability_analysis(ss),
+                            'program': self.controller.condense_program(ss),
+                            'lower_bound': {'A': np.zeros((1, self.controller.sys.n_x)), 'b': np.zeros((1,1))},
+                            'upper_bound': {'convex_hull': None, 'A': None, 'b': None},
+                            }
+                else:
+                    n_unfeasible += 1
+
+
+        print('Detected ' + str(len(self.library)) + ' switching sequences.')
+        print(str(n_unfeasible) + ' unfeasible samples out of ' + str(n_samples) + '.')
         return
 
-
-    def sample_policy_randomly(self, n_samples=1, ss=None):
-        if ss is None:
-            for i in range(n_samples):
-                feasible = False
-                while not feasible:
-                    x = self.generate_random_sample()
-                    u, V, ss = self.controller.feedforward(x)
-                    if not any(np.isnan(u)):
-                        feasible = True
-                self.add_sample_to_library(x, u, V, ss, True)
-        else:
-            for i in range(n_samples):
-                x = self.generate_random_sample(ss)
-                u, V = self.library[ss]['program'].solve(x)
-                self.add_sample_to_library(x, u, V, ss, False)
-        return
-
-
-    def generate_random_sample(self, ss=None):
-
-        if ss is None:
-            x_min = self.controller.sys.x_min
-            x_max = self.controller.sys.x_max
-        else:
-            if not self.library[ss].has_key('feasible_set'):
-                self.library[ss]['feasible_set'] = self.controller.backward_reachability_analysis(ss)
-            x_min = self.library[ss]['feasible_set'].x_min
-            x_max = self.library[ss]['feasible_set'].x_max
-
-        # scaled random sample
-        is_inside = False
-        while not is_inside:
-            x = np.random.rand(self.controller.Q.shape[0],1)
-            x = np.multiply(x, (x_max - x_min)) + x_min
-            if ss is None:
-                is_inside = any([X.applies_to(x) for X in self.controller.sys.state_domains])
-            else:
-                is_inside = self.library[ss]['feasible_set'].applies_to(x)
-
+    def random_sample(self):
+        # is_inside = False
+        # while not is_inside:
+        #     x = np.random.rand(self.controller.sys.n_x,1)
+        #     x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
+        #     is_inside = any([X.applies_to(x) for X in self.controller.sys.state_domains])
+        x = np.random.rand(self.controller.sys.n_x,1)
+        x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
         return x
 
-    def add_sample_to_library(self, x, u, V, ss, optimal=False):
+    def sampling_rejection(self, x):
+        for ss_value in self.library.values():
+            if ss_value['feasible_set'].applies_to(x):
+                return True
+        return False
 
-        if self.library.has_key(ss):
-            prog = self.library[ss]['program']
-            active_set = prog.get_active_set(x, u)
-
-            if self.library[ss]['active_sets'].has_key(active_set):
-                self.library[ss]['active_sets'][active_set]['x'].append(x)
-                self.library[ss]['active_sets'][active_set]['V'].append(V)
-                self.library[ss]['active_sets'][active_set]['optimal'].append(optimal)
-
-            else:
-                active_set_dict = {'x': [x], 'V': [V], 'optimal': [optimal]}
-                self.library[ss]['active_sets'][active_set] = active_set_dict
-
-        else:
-            prog = self.controller.condense_program(ss)
-            active_set = prog.get_active_set(x, u)
-            active_set_dict = {'x': [x], 'V': [V], 'optimal': [optimal]}
-            active_sets_dict = {active_set: active_set_dict}
-            switching_sequence_dict = {'program': prog, 'active_sets': active_sets_dict}
-            self.library[ss] = switching_sequence_dict
-
-        return
+    def shift_switching_sequence(self, ss, terminal_domain):
+        return [ss[i:] + (terminal_domain,)*i for i in range(1,len(ss))]
 
     def add_vertices_of_feasible_regions(self, eps=1.e-4):
-        for ss, ss_values in self.library.items():
-            if not ss_values.has_key('feasible_set'):
-                fs = self.controller.backward_reachability_analysis(ss)
-                ss_values['feasible_set'] = fs
+        for ss_values in self.library.values():
             x_list = ss_values['feasible_set'].vertices
             x_list = [x + (ss_values['feasible_set'].center - x)*eps for x in x_list]
-            for x in x_list:
-                u, V = ss_values['program'].solve(x)
-                self.add_sample_to_library(x, u, V, ss)
+            xV_list = [np.vstack((x, ss_values['program'].solve(x)[1])) for x in x_list]
+
+            ### add an auxiliary vertex when the number of samples in not enough to generate a simplex
+            if len(xV_list) == xV_list[0].shape[0]:
+                auxiliary_vertex = sum([x[:-1,:] for x in xV_list])/len(xV_list)
+                max_cost = max([x[-1,0] for x in xV_list])
+                auxiliary_vertex = np.vstack((auxiliary_vertex, np.array([[2.*max_cost]])))
+                xV_list.append(auxiliary_vertex)
+
+            ss_values['upper_bound']['convex_hull'] = ConvexHull(np.hstack(xV_list).T, incremental=True)
+            A, b = self.upper_bound_from_hull(ss_values['upper_bound']['convex_hull'])
+            ss_values['upper_bound']['A'] = A
+            ss_values['upper_bound']['b'] = b
+            
         return
 
-    # def bound_cost_from_below(self):
-    #     for ss, ss_values in self.library.items():
-    #         ss_values['lower_bound_planes'] = []
-    #         for active_set, as_values in ss_values['active_sets'].items():
-    #             plane_list = ss_values['program'].get_cost_sensitivity(as_values['x'], active_set)
-    #             ss_values['lower_bound_planes'] += plane_list
-    #     return
+    def bound_optimal_value_functions(self, n_samples):
 
-    def bound_cost_from_below(self):
-        for ss, ss_values in self.library.items():
-            for as_values in ss_values['active_sets'].values():
-                for i, x in enumerate(as_values['x']):
-                    if as_values['optimal'][i]:
-                        fss = self.feasible_switching_sequences(x)
-                        fss.remove(ss)
-                        for ss_lb in fss:
-                            lb = self.get_lower_bound(ss_lb, x)
-                            if lb < as_values['V'][i]:
-                                self.sample_policy([x], ss_lb, True)
-        return
+        for i in range(n_samples):
+            x = self.random_sample()
+            css = self.get_candidate_switching_sequences(x)
 
-    def bound_cost_from_above(self):
+            # if there is more than 1 candidate
+            if len(css) > 1:
+                u_list = []
+                V_list = []
+                for ss in css:
+                    u, V = self.library[ss]['program'].solve(x)
+                    u_list.append(u)
+                    V_list.append(V)
+                V_star = min(V_list)
+                ss_star = css[V_list.index(V_star)]
 
-        for ss, ss_values in self.library.items():
-            ss_values['upper_bound_planes'] = []
+                # refine minimum upper bound
+                self.library[ss_star]['upper_bound']['convex_hull'].add_points(np.vstack((x, V_star)).T)
+                A, b = self.upper_bound_from_hull(self.library[ss_star]['upper_bound']['convex_hull'])
+                self.library[ss_star]['upper_bound']['A'] = A
+                self.library[ss_star]['upper_bound']['b'] = b
 
-            vertices = []
-            for as_values in ss_values['active_sets'].values():
-                vertices_active_set = [np.vstack((as_values['x'][i], np.array([[as_values['V'][i]]]))) for i in range(len(as_values['x']))]
-                vertices += vertices_active_set
+                # refine lower bounds
+                for j, ss in enumerate(css):
+                    lb = self.get_lower_bound(ss, x)
+                    if ss != ss_star and lb < V_star:
+                        active_set = self.library[ss]['program'].get_active_set(x, u_list[j])
+                        [A, b] = self.library[ss]['program'].get_cost_sensitivity([x], active_set)[0]
+                        self.library[ss]['lower_bound']['A'] = np.vstack((self.library[ss]['lower_bound']['A'], A))
+                        self.library[ss]['lower_bound']['b'] = np.vstack((self.library[ss]['lower_bound']['b'], b))
 
-            # add an auxiliary vetex when the number of samples in not enough to generate a simplex
-            if len(vertices) == vertices[0].shape[0]:
-                auxiliary_vertex = sum([vertex[:-1,:] for vertex in vertices])/len(vertices)
-                max_cost = max([vertex[-1,0] for vertex in vertices])
-                auxiliary_vertex = np.vstack((auxiliary_vertex, np.array([[10.*max_cost]])))
-                vertices.append(auxiliary_vertex)
-
-            hull = ConvexHull(np.hstack(vertices).T)
-            lhs = np.array(hull.equations)[:, :-1]
-            rhs = (np.array(hull.equations)[:, -1]).reshape((lhs.shape[0], 1))
-            facets_to_keep = [i for i in range(lhs.shape[0]) if lhs[i,-1] < 0.]
-            for i in facets_to_keep:
-                A = - lhs[i:i+1,:-1]/lhs[i,-1]
-                b = - rhs[i:i+1,:]/lhs[i,-1]
-                ss_values['upper_bound_planes'].append([A,b])
         return
 
     def get_lower_bound(self, ss, x):
-        is_inside = self.library[ss]['feasible_set'].applies_to(x)
-        if is_inside and self.library[ss].has_key('lower_bound_planes'):
-            return max([(plane[0].dot(x) + plane[1])[0,0] for plane in self.library[ss]['lower_bound_planes']])
+        if self.library[ss]['feasible_set'].applies_to(x):
+            return max((self.library[ss]['lower_bound']['A'].dot(x) + self.library[ss]['lower_bound']['b']))[0]
         else:
-            return -np.inf
+            return 0.
 
     def get_upper_bound(self, ss, x):
-        is_inside = self.library[ss]['feasible_set'].applies_to(x)
-        if is_inside and self.library[ss].has_key('upper_bound_planes'):
-            return max([(plane[0].dot(x) + plane[1])[0,0] for plane in self.library[ss]['upper_bound_planes']])
+        if self.library[ss]['feasible_set'].applies_to(x):
+            return max((self.library[ss]['upper_bound']['A'].dot(x) + self.library[ss]['upper_bound']['b']))[0]
         else:
             return np.inf
 
-    def add_lower_bound(self, ss, x, u):
-        active_set = self.library[ss]['program'].get_active_set(x, u)
-        plane = self.library[ss]['program'].get_cost_sensitivity([x], active_set)
-        if self.library[ss].has_key('lower_bound_planes'):
-            self.library[ss]['lower_bound_planes'] += plane
-        else:
-            self.library[ss]['lower_bound_planes'] = plane
-        return
-
-    def feasible_switching_sequences(self, x):
-        fss = []
-        for ss, ss_values in self.library.items():
-            if ss_values['feasible_set'].applies_to(x):
-                fss.append(ss)
-        return fss
-
-    def add_shifted_sequences(self, terminal_domain):
-        for ss in self.library.keys():
-            ss_shifted = ss
-            for i in range(len(ss)):
-                ss_shifted = ss_shifted[1:] + (terminal_domain,)
-                if not self.library.has_key(ss_shifted):
-                    prog = self.controller.condense_program(ss_shifted)
-                    self.library[ss_shifted] = {'program': prog, 'active_sets': dict()}
-        return
+    def get_feasible_switching_sequences(self, x):
+        return [ss for ss, ss_values in self.library.items() if ss_values['feasible_set'].applies_to(x)]
 
     def get_candidate_switching_sequences(self, x):
         css = []
-        fss = self.feasible_switching_sequences(x)
+        fss = self.get_feasible_switching_sequences(x)
+        if not fss:
+            return fss
         ub = min([self.get_upper_bound(ss, x) for ss in fss])
         for ss in fss:
             lb = self.get_lower_bound(ss, x)
             if lb < ub:
                 css.append(ss)
+        print css
         return css
 
     def feedforward(self, x):
@@ -685,23 +785,31 @@ class HybridPolicyLibrary:
         print len(css), 'candidate switching sequences'
         if not css:
             V_star = np.nan
-            u_star = np.full((self.controller.sys.n_u, 1), np.nan)
+            u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
             return u_star, V_star
         V_star = np.inf
         for ss in css:
             u, V = self.library[ss]['program'].solve(x)
             if V < V_star:
                 V_star = V
-                u_star = u
+                u_star = [u[i*self.controller.sys.n_u:(i+1)*self.controller.sys.n_u,:] for i in range(self.controller.N)]
         return u_star, V_star
 
     def feedback(self, x):
-        u_feedforward = self.feedforward(x)[0]
-        u_feedback = u_feedforward[0:self.controller.sys.n_u]
-        return u_feedback
+        return self.feedforward(x)[0][0]
 
+    @staticmethod
+    def upper_bound_from_hull(hull):
+        A = np.array(hull.equations)[:, :-1]
+        b = (np.array(hull.equations)[:, -1]).reshape((A.shape[0], 1))
+        facets_to_keep = [i for i in range(A.shape[0]) if A[i,-1] < 0.]
+        A_new = np.zeros((0, A.shape[1]-1))
+        b_new = np.zeros((0, 1))
+        for i in facets_to_keep:
+            A_new = np.vstack((A_new, - A[i:i+1,:-1]/A[i,-1]))
+            b_new = np.vstack((b_new, - b[i:i+1,:]/A[i,-1]))
+        return A_new, b_new
 
-            
 
 
 
@@ -785,6 +893,7 @@ class parametric_qp:
         return u_star, cost[0,0]
 
     def get_active_set(self, x, u, tol=1.e-6):
+        u = np.vstack(u)
         return tuple(np.where((self.C_u.dot(u) - self.C - self.C_x.dot(x)) > -tol)[0])
 
     def remove_linear_terms(self):
@@ -844,9 +953,13 @@ class parametric_qp:
         # tangent approximation
         plane_list = []
         for x in x_list:
-            A = x.T.dot(V_quadratic) + V_linear.T
+
+            A = x.T.dot(V_quadratic) + V_linear
             b = -.5*x.T.dot(V_quadratic).dot(x) + V_offset
             plane_list.append([A, b])
+
+        # if A.shape[0] != b.shape[0]:
+        #     import pdb; pdb.set_trace()
 
         return plane_list
 
@@ -899,13 +1012,55 @@ def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
         parametric_program = parametric_qp(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W)
     return parametric_program
 
+# def constraint_condenser(sys, X_N, switching_sequence):
+#     N = len(switching_sequence)
+#     G_u, W_u, E_u = input_constraint_condenser(sys, switching_sequence)
+#     G_x, W_x, E_x = state_constraint_condenser(sys, X_N, switching_sequence)
+#     G = np.vstack((G_u, G_x))
+#     W = np.vstack((W_u, W_x))
+#     E = np.vstack((E_u, E_x))
+#     p = Polytope(np.hstack((G, -E)), W)
+#     p.assemble()
+#     if not p.empty:
+#         G = p.lhs_min[:,:sys.n_u*N]
+#         E = - p.lhs_min[:,sys.n_u*N:]
+#         W = p.rhs_min
+#     else:
+#         G = None
+#         W = None
+#         E = None
+#     return G, W, E
+
+# def input_constraint_condenser(sys, switching_sequence):
+#     N = len(switching_sequence)
+#     U_sequence = [sys.input_domains[switching_sequence[i]] for i in range(N)]
+#     G_u = linalg.block_diag(*[U.lhs_min for U in U_sequence])
+#     W_u = np.vstack([U.rhs_min for U in U_sequence])
+#     E_u = np.zeros((W_u.shape[0], sys.n_x))
+#     return G_u, W_u, E_u
+
+# def state_constraint_condenser(sys, X_N, switching_sequence):
+#     N = len(switching_sequence)
+#     X_sequence = [sys.state_domains[switching_sequence[i]] for i in range(N)]
+#     lhs_x = linalg.block_diag(*[X.lhs_min for X in X_sequence] + [X_N.lhs_min])
+#     rhs_x = np.vstack([X.rhs_min for X in X_sequence] + [X_N.rhs_min])
+#     A_bar, B_bar, c_bar = sys.condense(switching_sequence)
+#     G_x = lhs_x.dot(B_bar)
+#     W_x = rhs_x - lhs_x.dot(c_bar)
+#     E_x = - lhs_x.dot(A_bar)
+#     return G_x, W_x, E_x
+
 def constraint_condenser(sys, X_N, switching_sequence):
     N = len(switching_sequence)
-    G_u, W_u, E_u = input_constraint_condenser(sys, switching_sequence)
-    G_x, W_x, E_x = state_constraint_condenser(sys, X_N, switching_sequence)
-    G = np.vstack((G_u, G_x))
-    W = np.vstack((W_u, W_x))
-    E = np.vstack((E_u, E_x))
+    D_sequence = [sys.domains[switching_sequence[i]] for i in range(N)]
+    lhs_x = linalg.block_diag(*[D.lhs_min[:,:sys.n_x] for D in D_sequence] + [X_N.lhs_min])
+    lhs_u = linalg.block_diag(*[D.lhs_min[:,sys.n_x:] for D in D_sequence])
+    lhs_u = np.vstack((lhs_u, np.zeros((X_N.lhs_min.shape[0], lhs_u.shape[1]))))
+    rhs = np.vstack([D.rhs_min for D in D_sequence] + [X_N.rhs_min])
+    A_bar, B_bar, c_bar = sys.condense(switching_sequence)
+    G = (lhs_x.dot(B_bar) + lhs_u)
+    W = rhs - lhs_x.dot(c_bar)
+    E = - lhs_x.dot(A_bar)
     p = Polytope(np.hstack((G, -E)), W)
     p.assemble()
     if not p.empty:
@@ -918,24 +1073,6 @@ def constraint_condenser(sys, X_N, switching_sequence):
         E = None
     return G, W, E
 
-def input_constraint_condenser(sys, switching_sequence):
-    N = len(switching_sequence)
-    U_sequence = [sys.input_domains[switching_sequence[i]] for i in range(N)]
-    G_u = linalg.block_diag(*[U.lhs_min for U in U_sequence])
-    W_u = np.vstack([U.rhs_min for U in U_sequence])
-    E_u = np.zeros((W_u.shape[0], sys.n_x))
-    return G_u, W_u, E_u
-
-def state_constraint_condenser(sys, X_N, switching_sequence):
-    N = len(switching_sequence)
-    X_sequence = [sys.state_domains[switching_sequence[i]] for i in range(N)]
-    lhs_x = linalg.block_diag(*[X.lhs_min for X in X_sequence] + [X_N.lhs_min])
-    rhs_x = np.vstack([X.rhs_min for X in X_sequence] + [X_N.rhs_min])
-    A_bar, B_bar, c_bar = sys.condense(switching_sequence)
-    G_x = lhs_x.dot(B_bar)
-    W_x = rhs_x - lhs_x.dot(c_bar)
-    E_x = - lhs_x.dot(A_bar)
-    return G_x, W_x, E_x
 
 def linear_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
     """

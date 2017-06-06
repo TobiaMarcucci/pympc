@@ -108,7 +108,7 @@ class TestMPCTools(unittest.TestCase):
         U = [U_1, U_2]
 
         # PWA system
-        pwa_sys = ds.DTPWASystem(sys, X, U)
+        pwa_sys = ds.DTPWASystem.from_orthogonal_domains(sys, X, U)
 
         # hybrid controller
         N = 10

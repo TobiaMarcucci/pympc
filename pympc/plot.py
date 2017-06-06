@@ -200,13 +200,11 @@ def grouped_state_partition(critical_regions, active_set=False, first_input=Fals
 
 
 def optimal_value_function(critical_regions):
-    vertices = np.zeros((0,2))
-    for cr in critical_regions:
-        vertices = np.vstack((vertices, cr.polytope.vertices))
-    x_max = max([vertex[0] for vertex in vertices])
-    x_min = min([vertex[0] for vertex in vertices])
-    y_max = max([vertex[1] for vertex in vertices])
-    y_min = min([vertex[1] for vertex in vertices])
+    vertices = [vertex for cr in critical_regions for vertex in cr.polytope.vertices]
+    x_max = max([vertex[0,0] for vertex in vertices])
+    x_min = min([vertex[0,0] for vertex in vertices])
+    y_max = max([vertex[1,0] for vertex in vertices])
+    y_min = min([vertex[1,0] for vertex in vertices])
     x = np.arange(x_min, x_max, (x_max-x_min)/100.)
     y = np.arange(y_min, y_max, (y_max-y_min)/100.)
     X, Y = np.meshgrid(x, y)

@@ -101,7 +101,7 @@ class TestGeometry(unittest.TestCase):
         p.assemble()
         self.assertFalse(p.empty)
         self.assertTrue(p.bounded)
-        true_vertices = [[.5,.5],[-.2,.5],[-.2,-1.],[.5,-1.]]
+        true_vertices = [np.array([[.5],[.5]]),np.array([[-.2],[.5]]),np.array([[-.2],[-1.]]),np.array([[.5],[-1.]])]
         self.assertTrue(all([any(np.all(np.isclose(vertex, true_vertices),axis=1)) for vertex in p.vertices]))
 
         # intersection and inclusion
