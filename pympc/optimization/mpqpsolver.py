@@ -165,16 +165,16 @@ class MPQPSolver:
         cost[candidate_active_set.index(active_set_change[0])] = -1.
         cons_lhs = np.vstack((G_A.T, -G_A.T, -np.eye(n_lam)))
         cons_rhs = np.vstack((-self.qp.H.dot(z_center), self.qp.H.dot(z_center), np.zeros((n_lam,1))))
-        lambda_sol = linear_program(cost, cons_lhs, cons_rhs)[0]
+        sol = linear_program(cost, cons_lhs, cons_rhs)
 
         # if the solution in unbounded the region is unfeasible
         active_set = []
-        if any(np.isnan(lambda_sol)):
+        if any(np.isnan(sol.argmin)):
             return active_set
 
         # if the solution in bounded look at the indices of the solution to derive the active set
         for i in range(0, n_lam):
-            if lambda_sol[i] > toll:
+            if sol.argmin[i] > toll:
                 active_set += [candidate_active_set[i]]
         return active_set
 
@@ -267,14 +267,14 @@ class CriticalRegion:
         self.z_offset = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_offset))
         self.z_linear = - qp.H_inv.dot(G_A.T.dot(self.lambda_A_linear))
 
+        # optimal value function explicit solution: V_star = .5 x' V_quadratic x + V_linear x + V_offset
+        self.V_quadratic = self.z_linear.T.dot(qp.H).dot(self.z_linear) + qp.F_xx_q
+        self.V_linear = self.z_offset.T.dot(qp.H).dot(self.z_linear) + qp.F_x_q.T
+        self.V_offset = qp.F_q + .5*self.z_offset.T.dot(qp.H).dot(self.z_offset)
+
         # primal original variables explicit solution
         self.u_offset = self.z_offset - qp.H_inv.dot(qp.F_u)
         self.u_linear = self.z_linear - qp.H_inv.dot(qp.F_xu.T)
-
-        # optimal value function explicit solution: V_star = .5 x' V_quadratic x + V_linear x + V_offset
-        self.V_quadratic = self.u_linear.T.dot(qp.F_uu).dot(self.u_linear) + qp.F_xx + 2.*qp.F_xu.dot(self.u_linear)
-        self.V_linear = self.u_offset.T.dot(qp.F_uu).dot(self.u_linear) + self.u_offset.T.dot(qp.F_xu.T) + qp.F_u.T.dot(self.u_linear) + qp.F_x.T
-        self.V_offset = .5*self.u_offset.T.dot(qp.F_uu).dot(self.u_offset) + qp.F_u.T.dot(self.u_offset) + qp.F
 
         # equation (12) (modified: only inactive indices considered)
         lhs_type_1 = G_I.dot(self.z_linear) - S_I

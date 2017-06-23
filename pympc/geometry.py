@@ -3,13 +3,14 @@ from optimization.gurobi import linear_program
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
 import gurobipy as grb
 from optimization.gurobi import point_inside_polyhedron, real_variable, iff_point_in_halfspace
-# from optimization.gurobi import iff_point_in_polyhedron
 import scipy.spatial as spatial
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import matplotlib.patches as patches
 import copy
 import time
+import cdd
+
 
 class Polytope:
     """
@@ -77,13 +78,35 @@ class Polytope:
         self._x_max = None
         return self
 
-    def normalize(self, toll=1e-9):
+    def assemble_light(self):
+        if self.assembled:
+            raise ValueError('Polytope already assembled, cannot assemble again!')
+        self.assembled = True
+        [self.n_facets, self.n_variables] = self.A.shape
+        self.normalize()
+        self.check_emptiness()
+        if self.empty:
+            return
+        # self.find_minimal_facets_cddlib()
+        # print 'shapes ccd',self.lhs_min.shape
+        # self.find_minimal_facets()
+        # print 'shapes me',self.lhs_min.shape
+        self.lhs_min = self.A
+        self.rhs_min = self.b
+        self._facet_centers = [None] * self.n_facets
+        self._facet_radii = [None] * self.n_facets
+        self._vertices = None
+        self._x_min = None
+        self._x_max = None
+        return
+
+    def normalize(self, tol=1e-9):
         """
         Normalizes the H-polytope dividing each row of A by its norm and each entry of b by the norm of the corresponding row of A.
         """
         for i in range(0, self.n_facets):
             norm_factor = np.linalg.norm(self.A[i,:])
-            if norm_factor > toll:
+            if norm_factor > tol:
                 self.A[i,:] = self.A[i,:]/norm_factor
                 self.b[i] = self.b[i]/norm_factor
         return self
@@ -99,7 +122,7 @@ class Polytope:
             print('Empty polytope!')
         return
 
-    def check_boundedness(self, toll=1.e-9):
+    def check_boundedness(self, tol=1.e-9):
         """
         Checks if the polyhedron is bounded: a polyhedron is unbounded (i.e. a polytope) iff there exists an x != 0 in the recession cone (A*x <= 0). We also have that { exists x != 0 | A*x <= 0 } <=> { exists z < 0 | A^T*z = 0 }. The second condition is tested through a LP.
         """
@@ -110,7 +133,7 @@ class Polytope:
             self.bounded = False
             return
         # if ker(A) != 0
-        rank_A = np.linalg.matrix_rank(self.A, toll)
+        rank_A = np.linalg.matrix_rank(self.A, tol)
         dim_null_A = self.A.shape[1] - rank_A
         if dim_null_A > 0:
             self.bounded = False
@@ -121,13 +144,13 @@ class Polytope:
         b = - np.ones((self.A.shape[0],1))
         C = self.A.T
         d = np.zeros((self.A.shape[1],1))
-        feasible_point, _ = linear_program(f, A, b, C, d)
-        if any(np.isnan(feasible_point)):
+        sol = linear_program(f, A, b, C, d)
+        if any(np.isnan(sol.argmin)):
             self.bounded = False
             print 'Boundedness test failed!'
         return
 
-    def find_coincident_facets(self, rel_toll=1e-9, abs_toll=1e-9):
+    def find_coincident_facets(self, rel_tol=1e-9, abs_tol=1e-9):
         """
         For each facet of the (potentially redundant) polytope finds the set of coincident facets and stores a list whose ith entry is the list of the facetes coincident with the ith facets (the index i itself is included in this list; e.g., if the ith and the jth facets are coincident coincident_facets[i] = coincident_facets[j] = [i,j]).
         """
@@ -135,19 +158,19 @@ class Polytope:
         self.coincident_facets = []
         Ab = np.hstack((self.A, self.b))
         for i in range(0, self.n_facets):
-            coincident_flag_matrix = np.isclose(Ab, Ab[i,:], rel_toll, abs_toll)
+            coincident_flag_matrix = np.isclose(Ab, Ab[i,:], rel_tol, abs_tol)
             coincident_flag_vector = np.all(coincident_flag_matrix, axis=1)
             coincident_facets_i = sorted(np.where(coincident_flag_vector)[0].tolist())
             self.coincident_facets.append(coincident_facets_i)
         return
 
-    def find_minimal_facets(self, toll=1e-9):
+    def find_minimal_facets(self, tol=1e-9):
         """
         Finds the non-redundant facets and derives a minimal representation of the polyhedron solving a LP for each facet. See "Fukuda - Frequently asked questions in polyhedral computation" Sec.2.21.
         """
         # list of non-redundant facets
-        self.minimal_facets = range(0, self.n_facets)
-        for i in range(0, self.n_facets):
+        self.minimal_facets = range(self.n_facets)
+        for i in range(self.n_facets):
             # remove redundant constraints
             A_reduced = self.A[self.minimal_facets,:]
             # relax the ith constraint
@@ -155,9 +178,10 @@ class Polytope:
             b_relaxation[i] += 1.
             b_relaxed = (self.b + b_relaxation)[self.minimal_facets];
             # check redundancy
-            cost_i = - linear_program(-self.A[i,:], A_reduced, b_relaxed)[1]
+            sol = linear_program(-self.A[i,:], A_reduced, b_relaxed)
+            cost_i = - sol.min
             # remove redundant facets from the list
-            if cost_i - self.b[i] < toll or np.isnan(cost_i):
+            if cost_i - self.b[i] < tol or np.isnan(cost_i):
                 self.minimal_facets.remove(i)
         # list of non redundant facets
         self.lhs_min = self.A[self.minimal_facets,:]
@@ -213,8 +237,8 @@ class Polytope:
             for i in range(self.n_variables):
                 f = np.zeros((self.n_variables, 1))
                 f[i,:] += 1.
-                x_min_i = linear_program(f, self.lhs_min, self.rhs_min)[1]
-                self._x_min.append([x_min_i])
+                sol = linear_program(f, self.lhs_min, self.rhs_min)
+                self._x_min.append([sol.min])
             self._x_min = np.array(self._x_min)
         return self._x_min
 
@@ -225,26 +249,57 @@ class Polytope:
             for i in range(self.n_variables):
                 f = np.zeros((self.n_variables, 1))
                 f[i,:] += 1.
-                x_max_i = -linear_program(-f, self.lhs_min, self.rhs_min)[1]
-                self._x_max.append([x_max_i])
+                sol = linear_program(-f, self.lhs_min, self.rhs_min)
+                self._x_max.append([-sol.min])
             self._x_max = np.array(self._x_max)
         return self._x_max
 
-    def orthogonal_projection(self, dim_proj):
+    def orthogonal_projection(self, residual_variables):
         """
         Projects the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
         """
+        drop_variables = [i+1 for i in range(self.n_variables) if i not in residual_variables]
+        M = np.hstack((self.rhs_min, -self.lhs_min))
+        print M.shape
+        M = cdd.Matrix([list(m) for m in M])
+        M.rep_type = cdd.RepType.INEQUALITY
+        M_proj = M.block_elimination(drop_variables)
+        M_proj.canonicalize()
+        A_proj = - np.array([list(M_proj[i])[1:] for i in range(M_proj.row_size)])
+        b_proj = np.array([list(M_proj[i])[:1] for i in range(M_proj.row_size)])
+        p_proj = Polytope(A_proj,b_proj)
+        p_proj.assemble() #p_proj.assemble_light()
+        return p_proj
+
+    def orthogonal_projection_from_vertices(self, dim_proj):
+        """
+        Projects the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
+        """
+        
         vertices_proj = np.hstack(self.vertices).T[:,dim_proj]
         if len(dim_proj) > 1:
             hull = spatial.ConvexHull(vertices_proj)
             lhs = np.array(hull.equations)[:, :-1]
-            rhs = - (np.array(hull.equations)[:, -1]).reshape((lhs.shape[0], 1))
+            rhs = - np.array(hull.equations)[:, -1:]
         else:
             lhs = np.array([[1.],[-1.]])
             rhs = np.array([[max(vertices_proj)[0]],[-min(vertices_proj)[0]]])
         projected_polytope = Polytope(lhs, rhs)
-        projected_polytope.assemble()
+        projected_polytope.assemble() #projected_polytope.assemble_light()
         return projected_polytope
+
+    def find_minimal_facets_cddlib(self):
+        M = np.hstack((self.A, -self.b))
+        M = cdd.Matrix([list(m) for m in M])
+        M.rep_type = cdd.RepType.INEQUALITY
+        p = cdd.Polyhedron(M)
+        print 'before canonicalize', p.get_generators()
+        M.canonicalize()
+        p = cdd.Polyhedron(M)
+        print 'after canonicalize', p.get_generators()
+        self.lhs_min = - np.array([list(M[i])[1:] for i in range(M.row_size)])
+        self.rhs_min = np.array([list(M[i])[:1] for i in range(M.row_size)])
+        return
 
     def intersect_with(self, p):
         """
@@ -254,8 +309,8 @@ class Polytope:
         A = np.vstack((self.lhs_min, p.lhs_min))
         b = np.vstack((self.rhs_min, p.rhs_min))
         f = np.zeros((A.shape[1],1))
-        feasible_point = linear_program(f, A, b)[0]
-        if any(np.isnan(feasible_point)):
+        sol = linear_program(f, A, b)
+        if any(np.isnan(sol.argmin)):
             intersection = False
         return intersection
 
@@ -265,7 +320,8 @@ class Polytope:
         """
         inclusion = True
         for i in range(p.lhs_min.shape[0]):
-            penetration = - linear_program(-p.lhs_min[i,:], self.lhs_min, self.rhs_min)[1] - p.rhs_min[i]
+            sol = linear_program(-p.lhs_min[i,:], self.lhs_min, self.rhs_min)
+            penetration = - sol.min - p.rhs_min[i]
             if penetration > tol:
                 inclusion = False
                 break
@@ -318,67 +374,6 @@ class Polytope:
             inclusion = False
 
         return inclusion
-
-
-
-    # def included_in_union_of(self, p_list):
-    #     """
-    #     Checks if the polytope is a subset of the union of the polytopes in p_list (returns True or False).
-    #     """
-
-    #     # check if it is included in one
-    #     for p in p_list:
-    #         if self.included_in(p):
-    #             return True
-
-    #     # list of polytope with which it has non-empty intersection
-    #     intersection_list = []
-    #     for i, p in enumerate(p_list):
-    #         if self.intersect_with(p):
-    #             intersection_list.append(i)
-    #     print intersection_list
-
-    #     # milp
-    #     model = grb.Model()
-    #     x, model = real_variable(model, [self.n_variables])
-
-    #     # domain
-    #     model = point_inside_polyhedron(model, self.lhs_min, self.rhs_min, x)
-
-    #     # point not in polyhedra
-    #     d = []
-    #     s = []
-    #     for i in intersection_list:
-    #         p = p_list[i]
-    #         model, d_i, s_i = iff_point_in_polyhedron(model, p.lhs_min, p.rhs_min, x, self)
-    #         d.append(d_i)
-    #         s.append(s_i)
-
-    #     # objective
-    #     objective = sum(d) + sum(s)
-    #     model.setObjective(objective)
-
-    #     # run optimization
-    #     model.setParam('OutputFlag', False)
-    #     model.optimize()
-
-    #     # return solution
-    #     inclusion = True
-    #     if model.status == grb.GRB.Status.OPTIMAL:
-    #         d_star = model.getAttr('x', d)
-    #         print 'cost', model.objVal
-    #         print 's', model.getAttr('x', s)
-    #         x_star = model.getAttr('x', x)[0]
-    #         print 'max residuals',[np.max(p_list[i].lhs_min*x_star - p_list[i].rhs_min) for i in intersection_list]
-    #         print 'd', d_star
-    #         print 'x', x_star
-
-    #         if round(sum(d_star)) == 0:
-    #             inclusion = False
-    #     else:
-    #         raise ValueError('Unfeasible milp')
-
-    #     return inclusion
 
     def plot(self, dim_proj=[0,1], largest_ball=False, **kwargs):
         """
@@ -444,133 +439,6 @@ class Polytope:
 
         return is_inside
 
-
-    # def fourier_motzkin_elimination(self, variable_index, tol=1.e-12):
-    #     [n_facets, n_variables] = self.lhs_min.shape
-    #     lhs_leq = np.zeros((0, n_variables-1))
-    #     rhs_leq = np.zeros((0, 1))
-    #     lhs_geq = np.zeros((0, n_variables-1))
-    #     rhs_geq = np.zeros((0, 1))
-    #     lhs = np.zeros((0, n_variables-1))
-    #     rhs = np.zeros((0, 1))
-    #     for i in range(n_facets):
-    #         pivot = self.lhs_min[i, variable_index]
-    #         lhs_row = np.hstack((self.lhs_min[i,:variable_index], self.lhs_min[i,variable_index+1:]))
-    #         rhs_row = self.rhs_min[i, 0]
-    #         if pivot > tol:
-    #             lhs_leq = np.vstack((lhs_leq, lhs_row/pivot))
-    #             rhs_leq = np.vstack((rhs_leq, rhs_row/pivot))
-    #         elif pivot < -tol:
-    #             lhs_geq = np.vstack((lhs_geq, lhs_row/pivot))
-    #             rhs_geq = np.vstack((rhs_geq, rhs_row/pivot))
-    #         else:
-    #             lhs = np.vstack((lhs, lhs_row))
-    #             rhs = np.vstack((rhs, rhs_row))
-    #     for i in range(lhs_leq.shape[0]):
-    #         for j in range(lhs_geq.shape[0]):
-    #             lhs_row = lhs_leq[i,:] - lhs_geq[j,:]
-    #             rhs_row = rhs_leq[i,0] - rhs_geq[j,0]
-    #             lhs = np.vstack((lhs, lhs_row))
-    #             rhs = np.vstack((rhs, rhs_row))
-    #     p = Polytope(lhs,rhs)
-    #     p.assemble()
-    #     return p
-
-
-    # def orthogonal_projection_test(self, projection_dimensions, tol=1.e-8):
-
-    #     # find first 2 vertices of the projection minimizing and maximizing in the first direction
-    #     growth_direction = np.zeros((self.n_variables, 1))
-    #     growth_direction[projection_dimensions[0],0] = 1.
-        
-    #     v0 = linear_program(-growth_direction, self.lhs_min, self.rhs_min)[0]
-    #     v1 = linear_program(growth_direction, self.lhs_min, self.rhs_min)[0]
-    #     v_list = [v0[projection_dimensions], v1[projection_dimensions]]
-
-    #     # find inner approximation of the convex hull of the projection
-    #     for i in range(2, len(projection_dimensions)+1):
-
-    #         # find the gradient of plane conataining all the vertices in the lower-dimensional space (lhs * x = rhs = 1)
-    #         growth_direction = np.zeros((self.n_variables, 1))
-    #         v_lower_dim = np.hstack([v[:i] for v in v_list])
-    #         gradient_lower_dim = np.sum(np.linalg.inv(v_lower_dim), axis=0)
-    #         growth_direction[projection_dimensions[:i],0] = gradient_lower_dim
-
-    #         # move in the (+-) growth_direction to find a vertex
-    #         vi = linear_program(growth_direction, self.lhs_min, self.rhs_min)[0]
-    #         vi = vi[projection_dimensions]
-    #         if any([np.linalg.norm(vi - v) < tol for v in v_list]):
-                
-    #             vi = linear_program(-growth_direction, self.lhs_min, self.rhs_min)[0]
-    #             vi = vi[projection_dimensions]
-    #         v_list.append(vi)
-
-    #     # check that the number of vertices is the roght one
-    #     if len(v_list) != len(projection_dimensions)+1:
-    #         raise ValueError('Not enough vertices from the pre-processing phase!')
-
-    #     # compute the remaining vertices of the projection
-    #     # initialize the polytope projection
-    #     convergence = False
-    #     lhs_projection = []
-    #     rhs_projection = []
-    #     hull = spatial.ConvexHull(np.hstack(v_list).T, incremental=True)
-
-    #     # check if each facet is a boundary
-    #     while not convergence:
-    #         internal_facets = 0
-    #         v_new = []
-
-    #         # temporary H-rep of the projection
-    #         lhs_temp = np.array(hull.equations)[:, :-1]
-    #         rhs_temp = - (np.array(hull.equations)[:, -1:])
-
-    #         # temporary H-rep of the projection in the higher dimensional sapce
-    #         lhs_temp_higher_dim = np.zeros((lhs_temp.shape[0], self.n_variables))
-    #         lhs_temp_higher_dim[:,projection_dimensions] = lhs_temp
-
-    #         for i in range(lhs_temp.shape[0]):
-    #             if not any([np.linalg.norm(lhs_temp[i,:] - facet) < tol for facet in lhs_projection]):
-    #                 vi, ci = linear_program(-lhs_temp_higher_dim[i,:], self.lhs_min, self.rhs_min)
-    #                 vi = vi[projection_dimensions]
-    #                 if - rhs_temp[i,0] - ci > tol:
-    #                     internal_facets += 1
-    #                     if all([np.linalg.norm(vi - v) > tol for v in v_list]):
-    #                         v_new.append(vi)
-    #                         v_list.append(vi)
-    #                 else:
-    #                     lhs_projection.append(lhs_temp[i,:])
-    #                     rhs_projection.append([rhs_temp[i,0]])
-
-    #         if internal_facets == 0:
-    #             convergence = True
-    #         else:
-    #             hull.add_points(np.hstack(v_new).T)
-
-    #     p = Polytope(np.array(lhs_projection), np.array(rhs_projection))
-    #     p.assemble()
-    #     p.vertices = hull.points
-
-    #     return p
-
-
-
-
-    # def orthogonal_projection(self, projection_dimensions):
-    #     """
-    #     Projects the polytope in the given directions: from H-rep to V-rep, keeps the component of the vertices in the projected dimensions, from V-rep to H-rep.
-    #     """
-    #     remove_dimensions = sorted(list(set(range(self.lhs_min.shape[1])) - set(projection_dimensions)))
-    #     p = self
-    #     for dimension in reversed(remove_dimensions):
-    #         p = p.fourier_motzkin_elimination(dimension)
-    #     return p
-
-
-
-
-
-
 ### AUXILIARY FUNCTIONS
 
 def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
@@ -614,7 +482,9 @@ def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     f_lp[-1] = 1.
     A_row_norm = np.reshape(np.linalg.norm(A_projected, axis=1), (n_facets, 1))
     A_lp = np.hstack((A_projected, -A_row_norm))
-    center, radius = linear_program(f_lp, A_lp, b_projected)
+    sol = linear_program(f_lp, A_lp, b_projected)
+    center = sol.argmin
+    radius = sol.min
     center = center[0:-1]
     radius = -radius
     if C is not None and d is not None:
@@ -637,11 +507,3 @@ def nullspace_basis(A):
     rank = np.linalg.matrix_rank(A)
     Z = V[:,rank:]
     return Z
-
-
-
-
-
-
-
-

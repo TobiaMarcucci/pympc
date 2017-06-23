@@ -278,6 +278,7 @@ def moas(A, X):
         raise ValueError('Cannot compute MOAS for unstable systems')
 
     # Gilber and Tan algorithm
+    print 'Computation of MOAS started...',
     [n_constraints, n_variables] = X.lhs_min.shape
     t = 0
     convergence = False
@@ -287,14 +288,14 @@ def moas(A, X):
         J = X.lhs_min.dot(np.linalg.matrix_power(A,t+1))
 
         # constraints to each LP
-        cons_lhs = np.vstack([X.lhs_min.dot(np.linalg.matrix_power(A,k)) for k in range(0,t+1)])
-        cons_rhs = np.vstack([X.rhs_min for k in range(0,t+1)])
+        cons_lhs = np.vstack([X.lhs_min.dot(np.linalg.matrix_power(A,k)) for k in range(t+1)])
+        cons_rhs = np.vstack([X.rhs_min for k in range(t+1)])
 
         # list of all minima
         J_sol = []
-        for i in range(0, n_constraints):
-            J_sol_i = linear_program(np.reshape(-J[i,:], (n_variables,1)), cons_lhs, cons_rhs)[1]
-            J_sol.append(-J_sol_i - X.rhs_min[i])
+        for i in range(n_constraints):
+            sol = linear_program(np.reshape(-J[i,:], (n_variables,1)), cons_lhs, cons_rhs)
+            J_sol.append(-sol.min - X.rhs_min[i])
 
         # convergence check
         if np.max(J_sol) < 0:
@@ -303,7 +304,10 @@ def moas(A, X):
             t += 1
 
     # define polytope
+    print 'MOAS found.'
+    print 'MOAS facets are ' + str(cons_lhs.shape[0]) + ', removing redundant ones...',
     moas = Polytope(cons_lhs, cons_rhs)
     moas.assemble()
+    print 'redundant factes removed, MOAS facets are ' + str(moas.lhs_min.shape[0]) + '.'
 
     return moas

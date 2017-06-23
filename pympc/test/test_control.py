@@ -54,7 +54,7 @@ class TestMPCTools(unittest.TestCase):
         X_N = ds.moas_closed_loop(sys.A, sys.B, K, X, U)
         controller = MPCController(sys, N, objective_norm, Q, R, P, X, U, X_N)
 
-        # explicit vs implicit solution + feasibility region
+        # explicit vs implicit solution
         controller.get_explicit_solution()
         n_test = 100
         for i in range(n_test):
@@ -68,11 +68,11 @@ class TestMPCTools(unittest.TestCase):
                 self.assertTrue(all(np.isnan(u_implicit)))
                 self.assertTrue(np.isnan(V_explicit))
                 self.assertTrue(np.isnan(V_implicit))
-                self.assertFalse(controller.condensed_program.feasible_set.applies_to(x0))
+                # self.assertFalse(controller.condensed_program.feasible_set.applies_to(x0))
             else:
-                self.assertTrue(all(np.isclose(u_explicit, u_implicit, rtol=1.e-04).flatten()))
-                self.assertTrue(np.isclose(V_explicit, V_implicit, rtol=1.e-04))
-                self.assertTrue(controller.condensed_program.feasible_set.applies_to(x0))
+                self.assertTrue(all(np.isclose(u_explicit, u_implicit, rtol=1.e-4).flatten()))
+                self.assertTrue(np.isclose(V_explicit, V_implicit, rtol=1.e-4))
+                # self.assertTrue(controller.condensed_program.feasible_set.applies_to(x0))
 
     def test_MPCHybridController(self):
 
@@ -122,14 +122,41 @@ class TestMPCTools(unittest.TestCase):
             # compare the cost of the MIP and the condensed program
             n_test = 100
             for i in range(n_test):
-                x0 = np.random.rand(2,1)
-                u_mip, V_mip, ss = controller.feedforward(x0)
-                if not any(np.isnan(ss)):
+                x0 = np.random.rand(A_1.shape[0], 1)
+                u_mip, _, ss, V_mip = controller.feedforward(x0)
+                if not np.isnan(V_mip):
                     prog = controller.condense_program(ss)
-                    u_condensed, V_condensed = prog.solve(x0)
-                    #print np.linalg.norm(u_mip-u_condensed)
-                    #self.assertTrue(all(np.isclose(u_mip, u_condensed).flatten()))
+                    u_condensed, V_condensed = prog.solve(x0, u_length=B_1.shape[1])
+                    argmin_error = max([np.linalg.norm(u_mip[i] - u_condensed[i]) for i in range(len(u_mip))])
+                    # if not argmin_error < 1.e-5:
+                    #     print argmin_error, objective_norm
                     self.assertTrue(np.isclose(V_mip, V_condensed))
+                    if objective_norm == 'two':
+                        self.assertTrue(argmin_error < 1.e-4)
+
+        # backwards reachability analysis
+        n_test = 100
+        ss_list = []
+        for i in range(n_test):
+            x0 = np.random.rand(A_1.shape[0], 1)
+            ss = controller.feedforward(x0)[2]
+            if not any(np.isnan(ss)) and ss not in ss_list:
+                ss_list.append(ss)
+                prog = controller.condense_program(ss)
+                fs = controller.backwards_reachability_analysis(ss)
+                fs_od = controller.backwards_reachability_analysis_from_orthogonal_domains(ss, X, U)
+                self.assertTrue(len(fs.vertices), len(fs_od.vertices))
+                for v in fs.vertices:
+                    self.assertTrue(any([np.allclose(v, v_od) for v_od in fs_od.vertices]))
+                for j in range(n_test):
+                    x0 = np.random.rand(A_1.shape[0], 1)
+                    V_star = prog.solve(x0)[1]
+                    if np.isnan(V_star):
+                        self.assertFalse(fs.applies_to(x0))
+                        self.assertFalse(fs_od.applies_to(x0))
+                    else:
+                        self.assertTrue(fs.applies_to(x0))
+                        self.assertTrue(fs_od.applies_to(x0))
 
 if __name__ == '__main__':
     unittest.main()

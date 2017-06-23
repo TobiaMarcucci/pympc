@@ -34,7 +34,7 @@ def input_sequence(u_sequence, t_s, u_bounds=None):
 
         # miscellaneous options
         plt.ylabel(r'$u_{' + str(i+1) + '}$')
-        plt.xlim((0.,N*t_s))
+        plt.xlim((0., N*t_s))
         if i == 0:
             if u_bounds is not None:
                 plt.legend([input_plot, bound_plot], ['Optimal control', 'Control bounds'], loc=1)
@@ -77,7 +77,7 @@ def state_trajectory(x_trajectory, t_s, x_bounds=None):
 
         # miscellaneous options
         plt.ylabel(r'$x_{' + str(i+1) + '}$')
-        plt.xlim((0.,N*t_s))
+        plt.xlim((0., N*t_s))
         if i == 0:
             if x_bounds is not None:
                 plt.legend([state_plot, bound_plot], ['Optimal trajectory', 'State bounds'], loc=1)
@@ -124,10 +124,10 @@ def output_trajectory(C, x_trajectory, t_s, y_bounds=None):
 
         # miscellaneous options
         plt.ylabel(r'$y_{' + str(i+1) + '}$')
-        plt.xlim((0.,N*t_s))
+        plt.xlim((0., N*t_s))
         if i == 0:
             if y_bounds is not None:
-                plt.legend([state_plot, bound_plot], ['Optimal trajectory', 'State bounds'], loc=1)
+                plt.legend([state_plot, bound_plot], ['Optimal trajectory', 'Output bounds'], loc=1)
             else:
                 plt.legend([state_plot], ['Optimal trajectory'], loc=1)
     plt.xlabel(r'$t$')

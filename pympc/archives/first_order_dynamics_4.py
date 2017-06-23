@@ -61,11 +61,11 @@ U = [U_1, U_2, U_3]
 
 # pwa system
 
-pwa_sys = ds.DTPWASystem(sys, X, U)
+pwa_sys = ds.DTPWASystem.from_orthogonal_domains(sys, X, U)
 
 # controller
 
-N = 10
+N = 5
 Q = np.eye(A_2.shape[0])
 R = np.eye(B_2.shape[1])
 P = Q
@@ -78,20 +78,21 @@ controller = MPCHybridController(pwa_sys, N, objective_norm, Q, R, P, X_N)
 
 # initiliazation library
 
-n_samples = 100
 policy = HybridPolicyLibrary(controller)
-policy.sample_policy_randomly(n_samples)
 
-# add shifted sequences
+# coverage
 
+n_samples = 100
 terminal_domain = 1
-policy.add_shifted_sequences(terminal_domain)
+policy.sample_policy(n_samples, terminal_domain)
 
-# bounds
+# bound optimal value functions
 
+n_samples = 1000
 policy.add_vertices_of_feasible_regions()
-policy.bound_cost_from_above()
-policy.bound_cost_from_below()
+policy.bound_optimal_value_functions(n_samples)
+
+
 
 
 ### plot
@@ -107,15 +108,15 @@ plt.plot(x_samples, V_samples, color='black', linewidth=3)
 
 # bounds
 
-for ss, book in policy.library.items():
+for ss, ss_value in policy.library.items():
 
     # x samples
     col = np.random.rand(3,1)
-    vertices = sorted([vertex[0,0] for vertex in book['feasible_set'].vertices])
+    vertices = sorted([vertex[0,0] for vertex in ss_value['feasible_set'].vertices])
     x_samples = list(np.linspace(vertices[0], vertices[1], n_samples))
 
     # sample real value function
-    V_samples = [book['program'].solve(np.array([[x]]))[1] for x in x_samples]
+    V_samples = [ss_value['program'].solve(np.array([[x]]))[1] for x in x_samples]
     plt.plot(x_samples, V_samples, color=col)
 
     # sample bounds
@@ -124,27 +125,21 @@ for ss, book in policy.library.items():
     plt.plot(x_samples, lb_samples, color=col, linestyle='--')
     plt.plot(x_samples, ub_samples, color=col, linestyle='-.')
 
-# plot samples
-
-for ss_values in policy.library.values():
-    for as_values in ss_values['active_sets'].values():
-        for i, x in enumerate(as_values['x']):
-            if as_values['optimal'][i]:
-                plt.scatter(x[0,0], as_values['V'][i], facecolors='none', edgecolors='r')
-
 plt.show()
+
 
 # simulate closed loop
 
-N_sim = 100
+N_sim = 50
 x_0 = np.array([[2.9]])
 u = []
 x = []
 u_miqp = []
 my_times = []
 miqp_times = []
-x.append(x_1)
+x.append(x_0)
 for k in range(N_sim):
+
     tic = time.time()
     u.append(policy.feedback(x[k]))
     my_times.append(time.time() - tic)

@@ -1,7 +1,10 @@
 import gurobipy as grb
 import numpy as np
+from collections import namedtuple
 
-def linear_program(f, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
+LPSolution = namedtuple('LPSolution',  ['argmin', 'min', 'active_set', 'inequality_multipliers', 'equality_multipliers', 'primal_degenerate', 'dual_degenerate'])
+
+def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
     """
     Solves the linear program
     min  f^T x
@@ -19,43 +22,69 @@ def linear_program(f, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
 
     # optimization variables
     n_x = f.shape[0]
-    if x_lb is None:
-        x_lb = [- grb.GRB.INFINITY]*n_x
-    if x_ub is None:
-        x_ub = [grb.GRB.INFINITY]*n_x
-    x = model.addVars(n_x, lb=x_lb, ub=x_ub, name='x')
+    x = model.addVars(n_x, lb=[- grb.GRB.INFINITY]*n_x, name='x')
     x_np = np.array([[x[i]] for i in range(n_x)])
 
     with suppress_stdout():
 
         # inequality constraints
+        n_ineq = 0
         if A is not None and b is not None:
+            n_ineq = A.shape[0]
             expr = A.dot(x_np) - b
-            model.addConstrs((expr[i,0] <= 0. for i in range(A.shape[0])))
+            inequalities = model.addConstrs((expr[i,0] <= 0. for i in range(n_ineq)))
 
         # equality constraints
+        n_eq = 0
         if C is not None and d is not None:
+            n_eq = C.shape[0]
             expr = C.dot(x_np) - d
-            model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
+            equalities = model.addConstrs((expr[i,0] == 0. for i in range(n_eq)))
 
         # cost function
         f = np.reshape(f, (n_x, 1))
         V = f.T.dot(x_np)[0,0]
         model.setObjective(V)
 
+    # initialize output
+    x_star = np.full((n_x,1), np.nan)
+    V_star = np.nan
+    active_set = None
+    mult_ineq = np.full((n_ineq,1), np.nan)
+    mult_eq = np.full((n_eq,1), np.nan)
+    primal_degenerate = None
+    dual_degenerate = None
+
     # run the optimization
     model.setParam('OutputFlag', False)
+    model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
+    model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
     model.optimize()
-
-    # return the result
+    
+    # populate output
     if model.status == grb.GRB.Status.OPTIMAL:
         x_star = np.array([[model.getAttr('x', x)[i]] for i in range(n_x)])
         V_star = V.getValue()
-    else:
-        x_star = np.full((n_x,1), np.nan)
-        V_star = np.nan
 
-    return x_star, V_star
+        # inequality constraints
+        if A is not None and b is not None:
+            mult_ineq = np.array([[-model.getAttr('Pi', inequalities)[i]] for i in range(n_ineq)])
+            active_set = [i for i in range(n_ineq) if model.getAttr('CBasis', inequalities)[i] == -1]
+            primal_degenerate = len(active_set) > n_x - n_eq
+            dual_degenerate = len(list(np.where(mult_ineq < tol)[0])) > n_ineq - n_x + n_eq
+
+        # equality constraints
+        if C is not None and d is not None:
+            mult_eq = np.array([[-model.getAttr('Pi', equalities)[i]] for i in range(n_eq)])
+
+    return LPSolution(
+        argmin = x_star,
+        min = V_star,
+        inequality_multipliers = mult_ineq,
+        equality_multipliers = mult_eq,
+        active_set = active_set,
+        primal_degenerate = primal_degenerate,
+        dual_degenerate = dual_degenerate)
 
 def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None):
     """
@@ -99,6 +128,8 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub
 
     # run the optimization
     model.setParam('OutputFlag', False)
+    model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
+    model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
     model.optimize()
 
     # return the result

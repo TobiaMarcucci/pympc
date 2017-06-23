@@ -11,6 +11,8 @@ from geometry import Polytope
 from dynamical_systems import DTAffineSystem, DTPWASystem
 from optimization.mpqpsolver import MPQPSolver, CriticalRegion
 from scipy.spatial import ConvexHull
+import cdd
+
 
 
 class MPCController:
@@ -68,6 +70,9 @@ class MPCController:
         return self.feedforward(x0)[0][0]
 
     def get_explicit_solution(self):
+        """
+        Attention: since the method remove_intial_state_contraints() modifies the variables of condensed_program, I have to call remove_linear_terms() again!
+        """
         self.condensed_program.remove_linear_terms()
         mpqp_solution = MPQPSolver(self.condensed_program)
         self.critical_regions = mpqp_solution.critical_regions
@@ -144,7 +149,8 @@ class MPCHybridController:
                 M_ij = []
                 if i != j:
                     for k in range(domain_i.lhs_min.shape[0]):
-                        M_ijk = (- linear_program(-domain_i.lhs_min[k,:], domain_j.lhs_min, domain_j.rhs_min)[1] - domain_i.rhs_min[k])[0]
+                        sol = linear_program(-domain_i.lhs_min[k,:], domain_j.lhs_min, domain_j.rhs_min)
+                        M_ijk = (- sol.min - domain_i.rhs_min[k])[0]
                         M_ij.append(M_ijk)
                 M_ij = np.reshape(M_ij, (len(M_ij), 1))
                 M_i.append(M_ij)
@@ -163,9 +169,11 @@ class MPCHybridController:
                 M_ij = []
                 m_ij = []
                 for k in range(lhs_i.shape[0]):
-                    M_ijk = (- linear_program(-lhs_i[k,:], domain_j.lhs_min, domain_j.rhs_min)[1] + rhs_i[k])[0]
+                    sol = linear_program(-lhs_i[k,:], domain_j.lhs_min, domain_j.rhs_min)
+                    M_ijk = (- sol.min + rhs_i[k])[0]
                     M_ij.append(M_ijk)
-                    m_ijk = (linear_program(lhs_i[k,:], domain_j.lhs_min, domain_j.rhs_min)[1] + rhs_i[k])[0]
+                    sol = linear_program(lhs_i[k,:], domain_j.lhs_min, domain_j.rhs_min)
+                    m_ijk = (sol.min + rhs_i[k])[0]
                     m_ij.append(m_ijk)
                 M_ij = np.reshape(M_ij, (len(M_ij), 1))
                 m_ij = np.reshape(m_ij, (len(m_ij), 1))
@@ -175,7 +183,7 @@ class MPCHybridController:
             self.m_dynamics.append(m_i)
         return
 
-    def feedforward(self, x0):
+    def feedforward(self, x0, u_ws=None, x_ws=None, ss_ws=None):
 
         # gurobi model
         model = grb.Model()
@@ -186,6 +194,31 @@ class MPCHybridController:
         z, model = real_variable(model, [self.N, self.sys.n_sys, self.sys.n_x])
         d = model.addVars(self.N, self.sys.n_sys, vtype=grb.GRB.BINARY, name='d')
         model.update()
+
+        # warm start
+        if x_ws is not None:
+            for i in range(self.sys.n_x):
+                for k in range(self.N+1):
+                    x[k,i].setAttr('Start', x_ws[k][i,0])
+            if ss_ws is not None:
+                for i in range(self.sys.n_x):
+                    for j in range(self.sys.n_sys):
+                        for k in range(self.N):
+                            if j == ss_ws[k]:
+                                z[k,j,i].setAttr('Start', x_ws[k+1][i,0])
+                            else:
+                                z[k,j,i].setAttr('Start', 0.)
+        if u_ws is not None:
+            for i in range(self.sys.n_u):
+                for k in range(self.N):
+                    u[k,i].setAttr('Start', u_ws[k][i,0])
+        if ss_ws is not None:
+            for j in range(self.sys.n_sys):
+                for k in range(self.N):
+                    if j == ss_ws[k]:
+                        d[k,j].setAttr('Start', 1)
+                    else:
+                        d[k,j].setAttr('Start', 0)
 
         # numpy variables (list of numpy matrices ordered in time)
         x_np = [np.array([[x[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
@@ -214,24 +247,32 @@ class MPCHybridController:
         if model.status != grb.GRB.Status.OPTIMAL:
             print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
             u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
-            # x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
+            x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
             cost = np.nan
             switching_sequence = [np.nan]*self.N
         else:
             cost = model.objVal
             u_feedforward = [np.array([[model.getAttr('x', u)[k,i]] for i in range(self.sys.n_u)]) for k in range(self.N)]
-            # x_trajectory = [np.array([[model.getAttr('x', x)[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
-            # u_feedforward = np.array([[model.getAttr('x', u)[k,i] for i in range(self.sys.n_u)] for k in range(self.N)])
+            x_trajectory = [np.array([[model.getAttr('x', x)[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
             d_star = [np.array([[model.getAttr('x', d)[k,i]] for i in range(self.sys.n_sys)]) for k in range(self.N)]
             switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
-        return u_feedforward, cost, tuple(switching_sequence)#, x_trajectory
+        return u_feedforward, x_trajectory, tuple(switching_sequence), cost
 
-    def mip_objective(self, model, x_np, u_np):
+    def mip_objective(self, model, x_np, u_np, x_ws=None, u_ws=None):
 
         # linear objective
         if self.objective_norm == 'one':
             phi = model.addVars(self.N+1, self.sys.n_x, name='phi')
+            if x_ws is not None:
+                for i in range(self.sys.n_x):
+                    for k in range(self.N):
+                        phi[k,i].setAttr('Start', self.Q[i,:].dot(x_ws[k]))
+                    phi[self.N,i].setAttr('Start', self.P[i,:].dot(x_ws[self.N]))
             psi = model.addVars(self.N, self.sys.n_u, name='psi')
+            if u_ws is not None:
+                for i in range(self.sys.n_u):
+                    for k in range(self.N):
+                        psi[k,i].setAttr('Start', self.R[i,:].dot(u_ws[k]))
             model.update()
             V = 0.
             for k in range(self.N+1):
@@ -321,28 +362,129 @@ class MPCHybridController:
         return OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
 
     def backwards_reachability_analysis(self, switching_sequence):
+        """
+        Returns the feasible set (Polytope) for the given switching sequence.
+        It consists in N orthogonal projections:
+        X_N := { x | G x <= g }
+        x_N = A_{N-1} x_{N-1} + B_{N-1} u_{N-1} + c_{N-1}
+        X_{N-1} = { x | exists u: G A_{N-1} x <= g - G B_{N-1} u - G c_{N-1} and (x,u) \in D }
+        and so on...
+        Note that in this case mixed constraints in x and u are allowed.
+        """
+
+        # check that all the data are present
         if self.X_N is None:
             raise ValueError('A terminal constraint is needed for the backward reachability analysis!')
         if len(switching_sequence) != self.N:
             raise ValueError('Switching sequence not coherent with the controller horizon.')
+
+        # start
         print('Backwards reachability analysis for the switching sequence ' + str(switching_sequence))
         tic = time.time()
         feasible_set = self.X_N
+
+        # fix the switching sequence
         A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
         B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
         c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
         D_sequence = [self.sys.domains[switch] for switch in switching_sequence]
-        for i in range(self.N-1,-1,-1):
+
+        # iterations over the horizon
+        for i in range(self.N-1,7,-1):
             lhs_x = feasible_set.lhs_min.dot(A_sequence[i])
             lhs_u = feasible_set.lhs_min.dot(B_sequence[i])
             lhs = np.hstack((lhs_x, lhs_u))
             rhs = feasible_set.rhs_min - feasible_set.lhs_min.dot(c_sequence[i])
             feasible_set = Polytope(lhs, rhs)
             feasible_set.add_facets(D_sequence[i].lhs_min, D_sequence[i].rhs_min)
-            feasible_set.assemble()
+            feasible_set.assemble() # feasible_set.assemble_light()
             feasible_set = feasible_set.orthogonal_projection(range(self.sys.n_x))
-        toc = time.time()
-        print('Feasible set computed in ' + str(toc-tic) + ' s')
+
+        print('Feasible set computed in ' + str(time.time()-tic) + ' s')
+        return feasible_set
+
+    def backwards_reachability_analysis_from_orthogonal_domains(self, switching_sequence, X_list, U_list):
+        """
+        Returns the feasible set (Polytope) for the given switching sequence.
+        It uses the set-relation approach presented in Scibilia et al. "On feasible sets for MPC and their approximations"
+        It consists in:
+        X_N := { x | G x <= g }
+        X_{N-1} = A^(-1) ( X_N \oplus (- B U - c) ) \cap X
+        and so on...
+        where X and U represent the domain of the state and the input respectively, and \oplus the Minkowsky sum.
+        """
+
+        # check that all the data are present
+        if self.X_N is None:
+            raise ValueError('A terminal constraint is needed for the backward reachability analysis!')
+        if len(switching_sequence) != self.N:
+            raise ValueError('Switching sequence not coherent with the controller horizon.')
+
+        # start
+        print('Backwards reachability analysis for the switching sequence ' + str(switching_sequence))
+        tic = time.time()
+        feasible_set = self.X_N
+
+        # fix the switching sequence
+        A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
+        B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
+        c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
+        X_sequence = [X_list[switch] for switch in switching_sequence]
+        U_sequence = [U_list[switch] for switch in switching_sequence]
+
+        # iterations over the horizon
+        for i in range(self.N-1,-1,-1):
+            print i
+
+            # vertices of the linear transformation - B U - c
+            trans_U_vertices = [- B_sequence[i].dot(v) - c_sequence[i] for v in U_sequence[i].vertices]
+
+            # vertices of X_N \oplus (- B U - c)
+            mink_sum = [v1 + v2 for v1 in feasible_set.vertices for v2 in trans_U_vertices]
+
+            # vertices of the linear transformation A^(-1) ( X_N \oplus (- B U - c) )
+            A_inv = np.linalg.inv(A_sequence[i])
+            trans_mink_sum = [A_inv.dot(v) for v in mink_sum]
+
+            # remove "almost zeros" to avoid numerical errors in cddlib
+            trans_mink_sum = [clean_matrix(v) for v in trans_mink_sum]
+
+            try:
+                M = np.hstack(trans_mink_sum).T
+                M = cdd.Matrix([[1.] + list(m) for m in M])
+                M.rep_type = cdd.RepType.GENERATOR
+                M.canonicalize()
+                p = cdd.Polyhedron(M)
+                M_ineq = p.get_inequalities()
+                # raise RuntimeError('Just to switch to qhull...')
+            except RuntimeError:
+
+                # print len(trans_mink_sum)
+                # M = np.hstack(trans_mink_sum).T
+                # M = cdd.Matrix([[1.] + list(m) for m in M])
+                # M.rep_type = cdd.RepType.GENERATOR
+                # M.canonicalize()
+                # trans_mink_sum = [np.array([[M[j][k]] for k in range(1,M.col_size)]) for j in range(M.row_size)]
+                # print len(trans_mink_sum)
+
+                print 'RuntimeError with cddlib: switched to qhull'
+                hull = ConvexHull(np.hstack(trans_mink_sum).T)
+                A = np.array(hull.equations)[:, :-1]
+                b = - np.array(hull.equations)[:, -1:]
+                M_ineq = np.hstack((b, -A))
+                M_ineq = cdd.Matrix([list(m) for m in M_ineq])
+                M_ineq.rep_type = cdd.RepType.INEQUALITY
+
+            M_ineq.canonicalize()
+            A = - np.array([list(M_ineq[j])[1:] for j in range(M_ineq.row_size)])
+            b = np.array([list(M_ineq[j])[:1] for j in range(M_ineq.row_size)])
+
+            # intersect with X
+            feasible_set = Polytope(A, b)
+            feasible_set.add_facets(X_sequence[i].lhs_min, X_sequence[i].rhs_min)
+            feasible_set.assemble()
+
+        print('Feasible set computed in ' + str(time.time()-tic) + ' s')
         return feasible_set
 
     def plot_feasible_set(self, switching_sequence, **kwargs):
@@ -403,239 +545,9 @@ class MPCHybridController:
     #         print('Unfeasible switching sequence!')
     #     return
 
-# class HybridPolicyLibrary:
-#     """
-#     library (dict)
-#         ss 0,...,n (dicts)
-#             'program' (parametric_qp instance)
-#             'feasible_set'
-#             'active_sets'
-#                 active_set 0,...,m (dicts)
-#                     'x' (list of states)
-#                     'V' (list of optimal values)
-#     """
-
-#     def __init__(self, controller):
-#         self.controller = controller
-#         self.library = dict()
-#         self.lower_bound = None
-#         self.upper_bound = None
-#         return
-
-#     def sample_policy(self, x_list, ss=None, update_lb=False):
-#         if ss is None:
-#             for x in x_list:
-#                 u, V, ss = self.controller.feedforward(x)
-#                 self.add_sample_to_library(x, u, V, ss, True)
-#                 if update_lb:
-#                     self.add_lower_bound(ss, x, u)
-#         else:
-#             for x in x_list:
-#                 u, V = self.library[ss]['program'].solve(x)
-#                 self.add_sample_to_library(x, u, V, ss, False)
-#                 if update_lb:
-#                     self.add_lower_bound(ss, x, u)
-#         return
 
 
-#     def sample_policy_randomly(self, n_samples=1, ss=None):
-#         if ss is None:
-#             for i in range(n_samples):
-#                 feasible = False
-#                 while not feasible:
-#                     x = self.generate_random_sample()
-#                     u, V, ss = self.controller.feedforward(x)
-#                     if not np.isnan(V):
-#                         feasible = True
-#                 self.add_sample_to_library(x, u, V, ss, True)
-#         else:
-#             for i in range(n_samples):
-#                 x = self.generate_random_sample(ss)
-#                 u, V = self.library[ss]['program'].solve(x)
-#                 self.add_sample_to_library(x, u, V, ss, False)
-#         return
 
-
-#     def generate_random_sample(self, ss=None):
-
-#         if ss is None:
-#             x_min = self.controller.sys.x_min
-#             x_max = self.controller.sys.x_max
-#         else:
-#             if not self.library[ss].has_key('feasible_set'):
-#                 self.library[ss]['feasible_set'] = self.controller.backwards_reachability_analysis(ss)
-#             x_min = self.library[ss]['feasible_set'].x_min
-#             x_max = self.library[ss]['feasible_set'].x_max
-
-#         # scaled random sample
-#         is_inside = False
-#         while not is_inside:
-#             x = np.random.rand(self.controller.Q.shape[0],1)
-#             x = np.multiply(x, (x_max - x_min)) + x_min
-#             if ss is None:
-#                 is_inside = any([X.applies_to(x) for X in self.controller.sys.state_domains])
-#             else:
-#                 is_inside = self.library[ss]['feasible_set'].applies_to(x)
-
-#         return x
-
-#     def add_sample_to_library(self, x, u, V, ss, optimal=False):
-
-#         if self.library.has_key(ss):
-#             prog = self.library[ss]['program']
-#             active_set = prog.get_active_set(x, u)
-
-#             if self.library[ss]['active_sets'].has_key(active_set):
-#                 self.library[ss]['active_sets'][active_set]['x'].append(x)
-#                 self.library[ss]['active_sets'][active_set]['V'].append(V)
-#                 self.library[ss]['active_sets'][active_set]['optimal'].append(optimal)
-
-#             else:
-#                 active_set_dict = {'x': [x], 'V': [V], 'optimal': [optimal]}
-#                 self.library[ss]['active_sets'][active_set] = active_set_dict
-
-#         else:
-#             prog = self.controller.condense_program(ss)
-#             active_set = prog.get_active_set(x, u)
-#             active_set_dict = {'x': [x], 'V': [V], 'optimal': [optimal]}
-#             active_sets_dict = {active_set: active_set_dict}
-#             switching_sequence_dict = {'program': prog, 'active_sets': active_sets_dict}
-#             self.library[ss] = switching_sequence_dict
-
-#         return
-
-#     def add_vertices_of_feasible_regions(self, eps=1.e-4):
-#         for ss, ss_values in self.library.items():
-#             if not ss_values.has_key('feasible_set'):
-#                 fs = self.controller.backwards_reachability_analysis(ss)
-#                 ss_values['feasible_set'] = fs
-#             x_list = ss_values['feasible_set'].vertices
-#             x_list = [x + (ss_values['feasible_set'].center - x)*eps for x in x_list]
-#             for x in x_list:
-#                 u, V = ss_values['program'].solve(x)
-#                 self.add_sample_to_library(x, u, V, ss)
-#         return
-
-#     # def bound_cost_from_below(self):
-#     #     for ss, ss_values in self.library.items():
-#     #         ss_values['lower_bound_planes'] = []
-#     #         for active_set, as_values in ss_values['active_sets'].items():
-#     #             plane_list = ss_values['program'].get_cost_sensitivity(as_values['x'], active_set)
-#     #             ss_values['lower_bound_planes'] += plane_list
-#     #     return
-
-#     def bound_cost_from_below(self):
-#         for ss, ss_values in self.library.items():
-#             for as_values in ss_values['active_sets'].values():
-#                 for i, x in enumerate(as_values['x']):
-#                     if as_values['optimal'][i]:
-#                         fss = self.feasible_switching_sequences(x)
-#                         fss.remove(ss)
-#                         for ss_lb in fss:
-#                             lb = self.get_lower_bound(ss_lb, x)
-#                             if lb < as_values['V'][i]:
-#                                 self.sample_policy([x], ss_lb, True)
-#         return
-
-#     def bound_cost_from_above(self):
-
-#         for ss, ss_values in self.library.items():
-#             ss_values['upper_bound_planes'] = []
-
-#             vertices = []
-#             for as_values in ss_values['active_sets'].values():
-#                 vertices_active_set = [np.vstack((as_values['x'][i], np.array([[as_values['V'][i]]]))) for i in range(len(as_values['x']))]
-#                 vertices += vertices_active_set
-
-#             # add an auxiliary vetex when the number of samples in not enough to generate a simplex
-#             if len(vertices) == vertices[0].shape[0]:
-#                 auxiliary_vertex = sum([vertex[:-1,:] for vertex in vertices])/len(vertices)
-#                 max_cost = max([vertex[-1,0] for vertex in vertices])
-#                 auxiliary_vertex = np.vstack((auxiliary_vertex, np.array([[10.*max_cost]])))
-#                 vertices.append(auxiliary_vertex)
-
-#             hull = ConvexHull(np.hstack(vertices).T)
-#             lhs = np.array(hull.equations)[:, :-1]
-#             rhs = (np.array(hull.equations)[:, -1]).reshape((lhs.shape[0], 1))
-#             facets_to_keep = [i for i in range(lhs.shape[0]) if lhs[i,-1] < 0.]
-#             for i in facets_to_keep:
-#                 A = - lhs[i:i+1,:-1]/lhs[i,-1]
-#                 b = - rhs[i:i+1,:]/lhs[i,-1]
-#                 ss_values['upper_bound_planes'].append([A,b])
-#         return
-
-#     def get_lower_bound(self, ss, x):
-#         is_inside = self.library[ss]['feasible_set'].applies_to(x)
-#         if is_inside and self.library[ss].has_key('lower_bound_planes'):
-#             return max([(plane[0].dot(x) + plane[1])[0,0] for plane in self.library[ss]['lower_bound_planes']])
-#         else:
-#             return -np.inf
-
-#     def get_upper_bound(self, ss, x):
-#         is_inside = self.library[ss]['feasible_set'].applies_to(x)
-#         if is_inside and self.library[ss].has_key('upper_bound_planes'):
-#             return max([(plane[0].dot(x) + plane[1])[0,0] for plane in self.library[ss]['upper_bound_planes']])
-#         else:
-#             return np.inf
-
-#     def add_lower_bound(self, ss, x, u):
-#         active_set = self.library[ss]['program'].get_active_set(x, u)
-#         plane = self.library[ss]['program'].get_cost_sensitivity([x], active_set)
-#         if self.library[ss].has_key('lower_bound_planes'):
-#             self.library[ss]['lower_bound_planes'] += plane
-#         else:
-#             self.library[ss]['lower_bound_planes'] = plane
-#         return
-
-#     def feasible_switching_sequences(self, x):
-#         fss = []
-#         for ss, ss_values in self.library.items():
-#             if ss_values['feasible_set'].applies_to(x):
-#                 fss.append(ss)
-#         return fss
-
-#     def add_shifted_sequences(self, terminal_domain):
-#         for ss in self.library.keys():
-#             ss_shifted = ss
-#             for i in range(len(ss)):
-#                 ss_shifted = ss_shifted[1:] + (terminal_domain,)
-#                 if not self.library.has_key(ss_shifted):
-#                     prog = self.controller.condense_program(ss_shifted)
-#                     self.library[ss_shifted] = {'program': prog, 'active_sets': dict()}
-#         return
-
-#     def get_candidate_switching_sequences(self, x):
-#         css = []
-#         fss = self.feasible_switching_sequences(x)
-#         ub = min([self.get_upper_bound(ss, x) for ss in fss])
-#         for ss in fss:
-#             lb = self.get_lower_bound(ss, x)
-#             if lb < ub:
-#                 css.append(ss)
-#         return css
-
-#     def feedforward(self, x):
-#         css = self.get_candidate_switching_sequences(x)
-#         print len(css), 'candidate switching sequences'
-#         if not css:
-#             V_star = np.nan
-#             u_star = np.full((self.controller.sys.n_u, 1), np.nan)
-#             return u_star, V_star
-#         V_star = np.inf
-#         for ss in css:
-#             u, V = self.library[ss]['program'].solve(x)
-#             if V < V_star:
-#                 V_star = V
-#                 u_star = u
-#         return u_star, V_star
-
-#     def feedback(self, x):
-#         u_feedforward = self.feedforward(x)[0]
-#         u_feedback = u_feedforward[0:self.controller.sys.n_u]
-#         return u_feedback
-
-
-            
 class HybridPolicyLibrary:
     """
     library (dict)
@@ -653,7 +565,7 @@ class HybridPolicyLibrary:
         self.library = dict()
         return
 
-    def sample_policy(self, n_samples, terminal_domain):
+    def sample_policy(self, n_samples, terminal_domain, X_list=None, U_list=None):
         n_unfeasible = 0
         for i in range(n_samples):
             x = self.random_sample()
@@ -665,14 +577,22 @@ class HybridPolicyLibrary:
                     ss_list += self.shift_switching_sequence(ss_list[0], terminal_domain)
                     for ss in ss_list:
                         if not self.library.has_key(ss):
+                            if X_list is None and U_list is None:
+                                feasible_set = self.controller.backwards_reachability_analysis(ss)
+                            elif X_list is not None and U_list is not None:
+                                feasible_set = self.controller.backwards_reachability_analysis_from_orthogonal_domains(ss, X_list, U_list)
                             self.library[ss] = {
-                            'feasible_set': self.controller.backwards_reachability_analysis(ss),
+                            'feasible_set': feasible_set,
                             'program': self.controller.condense_program(ss),
                             'lower_bound': {'A': np.zeros((1, self.controller.sys.n_x)), 'b': np.zeros((1,1))},
                             'upper_bound': {'convex_hull': None, 'A': None, 'b': None},
+                            'generating_point': (x, ss_star) ###### useless
                             }
                 else:
+                    print 'Sample', i, 'unfeasible'
                     n_unfeasible += 1
+            else:
+                print 'Sample', i, 'rejected'
 
 
         print('Detected ' + str(len(self.library)) + ' switching sequences.')
@@ -680,11 +600,6 @@ class HybridPolicyLibrary:
         return
 
     def random_sample(self):
-        # is_inside = False
-        # while not is_inside:
-        #     x = np.random.rand(self.controller.sys.n_x,1)
-        #     x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
-        #     is_inside = any([X.applies_to(x) for X in self.controller.sys.state_domains])
         x = np.random.rand(self.controller.sys.n_x,1)
         x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
         return x
@@ -695,13 +610,12 @@ class HybridPolicyLibrary:
                 return True
         return False
 
-    def shift_switching_sequence(self, ss, terminal_domain):
-        return [ss[i:] + (terminal_domain,)*i for i in range(1,len(ss))]
-
     def add_vertices_of_feasible_regions(self, eps=1.e-4):
-        for ss_values in self.library.values():
+        for ss, ss_values in self.library.items():
+            print ss
             x_list = ss_values['feasible_set'].vertices
             x_list = [x + (ss_values['feasible_set'].center - x)*eps for x in x_list]
+            print [ss_values['program'].solve(x)[1] for x in x_list]
             xV_list = [np.vstack((x, ss_values['program'].solve(x)[1])) for x in x_list]
 
             ### add an auxiliary vertex when the number of samples in not enough to generate a simplex
@@ -753,36 +667,32 @@ class HybridPolicyLibrary:
         return
 
     def get_lower_bound(self, ss, x):
-        if self.library[ss]['feasible_set'].applies_to(x):
-            return max((self.library[ss]['lower_bound']['A'].dot(x) + self.library[ss]['lower_bound']['b']))[0]
-        else:
-            return 0.
+        if not self.library[ss]['feasible_set'].applies_to(x):
+            raise ValueError('Switching sequence ' + str(ss) + ' is not feasible at x=' + str(x) + '.')
+        return max((self.library[ss]['lower_bound']['A'].dot(x) + self.library[ss]['lower_bound']['b']).flatten())
 
     def get_upper_bound(self, ss, x):
-        if self.library[ss]['feasible_set'].applies_to(x):
-            return max((self.library[ss]['upper_bound']['A'].dot(x) + self.library[ss]['upper_bound']['b']))[0]
-        else:
-            return np.inf
+        if not self.library[ss]['feasible_set'].applies_to(x):
+            raise ValueError('Switching sequence ' + str(ss) + ' is not feasible at x=' + str(x) + '.')
+        return max((self.library[ss]['upper_bound']['A'].dot(x) + self.library[ss]['upper_bound']['b']).flatten())
 
     def get_feasible_switching_sequences(self, x):
         return [ss for ss, ss_values in self.library.items() if ss_values['feasible_set'].applies_to(x)]
 
-    def get_candidate_switching_sequences(self, x):
-        css = []
+    def get_candidate_switching_sequences(self, x, tol= 0.):
         fss = self.get_feasible_switching_sequences(x)
         if not fss:
             return fss
-        ub = min([self.get_upper_bound(ss, x) for ss in fss])
-        for ss in fss:
-            lb = self.get_lower_bound(ss, x)
-            if lb < ub:
-                css.append(ss)
-        print css
-        return css
+        lb = [self.get_lower_bound(ss, x) for ss in fss]
+        ub = [self.get_upper_bound(ss, x) for ss in fss]
+        if any([lb[i] > ub[i] for i in range(len(fss))]):
+            real_cost = [self.library[ss]['program'].solve(x)[1] for ss in fss]
+            raise ValueError('Wrong lower bound ' + str(lb) + ' or upper bound ' + str(ub) + ' for optimal values ' + str(real_cost) + '.')
+        return [ss for i, ss in enumerate(fss) if lb[i] < min(ub) - tol]
 
     def feedforward(self, x):
         css = self.get_candidate_switching_sequences(x)
-        print len(css), 'candidate switching sequences'
+        # print len(css), 'candidate switching sequences'
         if not css:
             V_star = np.nan
             u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
@@ -797,6 +707,10 @@ class HybridPolicyLibrary:
 
     def feedback(self, x):
         return self.feedforward(x)[0][0]
+
+    @staticmethod
+    def shift_switching_sequence(ss, terminal_domain):
+        return [ss[i:] + (terminal_domain,)*i for i in range(1,len(ss))]
 
     @staticmethod
     def upper_bound_from_hull(hull):
@@ -855,11 +769,15 @@ class parametric_lp:
         self.n_cons = self.A.shape[0]
         return
 
-    def solve(self, x0):
+    def solve(self, x0, u_length=None):
         x0 = np.reshape(x0, (x0.shape[0], 1))
-        u_star, V_star =  linear_program(self.f, self.A, self.B.dot(x0)+self.c)
-        u_star = u_star[0:self.F_u.shape[1]]
-        return u_star, V_star
+        sol = linear_program(self.f, self.A, self.B.dot(x0)+self.c)
+        u_star = sol.argmin[0:self.F_u.shape[1]]
+        if u_length is not None:
+            if not float(u_star.shape[0]/u_length).is_integer():
+                raise ValueError('Uncoherent dimension of the input u_length.')
+            u_star = [u_star[i*u_length:(i+1)*u_length,:] for i in range(u_star.shape[0]/u_length)]
+        return u_star, sol.min
 
 
 class parametric_qp:
@@ -879,10 +797,11 @@ class parametric_qp:
         self.C_u = C_u
         self.C_x = C_x
         self.C = C
+        self.remove_linear_terms()
         self._feasible_set = None
         return
 
-    def solve(self, x0):
+    def solve(self, x0, u_length=None):
         x0 = np.reshape(x0, (x0.shape[0], 1))
         H = self.F_uu
         f = x0.T.dot(self.F_xu) + self.F_u.T
@@ -890,6 +809,10 @@ class parametric_qp:
         b = self.C + self.C_x.dot(x0)
         u_star, cost = quadratic_program(H, f, A, b)
         cost += .5*x0.T.dot(self.F_xx).dot(x0) + self.F_x.T.dot(x0) + self.F
+        if u_length is not None:
+            if not float(u_star.shape[0]/u_length).is_integer():
+                raise ValueError('Uncoherent dimension of the input u_length.')
+            u_star = [u_star[i*u_length:(i+1)*u_length,:] for i in range(u_star.shape[0]/u_length)]
         return u_star, cost[0,0]
 
     def get_active_set(self, x, u, tol=1.e-6):
@@ -899,33 +822,34 @@ class parametric_qp:
     def remove_linear_terms(self):
         """
         Applies the change of variables z = u + F_uu^-1 (F_xu' x + F_u')
+        that puts the cost function in the form
+        V = 1/2 z' H z + 1/2 x' F_xx_q x + F_x_q' x + F_q
+        and the constraints in the form:
+        G u <= W + S x
         """
         self.H_inv = np.linalg.inv(self.F_uu)
         self.H = self.F_uu
-        self.F_xx_q = (self.F_xx - self.F_xu.dot(self.H_inv).dot(self.F_xu.T))
-        self.F_x_q = self.F_x - self.F_u.T.dot(self.H_inv).dot(self.F_xu.T)
-        self.F_q = self.F - .5*self.F_u.T.dot(self.H_inv).dot(self.
-            F_u)
+        self.F_xx_q = self.F_xx - self.F_xu.dot(self.H_inv).dot(self.F_xu.T)
+        self.F_x_q = self.F_x - self.F_xu.dot(self.H_inv).dot(self.F_u)
+        self.F_q = self.F - .5*self.F_u.T.dot(self.H_inv).dot(self.F_u)
         self.G = self.C_u
         self.S = self.C_x + self.C_u.dot(self.H_inv).dot(self.F_xu.T)
         self.W = self.C + self.C_u.dot(self.H_inv).dot(self.F_u)
         return
 
-    @property
-    def feasible_set(self):
-        if self._feasible_set is None:
-            augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
-            augmented_polytope.assemble()
-            self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
-        return self._feasible_set
+    # @property
+    # def feasible_set(self):
+    #     if self._feasible_set is None:
+    #         augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
+    #         augmented_polytope.assemble_light()
+    #         self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
+    #     return self._feasible_set
 
-    def get_cost_sensitivity(self, x_list, active_set, tol = 1.e-6):
-
-        self.remove_linear_terms()
+    def get_cost_sensitivity(self, x_list, active_set):
 
         # clean active set
         G_A = self.G[active_set,:]
-        if active_set:
+        if active_set and np.linalg.matrix_rank(G_A) < G_A.shape[0]:
             lir = linearly_independent_rows(G_A)
             active_set = [active_set[i] for i in lir]
 
@@ -933,7 +857,7 @@ class parametric_qp:
         inactive_set = sorted(list(set(range(self.C.shape[0])) - set(active_set)))
         [G_A, W_A, S_A] = [self.G[active_set,:], self.W[active_set,:], self.S[active_set,:]]
         [G_I, W_I, S_I] = [self.G[inactive_set,:], self.W[inactive_set,:], self.S[inactive_set,:]]
-        H_A = np.linalg.inv(G_A.dot(self.H_inv.dot(G_A.T)))
+        H_A = np.linalg.inv(G_A.dot(self.H_inv).dot(G_A.T))
         lambda_A_offset = - H_A.dot(W_A)
         lambda_A_linear = - H_A.dot(S_A)
 
@@ -941,25 +865,21 @@ class parametric_qp:
         z_offset = - self.H_inv.dot(G_A.T.dot(lambda_A_offset))
         z_linear = - self.H_inv.dot(G_A.T.dot(lambda_A_linear))
 
+        # optimal value function explicit solution: V_star = .5 x' V_quadratic x + V_linear x + V_offset
+        V_quadratic = z_linear.T.dot(self.H).dot(z_linear) + self.F_xx_q
+        V_linear = z_offset.T.dot(self.H).dot(z_linear) + self.F_x_q.T
+        V_offset = self.F_q + .5*z_offset.T.dot(self.H).dot(z_offset)
+
         # primal original variables explicit solution
         u_offset = z_offset - self.H_inv.dot(self.F_u)
         u_linear = z_linear - self.H_inv.dot(self.F_xu.T)
 
-        # optimal value function explicit solution: V_star = .5 x' V_quadratic x + V_linear x + V_offset
-        V_quadratic = u_linear.T.dot(self.F_uu).dot(u_linear) + self.F_xx + 2.*self.F_xu.dot(u_linear)
-        V_linear = u_offset.T.dot(self.F_uu).dot(u_linear) + u_offset.T.dot(self.F_xu.T) + self.F_u.T.dot(u_linear) + self.F_x.T
-        V_offset = .5*u_offset.T.dot(self.F_uu).dot(u_offset) + self.F_u.T.dot(u_offset) + self.F
-
         # tangent approximation
         plane_list = []
         for x in x_list:
-
             A = x.T.dot(V_quadratic) + V_linear
             b = -.5*x.T.dot(V_quadratic).dot(x) + V_offset
             plane_list.append([A, b])
-
-        # if A.shape[0] != b.shape[0]:
-        #     import pdb; pdb.set_trace()
 
         return plane_list
 
@@ -979,9 +899,6 @@ class parametric_qp:
 
 
 
-
-
-
 ### AUXILIARY FUNCTIONS
 
 @contextmanager
@@ -994,12 +911,20 @@ def suppress_stdout():
         finally:
             sys.stdout = old_stdout
 
+def clean_matrix(A, threshold=1.e-6):
+    A_abs = np.abs(A)
+    elements_to_remove = np.where(np.abs(A) < threshold)
+    for i in range(elements_to_remove[0].shape[0]):
+        A[elements_to_remove[0][i], elements_to_remove[1][i]] = 0.
+    return A
+
 def linearly_independent_rows(A, tol=1.e-6):
     R = linalg.qr(A.T)[1]
     R_diag = np.abs(np.diag(R))
     return list(np.where(R_diag > tol)[0])
 
 def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
+    tic = time.time()
     N = len(switching_sequence)
     Q_bar = linalg.block_diag(*[Q for i in range(N)] + [P])
     R_bar = linalg.block_diag(*[R for i in range(N)])
@@ -1010,6 +935,7 @@ def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
     elif objective_norm == 'two':
         F_uu, F_xu, F_xx, F_u, F_x, F = quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
         parametric_program = parametric_qp(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W)
+    print 'total condensing time is', str(time.time()-tic),'s'
     return parametric_program
 
 # def constraint_condenser(sys, X_N, switching_sequence):
@@ -1061,6 +987,8 @@ def constraint_condenser(sys, X_N, switching_sequence):
     G = (lhs_x.dot(B_bar) + lhs_u)
     W = rhs - lhs_x.dot(c_bar)
     E = - lhs_x.dot(A_bar)
+    ### do I need this? it might be super slow...
+    tic = time.time()
     p = Polytope(np.hstack((G, -E)), W)
     p.assemble()
     if not p.empty:
@@ -1071,8 +999,8 @@ def constraint_condenser(sys, X_N, switching_sequence):
         G = None
         W = None
         E = None
+    print 'Redundant inequalities removed in', str(time.time()-tic),'s,',
     return G, W, E
-
 
 def linear_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
     """
