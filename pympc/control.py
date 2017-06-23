@@ -390,7 +390,7 @@ class MPCHybridController:
         D_sequence = [self.sys.domains[switch] for switch in switching_sequence]
 
         # iterations over the horizon
-        for i in range(self.N-1,7,-1):
+        for i in range(self.N-1,-1,-1):
             lhs_x = feasible_set.lhs_min.dot(A_sequence[i])
             lhs_u = feasible_set.lhs_min.dot(B_sequence[i])
             lhs = np.hstack((lhs_x, lhs_u))
