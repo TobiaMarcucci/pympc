@@ -2,7 +2,7 @@ import numpy as np
 import scipy.linalg as linalg
 import matplotlib.pyplot as plt
 from optimization.pnnls import linear_program
-from geometry import Polytope
+from geometry.polytope import Polytope
 
 ### CLASSES OF DYNAMICAL SYSTEMS
 

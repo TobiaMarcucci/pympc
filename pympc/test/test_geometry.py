@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
-from pympc.geometry import Polytope, chebyshev_center
-import matplotlib.pyplot as plt
-
+from pympc.geometry.polytope import Polytope
+from pympc.geometry.chebyshev_center import chebyshev_center
+from pympc.geometry.orthogonal_projection_CHM import plane_through_points
 
 class TestGeometry(unittest.TestCase):
 
@@ -12,7 +12,7 @@ class TestGeometry(unittest.TestCase):
         A = np.array([[1.,0.],[-1.,0.],[0.,1.],[0.,-1.]])
         b = np.array([[.5],[.5],[1.],[1.]])
         true_radius = .5
-        [center, radius] = chebyshev_center(A,b)
+        [center, radius] = chebyshev_center(A, b)
         self.assertTrue(np.isclose(0.,center[0,0]))
         self.assertTrue(np.absolute(center[1,0]) <= .5)
         self.assertTrue(np.isclose(true_radius, radius))
@@ -142,8 +142,46 @@ class TestGeometry(unittest.TestCase):
         # rows = np.hstack((p_proj.lhs_min, p_proj.rhs_min))
         # self.assertTrue(row_0 in rows)
         # self.assertTrue(row_1 in rows)
-        
-        return
+
+    def test_orthogonal_projection(self):
+
+        # test plane generator
+        points = [np.array([[1.],[0.],[0.]]), np.array([[-1.],[0.],[0.]]), np.array([[0.],[1.],[0.]])]
+        a, b = plane_through_points(points)
+        self.assertTrue(np.allclose(a, np.array([[0.],[0.],[1.]])))
+        self.assertTrue(np.allclose(b, np.array([[0.]])))
+        points = [np.array([[1.],[0.],[0.]]), np.array([[0.],[1.],[0.]]), np.array([[0.],[0.],[1.]])]
+        a, b = plane_through_points(points)
+        real_a = np.ones((3,1))/np.sqrt(3)
+        self.assertTrue(np.allclose(a, real_a))
+        self.assertTrue(np.isclose(b[0,0], real_a[0,0]))
+
+        # test convex hull method
+        n_test = 100
+        n_ineq = 20
+        n_var = 5
+        res = range(3)
+        for i in range(n_test):
+            print i
+            everything_ok = False
+            while not everything_ok:
+                A = np.random.randn(n_ineq, n_var)
+                b = np.random.rand(n_ineq, 1)
+                p = Polytope(A, b)
+                try:
+                    p.assemble()
+                    everything_ok = True
+                except ValueError:
+                    pass
+            p_proj_ve = p.orthogonal_projection(res, 'vertex_enumeration')
+            for method in ['convex_hull']:#, 'block_elimination']:
+                p_proj = p.orthogonal_projection(res, method)
+                self.assertTrue(p_proj.lhs_min.shape[0] == p_proj_ve.lhs_min.shape[0])
+                # note that sometimes qhull gives the same vertex twice!
+                for v in p_proj.vertices:
+                    self.assertTrue(any([np.allclose(v, v_ve) for v_ve in p_proj_ve.vertices]))
+                for v_ve in p_proj_ve.vertices:
+                    self.assertTrue(any([np.allclose(v, v_ve) for v in p_proj.vertices]))
 
 if __name__ == '__main__':
     unittest.main()

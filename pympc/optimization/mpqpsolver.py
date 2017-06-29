@@ -5,7 +5,7 @@ import time
 from pympc.ndpiecewise import NDPiecewise
 from pnnls import linear_program
 from gurobi import quadratic_program
-from pympc.geometry import Polytope
+from pympc.geometry.polytope import Polytope
 
 class MPQPSolver:
     """

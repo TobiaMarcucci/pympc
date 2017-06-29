@@ -113,7 +113,7 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
 
     # sometimes the nnls algorithms excedes the maximum number of iterations...
     except RuntimeError:
-        print 'RuntimeError in pnnls linear programming solver, switched to gurobi'
+        print('Too many iterations in PNNLS LP solver, switched to gurobi.')
         from gurobi import linear_program as lp_gurobi
         sol = lp_gurobi(f, A, b, C, d)
 

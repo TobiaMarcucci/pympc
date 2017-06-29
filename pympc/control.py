@@ -7,7 +7,7 @@ import gurobipy as grb
 from contextlib import contextmanager
 from optimization.pnnls import linear_program
 from optimization.gurobi import quadratic_program, real_variable
-from geometry import Polytope
+from geometry.polytope import Polytope
 from dynamical_systems import DTAffineSystem, DTPWASystem
 from optimization.mpqpsolver import MPQPSolver, CriticalRegion
 from scipy.spatial import ConvexHull
@@ -93,7 +93,7 @@ class MPCController:
             cost = np.nan
         return u_feedforward, cost
 
-        def feedback_explicit(self, x0):
+    def feedback_explicit(self, x0):
             return self.feedforward(x0)[0][0]
 
     def optimal_value_function(self, x0):
@@ -355,198 +355,156 @@ class MPCHybridController:
     def feedback(self, x0):
         return self.feedforward(x0)[0][0]
 
-
     def condense_program(self, switching_sequence):
-        if len(switching_sequence) != self.N:
-            raise ValueError('Switching sequence not coherent with the controller horizon.')
-        return OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
-
-    def backwards_reachability_analysis(self, switching_sequence):
-        """
-        Returns the feasible set (Polytope) for the given switching sequence.
-        It consists in N orthogonal projections:
-        X_N := { x | G x <= g }
-        x_N = A_{N-1} x_{N-1} + B_{N-1} u_{N-1} + c_{N-1}
-        X_{N-1} = { x | exists u: G A_{N-1} x <= g - G B_{N-1} u - G c_{N-1} and (x,u) \in D }
-        and so on...
-        Note that in this case mixed constraints in x and u are allowed.
-        """
-
-        # check that all the data are present
-        if self.X_N is None:
-            raise ValueError('A terminal constraint is needed for the backward reachability analysis!')
-        if len(switching_sequence) != self.N:
-            raise ValueError('Switching sequence not coherent with the controller horizon.')
-
-        # start
-        print('Backwards reachability analysis for the switching sequence ' + str(switching_sequence))
         tic = time.time()
-        feasible_set = self.X_N
-
-        # fix the switching sequence
-        A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
-        B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
-        c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
-        D_sequence = [self.sys.domains[switch] for switch in switching_sequence]
-
-        # iterations over the horizon
-        for i in range(self.N-1,-1,-1):
-            lhs_x = feasible_set.lhs_min.dot(A_sequence[i])
-            lhs_u = feasible_set.lhs_min.dot(B_sequence[i])
-            lhs = np.hstack((lhs_x, lhs_u))
-            rhs = feasible_set.rhs_min - feasible_set.lhs_min.dot(c_sequence[i])
-            feasible_set = Polytope(lhs, rhs)
-            feasible_set.add_facets(D_sequence[i].lhs_min, D_sequence[i].rhs_min)
-            feasible_set.assemble() # feasible_set.assemble_light()
-            feasible_set = feasible_set.orthogonal_projection(range(self.sys.n_x))
-
-        print('Feasible set computed in ' + str(time.time()-tic) + ' s')
-        return feasible_set
-
-    def backwards_reachability_analysis_from_orthogonal_domains(self, switching_sequence, X_list, U_list):
-        """
-        Returns the feasible set (Polytope) for the given switching sequence.
-        It uses the set-relation approach presented in Scibilia et al. "On feasible sets for MPC and their approximations"
-        It consists in:
-        X_N := { x | G x <= g }
-        X_{N-1} = A^(-1) ( X_N \oplus (- B U - c) ) \cap X
-        and so on...
-        where X and U represent the domain of the state and the input respectively, and \oplus the Minkowsky sum.
-        """
-
-        # check that all the data are present
-        if self.X_N is None:
-            raise ValueError('A terminal constraint is needed for the backward reachability analysis!')
+        print('- Condensing the OCP for the switching sequence ' + str(switching_sequence) + ' ...')
         if len(switching_sequence) != self.N:
             raise ValueError('Switching sequence not coherent with the controller horizon.')
+        prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
+        print('- OCP condensed in ' + str(time.time() -tic ) + ' seconds.')
+        return prog
 
-        # start
-        print('Backwards reachability analysis for the switching sequence ' + str(switching_sequence))
-        tic = time.time()
-        feasible_set = self.X_N
+    # def backwards_reachability_analysis(self, switching_sequence):
+    #     """
+    #     Returns the feasible set (Polytope) for the given switching sequence.
+    #     It consists in N orthogonal projections:
+    #     X_N := { x | G x <= g }
+    #     x_N = A_{N-1} x_{N-1} + B_{N-1} u_{N-1} + c_{N-1}
+    #     X_{N-1} = { x | exists u: G A_{N-1} x <= g - G B_{N-1} u - G c_{N-1} and (x,u) \in D }
+    #     and so on...
+    #     Note that in this case mixed constraints in x and u are allowed.
+    #     """
 
-        # fix the switching sequence
-        A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
-        B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
-        c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
-        X_sequence = [X_list[switch] for switch in switching_sequence]
-        U_sequence = [U_list[switch] for switch in switching_sequence]
+    #     # check that all the data are present
+    #     if self.X_N is None:
+    #         raise ValueError('A terminal constraint is needed for the backward reachability analysis!')
+    #     if len(switching_sequence) != self.N:
+    #         raise ValueError('Switching sequence not coherent with the controller horizon.')
 
-        # iterations over the horizon
-        for i in range(self.N-1,-1,-1):
-            print i
+    #     # start
+    #     print('Backwards reachability analysis for the switching sequence ' + str(switching_sequence))
+    #     tic = time.time()
+    #     feasible_set = self.X_N
 
-            # vertices of the linear transformation - B U - c
-            trans_U_vertices = [- B_sequence[i].dot(v) - c_sequence[i] for v in U_sequence[i].vertices]
+    #     # fix the switching sequence
+    #     A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
+    #     B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
+    #     c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
+    #     D_sequence = [self.sys.domains[switch] for switch in switching_sequence]
 
-            # vertices of X_N \oplus (- B U - c)
-            mink_sum = [v1 + v2 for v1 in feasible_set.vertices for v2 in trans_U_vertices]
+    #     # iterations over the horizon
+    #     for i in range(self.N-1,-1,-1):
+    #         print i
+    #         lhs_x = feasible_set.lhs_min.dot(A_sequence[i])
+    #         lhs_u = feasible_set.lhs_min.dot(B_sequence[i])
+    #         lhs = np.hstack((lhs_x, lhs_u))
+    #         rhs = feasible_set.rhs_min - feasible_set.lhs_min.dot(c_sequence[i])
+    #         feasible_set = Polytope(lhs, rhs)
+    #         feasible_set.add_facets(D_sequence[i].lhs_min, D_sequence[i].rhs_min)
+    #         feasible_set.assemble_light()
+    #         feasible_set = feasible_set.orthogonal_projection(range(self.sys.n_x))
 
-            # vertices of the linear transformation A^(-1) ( X_N \oplus (- B U - c) )
-            A_inv = np.linalg.inv(A_sequence[i])
-            trans_mink_sum = [A_inv.dot(v) for v in mink_sum]
+    #     print('Feasible set computed in ' + str(time.time()-tic) + ' s')
+    #     return feasible_set
 
-            # remove "almost zeros" to avoid numerical errors in cddlib
-            trans_mink_sum = [clean_matrix(v) for v in trans_mink_sum]
+    # def backwards_reachability_analysis_from_orthogonal_domains(self, switching_sequence, X_list, U_list):
+    #     """
+    #     Returns the feasible set (Polytope) for the given switching sequence.
+    #     It uses the set-relation approach presented in Scibilia et al. "On feasible sets for MPC and their approximations"
+    #     It consists in:
+    #     X_N := { x | G x <= g }
+    #     X_{N-1} = A^(-1) ( X_N \oplus (- B U - c) ) \cap X
+    #     and so on...
+    #     where X and U represent the domain of the state and the input respectively, and \oplus the Minkowsky sum.
+    #     """
 
-            try:
-                M = np.hstack(trans_mink_sum).T
-                M = cdd.Matrix([[1.] + list(m) for m in M])
-                M.rep_type = cdd.RepType.GENERATOR
-                M.canonicalize()
-                p = cdd.Polyhedron(M)
-                M_ineq = p.get_inequalities()
-                # raise RuntimeError('Just to switch to qhull...')
-            except RuntimeError:
+    #     # check that all the data are present
+    #     if self.X_N is None:
+    #         raise ValueError('A terminal constraint is needed for the backward reachability analysis!')
+    #     if len(switching_sequence) != self.N:
+    #         raise ValueError('Switching sequence not coherent with the controller horizon.')
 
-                # print len(trans_mink_sum)
-                # M = np.hstack(trans_mink_sum).T
-                # M = cdd.Matrix([[1.] + list(m) for m in M])
-                # M.rep_type = cdd.RepType.GENERATOR
-                # M.canonicalize()
-                # trans_mink_sum = [np.array([[M[j][k]] for k in range(1,M.col_size)]) for j in range(M.row_size)]
-                # print len(trans_mink_sum)
+    #     # start
+    #     print('Backwards reachability analysis for the switching sequence ' + str(switching_sequence))
+    #     tic = time.time()
+    #     feasible_set = self.X_N
 
-                print 'RuntimeError with cddlib: switched to qhull'
-                hull = ConvexHull(np.hstack(trans_mink_sum).T)
-                A = np.array(hull.equations)[:, :-1]
-                b = - np.array(hull.equations)[:, -1:]
-                M_ineq = np.hstack((b, -A))
-                M_ineq = cdd.Matrix([list(m) for m in M_ineq])
-                M_ineq.rep_type = cdd.RepType.INEQUALITY
+    #     # fix the switching sequence
+    #     A_sequence = [self.sys.affine_systems[switch].A for switch in switching_sequence]
+    #     B_sequence = [self.sys.affine_systems[switch].B for switch in switching_sequence]
+    #     c_sequence = [self.sys.affine_systems[switch].c for switch in switching_sequence]
+    #     X_sequence = [X_list[switch] for switch in switching_sequence]
+    #     U_sequence = [U_list[switch] for switch in switching_sequence]
 
-            M_ineq.canonicalize()
-            A = - np.array([list(M_ineq[j])[1:] for j in range(M_ineq.row_size)])
-            b = np.array([list(M_ineq[j])[:1] for j in range(M_ineq.row_size)])
+    #     # iterations over the horizon
+    #     for i in range(self.N-1,8,-1):
+    #         print i
 
-            # intersect with X
-            feasible_set = Polytope(A, b)
-            feasible_set.add_facets(X_sequence[i].lhs_min, X_sequence[i].rhs_min)
-            feasible_set.assemble()
+    #         # vertices of the linear transformation - B U - c
+    #         trans_U_vertices = [- B_sequence[i].dot(v) - c_sequence[i] for v in U_sequence[i].vertices]
 
-        print('Feasible set computed in ' + str(time.time()-tic) + ' s')
-        return feasible_set
+    #         # vertices of X_N \oplus (- B U - c)
+    #         mink_sum = [v1 + v2 for v1 in feasible_set.vertices for v2 in trans_U_vertices]
 
-    def plot_feasible_set(self, switching_sequence, **kwargs):
-        feasible_set = self.backwards_reachability_analysis(switching_sequence)
-        feasible_set.plot(**kwargs)
-        plt.text(feasible_set.center[0], feasible_set.center[1], str(switching_sequence))
-        return
-
-    # def bound_optimal_value_function(self, switching_sequence, X):
-
-    #     prog = self.condense_program(switching_sequence)
-
-    #     # lower bound
-    #     H = np.vstack((
-    #         np.hstack((prog.F_xx, prog.F_xu)),
-    #         np.hstack((prog.F_xu.T, prog.F_uu))
-    #         ))
-    #     f = np.vstack((prog.F_x, prog.F_u))
-    #     A = np.vstack((
-    #         np.hstack((- prog.C_x, prog.C_u)),
-    #         np.hstack((X.lhs_min, np.zeros((X.lhs_min.shape[0], prog.C_u.shape[1]))))
-    #         ))
-    #     b = np.vstack((prog.C, X.rhs_min))
-    #     x_min, lb = quadratic_program(H, f, A, b)
-    #     #x_min = x_min[0:self.sys.n_x,:]
-    #     lb += prog.F[0,0]
-
-    #     # upper bound
-    #     cost_vertices = []
-    #     for vertex in X.vertices:
-    #         u_star, cost = prog.solve(vertex)
-    #         cost_vertices.append(cost)
-    #         # tol = 1.e-5
-    #         # residuals = np.abs(prog.C_u.dot(u_star) - prog.C_x.dot(vertex) - prog.C).flatten()
-    #         # active_set = np.where(residuals > tol)[0]
-    #     ub = max(cost_vertices)
-    #     return lb, ub
+    #         # vertices of the linear transformation A^(-1) ( X_N \oplus (- B U - c) )
+    #         A_inv = np.linalg.inv(A_sequence[i])
+    #         trans_mink_sum = [A_inv.dot(v) for v in mink_sum]
 
 
+    #         hull = ConvexHull(np.hstack(trans_mink_sum).T)
+    #         A = np.array(hull.equations)[:, :-1]
+    #         b = - np.array(hull.equations)[:, -1:]
 
+    #         # # remove "almost zeros" to avoid numerical errors in cddlib
+    #         # trans_mink_sum = [clean_matrix(v) for v in trans_mink_sum]
 
+    #         # try:
+    #         #     M = np.hstack(trans_mink_sum).T
+    #         #     M = cdd.Matrix([[1.] + list(m) for m in M])
+    #         #     M.rep_type = cdd.RepType.GENERATOR
+    #         #     print M.row_size
+    #         #     M.canonicalize()
+    #         #     print M.row_size
+    #         #     p = cdd.Polyhedron(M)
+    #         #     M_ineq = p.get_inequalities()
+    #         #     # raise RuntimeError('Just to switch to qhull...')
+    #         # except RuntimeError:
 
+    #         #     # print len(trans_mink_sum)
+    #         #     # M = np.hstack(trans_mink_sum).T
+    #         #     # M = cdd.Matrix([[1.] + list(m) for m in M])
+    #         #     # M.rep_type = cdd.RepType.GENERATOR
+    #         #     # M.canonicalize()
+    #         #     # trans_mink_sum = [np.array([[M[j][k]] for k in range(1,M.col_size)]) for j in range(M.row_size)]
+    #         #     # print len(trans_mink_sum)
+
+    #         #     print 'RuntimeError with cddlib: switched to qhull'
+    #         #     hull = ConvexHull(np.hstack(trans_mink_sum).T)
+    #         #     A = np.array(hull.equations)[:, :-1]
+    #         #     b = - np.array(hull.equations)[:, -1:]
+    #         #     print A.shape
+    #         #     M_ineq = np.hstack((b, -A))
+    #         #     M_ineq = cdd.Matrix([list(m) for m in M_ineq])
+    #         #     M_ineq.rep_type = cdd.RepType.INEQUALITY
+
+    #         # M_ineq.canonicalize()
+    #         # A = - np.array([list(M_ineq[j])[1:] for j in range(M_ineq.row_size)])
+    #         # b = np.array([list(M_ineq[j])[:1] for j in range(M_ineq.row_size)])
+    #         # print A.shape
+
+    #         # intersect with X
+    #         feasible_set = Polytope(A, b)
+    #         feasible_set.add_facets(X_sequence[i].lhs_min, X_sequence[i].rhs_min)
+    #         feasible_set.assemble_light()
+
+    #     print('Feasible set computed in ' + str(time.time()-tic) + ' s')
+    #     return feasible_set
 
     # def plot_feasible_set(self, switching_sequence, **kwargs):
-    #     tic = time.time()
-    #     mpqp = self.condense_qp(switching_sequence, self.sys, self.Q, self.R, self.P, self.X_N)
-    #     if mpqp is not None:
-    #         X = self.sys.X_list[switching_sequence[0]]
-    #         lhs = np.vstack((mpqp.feasible_set.lhs_min, X.lhs_min))
-    #         rhs = np.vstack((mpqp.feasible_set.rhs_min, X.rhs_min))
-    #         p = Polytope(lhs,rhs)
-    #         p.assemble()
-    #         toc = time.time()
-    #         print('Feasible set computed in ' + str(toc-tic) + ' s')
-    #         p.plot(**kwargs)
-    #         plt.text(p.center[0], p.center[1], str(switching_sequence))
-    #     else:
-    #         print('Unfeasible switching sequence!')
+    #     feasible_set = self.backwards_reachability_analysis(switching_sequence)
+    #     feasible_set.plot(**kwargs)
+    #     plt.text(feasible_set.center[0], feasible_set.center[1], str(switching_sequence))
     #     return
-
-
-
 
 class HybridPolicyLibrary:
     """
@@ -577,13 +535,22 @@ class HybridPolicyLibrary:
                     ss_list += self.shift_switching_sequence(ss_list[0], terminal_domain)
                     for ss in ss_list:
                         if not self.library.has_key(ss):
-                            if X_list is None and U_list is None:
-                                feasible_set = self.controller.backwards_reachability_analysis(ss)
-                            elif X_list is not None and U_list is not None:
-                                feasible_set = self.controller.backwards_reachability_analysis_from_orthogonal_domains(ss, X_list, U_list)
+
+                            # if X_list is None and U_list is None:
+                            #     feasible_set = self.controller.backwards_reachability_analysis(ss)
+                            # elif X_list is not None and U_list is not None:
+                            #     feasible_set = self.controller.backwards_reachability_analysis_from_orthogonal_domains(ss, X_list, U_list)
+
+                            prog = self.controller.condense_program(ss)
+                            tic = time.time()
+                            print('- Computing feasible set for the switching sequence ' + str(ss) + ' ...')
+                            fs = prog.feasible_set
+                            print('- Feasible set computed in ' + str(time.time()-tic) + ' seconds.')
+
+
                             self.library[ss] = {
-                            'feasible_set': feasible_set,
-                            'program': self.controller.condense_program(ss),
+                            'feasible_set': fs,
+                            'program': prog,
                             'lower_bound': {'A': np.zeros((1, self.controller.sys.n_x)), 'b': np.zeros((1,1))},
                             'upper_bound': {'convex_hull': None, 'A': None, 'b': None},
                             'generating_point': (x, ss_star) ###### useless
@@ -612,10 +579,8 @@ class HybridPolicyLibrary:
 
     def add_vertices_of_feasible_regions(self, eps=1.e-4):
         for ss, ss_values in self.library.items():
-            print ss
             x_list = ss_values['feasible_set'].vertices
             x_list = [x + (ss_values['feasible_set'].center - x)*eps for x in x_list]
-            print [ss_values['program'].solve(x)[1] for x in x_list]
             xV_list = [np.vstack((x, ss_values['program'].solve(x)[1])) for x in x_list]
 
             ### add an auxiliary vertex when the number of samples in not enough to generate a simplex
@@ -837,13 +802,13 @@ class parametric_qp:
         self.W = self.C + self.C_u.dot(self.H_inv).dot(self.F_u)
         return
 
-    # @property
-    # def feasible_set(self):
-    #     if self._feasible_set is None:
-    #         augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
-    #         augmented_polytope.assemble_light()
-    #         self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
-    #     return self._feasible_set
+    @property
+    def feasible_set(self):
+        if self._feasible_set is None:
+            augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
+            augmented_polytope.assemble()
+            self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
+        return self._feasible_set
 
     def get_cost_sensitivity(self, x_list, active_set):
 
@@ -935,7 +900,7 @@ def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
     elif objective_norm == 'two':
         F_uu, F_xu, F_xx, F_u, F_x, F = quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
         parametric_program = parametric_qp(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W)
-    print 'total condensing time is', str(time.time()-tic),'s'
+    print 'total condensing time is', str(time.time()-tic),'s.'
     return parametric_program
 
 # def constraint_condenser(sys, X_N, switching_sequence):
