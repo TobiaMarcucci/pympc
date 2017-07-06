@@ -4,7 +4,7 @@ from pyhull.halfspace import Halfspace, HalfspaceIntersection
 import cdd
 from pympc.optimization.pnnls import linear_program
 from pympc.geometry.chebyshev_center import chebyshev_center
-from pympc.geometry.orthogonal_projection_CHM import orthogonal_projection_CHM
+from pympc.geometry.convex_hull import orthogonal_projection_CHM
 import scipy.spatial as spatial
 from matplotlib.path import Path
 import matplotlib.patches as patches

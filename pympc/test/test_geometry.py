@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 from pympc.geometry.polytope import Polytope
 from pympc.geometry.chebyshev_center import chebyshev_center
-from pympc.geometry.orthogonal_projection_CHM import plane_through_points
+from pympc.geometry.convex_hull import plane_through_points
+from pympc.geometry.convex_hull import ConvexHull
 
 class TestGeometry(unittest.TestCase):
 
@@ -156,17 +157,18 @@ class TestGeometry(unittest.TestCase):
         self.assertTrue(np.allclose(a, real_a))
         self.assertTrue(np.isclose(b[0,0], real_a[0,0]))
 
-        # test convex hull method
+        # test CHM
         n_test = 100
         n_ineq = 20
         n_var = 5
-        res = range(3)
+        res = [1,3,4]
         for i in range(n_test):
-            print i
             everything_ok = False
             while not everything_ok:
                 A = np.random.randn(n_ineq, n_var)
                 b = np.random.rand(n_ineq, 1)
+                x_offeset = np.random.rand(n_var, 1)
+                b += A.dot(x_offeset)
                 p = Polytope(A, b)
                 try:
                     p.assemble()
@@ -182,6 +184,96 @@ class TestGeometry(unittest.TestCase):
                     self.assertTrue(any([np.allclose(v, v_ve) for v_ve in p_proj_ve.vertices]))
                 for v_ve in p_proj_ve.vertices:
                     self.assertTrue(any([np.allclose(v, v_ve) for v in p_proj.vertices]))
+
+
+    def test_convex_hull(self):
+
+        # first hull with 4 points
+        points = [np.array([[1.],[0.],[0.]]), np.array([[-1.],[0.],[0.]]), np.array([[0.],[1.],[0.]]), np.array([[0.],[0.],[1.]])]
+        A_real = np.array([
+            [1., 1., 1.]/np.sqrt(3.),
+            [-1., 1., 1.]/np.sqrt(3.),
+            [0., 0., -1.],[0., -1., 0.]
+            ])
+        b_real = np.array([
+            [1./np.sqrt(3.)],
+            [1./np.sqrt(3.)],
+            [0.],
+            [0.]
+            ])
+
+        # test Hrep
+        hull = ConvexHull(points)
+        Ab_real = np.hstack((A_real, b_real))
+        Ab = np.hstack((hull.A, hull.b))
+        self.assertEqual(Ab_real.shape[0], Ab.shape[0])
+        for ab_real in Ab_real:
+            self.assertTrue(any([np.allclose(ab_real, ab) for ab in Ab]))
+        for ab in Ab:
+            self.assertTrue(any([np.allclose(ab_real, ab) for ab_real in Ab_real]))
+
+        # add point on surface and inside (nothing is supposed happen...)
+        for point in [np.array([[0.],[0.],[.5]]), np.array([[0.],[.1],[.5]])]:
+            hull.add_point(point)
+            Ab = np.hstack((hull.A, hull.b))
+            for ab_real in Ab_real:
+                self.assertTrue(any([np.allclose(ab_real, ab) for ab in Ab]))
+            for ab in Ab:
+                self.assertTrue(any([np.allclose(ab_real, ab) for ab_real in Ab_real]))
+
+        # add coplanar point outside
+        point = np.array([[0.],[0.],[-1.]])
+        hull.add_point(point)
+        Ab = np.hstack((hull.A, hull.b))
+        A_real = np.array([
+            [1., 1., 1.]/np.sqrt(3.),
+            [-1., 1., 1.]/np.sqrt(3.),
+            [1., 1., -1.]/np.sqrt(3.),
+            [-1., 1., -1.]/np.sqrt(3.),
+            [0., -1., 0.]
+            ])
+        b_real = np.array([
+            [1./np.sqrt(3.)],
+            [1./np.sqrt(3.)],
+            [1./np.sqrt(3.)],
+            [1./np.sqrt(3.)],
+            [0.]])
+        Ab_real = np.hstack((A_real, b_real))
+        Ab = np.hstack((hull.A, hull.b))
+        points.append(point)
+        for ab_real in Ab_real:
+            self.assertTrue(any([np.allclose(ab_real, ab) for ab in Ab]))
+
+        # test minimal H-rep
+        Ab = np.hstack(hull.get_minimal_H_rep())
+        self.assertEqual(Ab_real.shape[0], Ab.shape[0])
+        for ab_real in Ab_real:
+            self.assertTrue(any([np.allclose(ab_real, ab) for ab in Ab]))
+        for ab in Ab:
+            self.assertTrue(any([np.allclose(ab_real, ab) for ab_real in Ab_real]))
+
+        # add point outside
+        point = np.array([[0.],[-1.],[0.]])
+        hull.add_point(point)
+        Ab = np.hstack((hull.A, hull.b))
+        A_real = np.array([
+            [1., 1., 1.],
+            [-1., 1., 1.],
+            [1., -1., 1.],
+            [1., 1., -1.],
+            [-1., -1., 1.],
+            [1., -1., -1.],
+            [-1., 1., -1.],
+            [-1., -1., -1.]
+            ])/np.sqrt(3.)
+        b_real = np.ones((8,1))/np.sqrt(3.)
+        Ab_real = np.hstack((A_real, b_real))
+        Ab = np.hstack((hull.A, hull.b))
+        points.append(point)
+        for ab_real in Ab_real:
+            self.assertTrue(any([np.allclose(ab_real, ab) for ab in Ab]))
+        for ab in Ab:
+            self.assertTrue(any([np.allclose(ab_real, ab) for ab_real in Ab_real]))
 
 if __name__ == '__main__':
     unittest.main()
