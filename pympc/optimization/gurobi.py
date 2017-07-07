@@ -111,20 +111,22 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub
     x = model.addVars(n_x, lb=x_lb, ub=x_ub, name='x')
     x_np = np.array([[x[i]] for i in range(n_x)])
 
-    # inequality constraints
-    if A is not None and b is not None:
-        expr = A.dot(x_np) - b
-        model.addConstrs((expr[i,0] <= 0. for i in range(A.shape[0])))
+    with suppress_stdout():
 
-    # equality constraints
-    if C is not None and d is not None:
-        expr = C.dot(x_np) - d
-        model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
+        # inequality constraints
+        if A is not None and b is not None:
+            expr = A.dot(x_np) - b
+            model.addConstrs((expr[i,0] <= 0. for i in range(A.shape[0])))
 
-    # cost function
-    f = np.reshape(f, (n_x, 1))
-    V = .5*x_np.T.dot(H).dot(x_np)[0,0] + f.T.dot(x_np)[0,0]
-    model.setObjective(V)
+        # equality constraints
+        if C is not None and d is not None:
+            expr = C.dot(x_np) - d
+            model.addConstrs((expr[i,0] == 0. for i in range(C.shape[0])))
+
+        # cost function
+        f = np.reshape(f, (n_x, 1))
+        V = .5*x_np.T.dot(H).dot(x_np)[0,0] + f.T.dot(x_np)[0,0]
+        model.setObjective(V)
 
     # run the optimization
     model.setParam('OutputFlag', False)

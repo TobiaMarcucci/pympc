@@ -206,11 +206,13 @@ def expand_simplex(A, b, hull, tol=1.e-7):
     print('\n'),
     return hull
 
+
 class PolytopeProjectionInnerApproximation:
 
     def __init__(self, A, b, resiudal_dimensions):
 
         # data
+        self.empty = False
         self.A = A
         self.b = b
         self.resiudal_dimensions = resiudal_dimensions
@@ -262,8 +264,6 @@ class PolytopeProjectionInnerApproximation:
         """
         is_inside = np.max(self.hull.A.dot(x) - self.hull.b) <= tol
         return is_inside
-
-
 
 
 

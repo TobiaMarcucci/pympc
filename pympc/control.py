@@ -237,7 +237,9 @@ class MPCHybridController:
         model = self.mip_constraints(model, x_np, u_np, z, d)
 
         # set parameters
+        time_limit = 60.
         model.setParam('OutputFlag', False)
+        model.setParam('TimeLimit', time_limit)
         model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
         model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
         model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
@@ -248,12 +250,14 @@ class MPCHybridController:
 
         # return solution
         if model.status != grb.GRB.Status.OPTIMAL:
-            print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+            # print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
             u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
             x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
             cost = np.nan
             switching_sequence = [np.nan]*self.N
         else:
+            if model.status == grb.GRB.Status.TIME_LIMIT:
+                print('The solution of the MIQP excedeed the time limit of ' + str(time_limit))
             cost = model.objVal
             u_feedforward = [np.array([[model.getAttr('x', u)[k,i]] for i in range(self.sys.n_u)]) for k in range(self.N)]
             x_trajectory = [np.array([[model.getAttr('x', x)[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
@@ -360,11 +364,11 @@ class MPCHybridController:
 
     def condense_program(self, switching_sequence):
         tic = time.time()
-        print('\nCondensing the OCP for the switching sequence ' + str(switching_sequence) + ' ...')
+        # print('\nCondensing the OCP for the switching sequence ' + str(switching_sequence) + ' ...')
         if len(switching_sequence) != self.N:
             raise ValueError('Switching sequence not coherent with the controller horizon.')
         prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
-        print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
+        # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
         return prog
 
 
@@ -385,14 +389,16 @@ class FeasibleSetLibrary:
 
     def sample_policy(self, n_samples):
         for i in range(n_samples):
-            print i
+            print('Sample ' + str(i) + ':'),
             x = self.random_sample()
             if not self.sampling_rejection(x):
                 ss = self.controller.feedforward(x)[2]
                 if not any(np.isnan(ss)):
                     if self.library.has_key(ss):
+                        print('included.')
                         self.library[ss]['feasible_set'].include_point(x)
                     else:
+                        print('new switching sequence.')
                         self.library[ss] = dict()
                         prog = self.controller.condense_program(ss)
                         self.library[ss]['program'] = prog
@@ -401,7 +407,11 @@ class FeasibleSetLibrary:
                         residual_dimensions = range(prog.C_x.shape[1])
                         feasible_set = PolytopeProjectionInnerApproximation(lhs, rhs, residual_dimensions)
                         feasible_set.include_point(x)
-                        self.library[ss]['feasible_set'] = feasible_set      
+                        self.library[ss]['feasible_set'] = feasible_set
+                else:
+                    print('unfeasible.')
+            else:
+                print('rejected.')
         return
 
     def random_sample(self):
@@ -415,24 +425,65 @@ class FeasibleSetLibrary:
                 return True
         return False
 
-    def plot_fs(self, ss):
-        color = np.random.rand(3,1)
-        fs = self.library[ss]['feasible_set']
-        p = Polytope(fs.A, fs.b)
-        p.assemble(redundant=False, vertices=fs.vertices)
-        p.plot(color=color, alpha=.5)
-        return
+    def get_feasible_switching_sequences(self, x):
+        return [ss for ss, ss_values in self.library.items() if ss_values['feasible_set'].applies_to(x)]
+
+    def feedforward(self, x, given_ss=None):
+        fss = self.get_feasible_switching_sequences(x)
+        if given_ss is not None:
+            fss.insert(0, given_ss)
+        if not fss:
+            V_star = np.nan
+            u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
+            ss_star = [np.nan]*self.controller.N
+            return u_star, V_star, ss_star
+        else:
+            V_star = np.inf
+            for ss in fss:
+                u, V = self.library[ss]['program'].solve(x)
+                if V < V_star:
+                    V_star = V
+                    u_star = [u[i*self.controller.sys.n_u:(i+1)*self.controller.sys.n_u,:] for i in range(self.controller.N)]
+                    ss_star = ss
+        return u_star, V_star, ss_star
+
+    def feedback(self, x, given_ss=None):
+        u_star, V_star, ss_star = self.feedforward(x, given_ss)
+        return u_star[0], ss_star
+
+    def add_shifted_switching_sequences(self, terminal_domain):
+        for ss in self.library.keys():
+            for shifted_ss in self.shift_switching_sequence(ss, terminal_domain):
+                if not self.library.has_key(shifted_ss):
+                    self.library[shifted_ss] = dict()
+                    self.library[shifted_ss]['program'] = self.controller.condense_program(shifted_ss)
+                    self.library[shifted_ss]['feasible_set'] = EmptyFeasibleSet()
+
+    @staticmethod
+    def shift_switching_sequence(ss, terminal_domain):
+        return [ss[i:] + (terminal_domain,)*i for i in range(1,len(ss))]
 
     def plot_partition(self):
         for ss_value in self.library.values():
             color = np.random.rand(3,1)
             fs = ss_value['feasible_set']
-            p = Polytope(fs.hull.A, fs.hull.b)
-            print fs.hull.A.shape, fs.hull.b.shape
-            p.assemble(redundant=False, vertices=fs.hull.points)
-            p.plot(color=color, alpha=.5)
-        plt.show()
+            if not fs.empty:
+                p = Polytope(fs.hull.A, fs.hull.b)
+                p.assemble()#redundant=False, vertices=fs.hull.points)
+                p.plot(color=color, alpha=.5)
         return
+        
+
+
+class EmptyFeasibleSet:
+
+    def __init__(self):
+        self.empty = True
+        return
+
+    def applies_to(self, x):
+        return False
+
 
 class parametric_lp:
 
@@ -630,7 +681,7 @@ def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
     elif objective_norm == 'two':
         F_uu, F_xu, F_xx, F_u, F_x, F = quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
         parametric_program = parametric_qp(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W)
-    print 'total condensing time is', str(time.time()-tic),'s.\n'
+    # print 'total condensing time is', str(time.time()-tic),'s.\n'
     return parametric_program
 
 def constraint_condenser(sys, X_N, switching_sequence):
@@ -656,7 +707,7 @@ def constraint_condenser(sys, X_N, switching_sequence):
         G = None
         W = None
         E = None
-    print '\nRedundant inequalities removed in', str(time.time()-tic),'s,',
+    # print '\nRedundant inequalities removed in', str(time.time()-tic),'s,',
     return G, W, E
 
 def linear_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
