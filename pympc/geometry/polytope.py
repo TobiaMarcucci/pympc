@@ -63,7 +63,7 @@ class Polytope:
         self.normalize()
         self.check_emptiness()
         if self.empty:
-            return
+            return self
         self.check_boundedness()
         if not(self.bounded):
             raise ValueError('Unbounded polyhedron: only polytopes allowed')
@@ -229,7 +229,7 @@ class Polytope:
         #     b_proj = np.array([list(M_proj[i])[:1] for i in range(M_proj.row_size)])
         #     p_proj = Polytope(A_proj, b_proj)
         #     p_proj.assemble()
-            
+
         elif mehtod == 'vertex_enumeration':
             v_proj = np.hstack(self.vertices).T[:,residual_variables]
             if len(residual_variables) > 1:
