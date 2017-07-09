@@ -65,8 +65,8 @@ class MPCController:
     def feedforward(self, x0):
         u_feedforward, cost = self.condensed_program.solve(x0)
         u_feedforward = [u_feedforward[self.sys.n_u*i:self.sys.n_u*(i+1),:] for i in range(self.N)]
-        if any(np.isnan(u_feedforward).flatten()):
-            print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+        # if any(np.isnan(u_feedforward).flatten()):
+        #     print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
         return u_feedforward, cost
 
     def feedback(self, x0):
@@ -91,7 +91,7 @@ class MPCController:
             cost = .5*x0.T.dot(cr_x0.V_quadratic).dot(x0) + cr_x0.V_linear.dot(x0) + cr_x0.V_offset
             cost = cost[0,0]
         else:
-            print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+            # print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
             u_feedforward = [np.full((self.sys.n_u, 1), np.nan) for i in range(self.N)]
             cost = np.nan
         return u_feedforward, cost
