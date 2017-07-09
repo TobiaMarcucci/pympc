@@ -101,7 +101,7 @@ class Polytope:
         self._facet_radii = [None] * len(self.minimal_facets)
         self._x_min = None
         self._x_max = None
-        return
+        return self
 
     def normalize(self, tol=1e-9):
         """
