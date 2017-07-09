@@ -44,16 +44,38 @@ class Polytope:
             raise ValueError('Polytope already assembled, cannot add facets!')
         self.A = np.vstack((self.A, A))
         self.b = np.vstack((self.b, b))
-        return self
+        return
 
-    def add_bounds(self, x_min, x_max):
+    def bound_selection_matrix(self, bound_indices):
+        n_variables = self.A.shape[1]
+        if bound_indices is None:
+            bound_indices = range(n_variables)
+        unbound_indices = [i for i in range(n_variables) if i not in bound_indices]
+        selection_matrix = np.eye(n_variables)
+        return np.delete(selection_matrix, unbound_indices, 0)
+
+    def add_bounds(self, x_min, x_max, bound_indices=None):
         if self.assembled:
             raise ValueError('Polytope already assembled, cannot add bounds!')
-        n_variables = x_max.shape[0]
-        A = np.vstack((np.eye(n_variables), -np.eye(n_variables)))
+        selection_matrix = self.bound_selection_matrix(bound_indices)
+        A = np.vstack((selection_matrix, -selection_matrix))
         b = np.vstack((x_max, -x_min))
         self.add_facets(A, b)
-        return self
+        return
+
+    def add_lower_bounds(self, x_min, bound_indices=None):
+        if self.assembled:
+            raise ValueError('Polytope already assembled, cannot add bounds!')
+        selection_matrix = self.bound_selection_matrix(bound_indices)
+        self.add_facets(-selection_matrix, -x_min)
+        return
+
+    def add_upper_bounds(self, x_max, bound_indices=None):
+        if self.assembled:
+            raise ValueError('Polytope already assembled, cannot add bounds!')
+        selection_matrix = self.bound_selection_matrix(bound_indices)
+        self.add_facets(selection_matrix, x_max)
+        return
 
     def assemble(self, redundant=True, vertices=None):
         if self.assembled:
@@ -79,7 +101,7 @@ class Polytope:
         self._facet_radii = [None] * len(self.minimal_facets)
         self._x_min = None
         self._x_max = None
-        return self
+        return
 
     def normalize(self, tol=1e-9):
         """
@@ -90,7 +112,7 @@ class Polytope:
             if norm_factor > tol:
                 self.A[i,:] = self.A[i,:]/norm_factor
                 self.b[i] = self.b[i]/norm_factor
-        return self
+        return
 
     def check_emptiness(self):
         """
