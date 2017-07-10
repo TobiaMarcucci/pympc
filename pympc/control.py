@@ -387,10 +387,10 @@ class FeasibleSetLibrary:
         self.library = dict()
         return
 
-    def sample_policy(self, n_samples):
+    def sample_policy(self, n_samples, X=None):
         for i in range(n_samples):
             print('Sample ' + str(i) + ':'),
-            x = self.random_sample()
+            x = self.random_sample(X)
             if not self.sampling_rejection(x):
                 ss = self.controller.feedforward(x)[2]
                 if not any(np.isnan(ss)):
@@ -414,9 +414,16 @@ class FeasibleSetLibrary:
                 print('rejected.')
         return
 
-    def random_sample(self):
-        x = np.random.rand(self.controller.sys.n_x,1)
-        x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
+    def random_sample(self, X=None):
+        if X is None:
+            x = np.random.rand(self.controller.sys.n_x, 1)
+            x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
+        else:
+            is_inside = False
+            while not is_inside:
+                x = np.random.rand(self.controller.sys.n_x,1)
+                x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
+                is_inside = X.applies_to(x)
         return x
 
     def sampling_rejection(self, x):
@@ -703,19 +710,21 @@ def constraint_condenser(sys, X_N, switching_sequence):
     G = (lhs_x.dot(B_bar) + lhs_u)
     W = rhs - lhs_x.dot(c_bar)
     E = - lhs_x.dot(A_bar)
-    # the following might be super slow (and is not necessary)
-    tic = time.time()
-    p = Polytope(np.hstack((G, -E)), W)
-    p.assemble()
-    if not p.empty:
-        G = p.lhs_min[:,:sys.n_u*N]
-        E = - p.lhs_min[:,sys.n_u*N:]
-        W = p.rhs_min
-    else:
-        G = None
-        W = None
-        E = None
-    # print '\nRedundant inequalities removed in', str(time.time()-tic),'s,',
+    # # the following might be super slow (and is not necessary)
+    # n_ineq_before = G.shape[0]
+    # tic = time.time()
+    # p = Polytope(np.hstack((G, -E)), W)
+    # p.assemble()
+    # if not p.empty:
+    #     G = p.lhs_min[:,:sys.n_u*N]
+    #     E = - p.lhs_min[:,sys.n_u*N:]
+    #     W = p.rhs_min
+    #     n_ineq_after = G.shape[0]
+    # else:
+    #     G = None
+    #     W = None
+    #     E = None
+    # print '\n' + str(n_ineq_before - n_ineq_after) + 'on' + str(n_ineq_before) + 'redundant inequalities removed in', str(time.time()-tic),'s,',
     return G, W, E
 
 def linear_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
