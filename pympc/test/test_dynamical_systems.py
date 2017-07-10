@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
-from pympc.dynamical_systems import DTLinearSystem, DTPWASystem, DTAffineSystem, dare, moas_closed_loop
-from pympc.geometry import Polytope
+from pympc.dynamical_systems import DTLinearSystem, DTPWASystem, DTAffineSystem, dare, moas_closed_loop_from_orthogonal_domains
+from pympc.geometry.polytope import Polytope
 
 class TestDynamicalSystems(unittest.TestCase):
 
@@ -40,7 +40,7 @@ class TestDynamicalSystems(unittest.TestCase):
         u_min = - u_max
         U = Polytope.from_bounds(u_min, u_max)
         U.assemble()
-        moas = moas_closed_loop(A, B, K, X, U)
+        moas = moas_closed_loop_from_orthogonal_domains(A, B, K, X, U)
         sys_cl = DTLinearSystem(A + B.dot(K), np.zeros((2,1)))
         v0_max = max([v[0] for v in moas.vertices])
         v1_max = max([v[1] for v in moas.vertices])

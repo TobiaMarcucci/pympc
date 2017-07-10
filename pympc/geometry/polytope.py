@@ -54,15 +54,6 @@ class Polytope:
         selection_matrix = np.eye(n_variables)
         return np.delete(selection_matrix, unbound_indices, 0)
 
-    def add_bounds(self, x_min, x_max, bound_indices=None):
-        if self.assembled:
-            raise ValueError('Polytope already assembled, cannot add bounds!')
-        selection_matrix = self.bound_selection_matrix(bound_indices)
-        A = np.vstack((selection_matrix, -selection_matrix))
-        b = np.vstack((x_max, -x_min))
-        self.add_facets(A, b)
-        return
-
     def add_lower_bounds(self, x_min, bound_indices=None):
         if self.assembled:
             raise ValueError('Polytope already assembled, cannot add bounds!')
@@ -75,6 +66,13 @@ class Polytope:
             raise ValueError('Polytope already assembled, cannot add bounds!')
         selection_matrix = self.bound_selection_matrix(bound_indices)
         self.add_facets(selection_matrix, x_max)
+        return
+
+    def add_bounds(self, x_min, x_max, bound_indices=None):
+        if self.assembled:
+            raise ValueError('Polytope already assembled, cannot add bounds!')
+        self.add_lower_bounds(x_min, bound_indices)
+        self.add_upper_bounds(x_max, bound_indices)
         return
 
     def assemble(self, redundant=True, vertices=None):

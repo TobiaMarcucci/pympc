@@ -23,6 +23,7 @@ mass = 1.
 stiffness = 100.
 gravity = 10.
 friction_coefficient = .5
+t_s = .1
 
 # position bounds
 
@@ -203,10 +204,10 @@ x_eq = np. array([
     ])
 u_eq = np.zeros((9,1))
 
-translated_affine_systems = [DTAffineSystem(get_A(mode), get_B(mode), c + get_A(mode).dot(x_eq)) for mode in modes]
+translated_affine_systems = [DTAffineSystem.from_continuous(get_A(mode), get_B(mode), c + get_A(mode).dot(x_eq), t_s) for mode in modes]
 translated_domains = [Polytope(domain.A, domain.b - domain.A.dot(np.vstack((x_eq, u_eq)))) for domain in domains]
-[translated_domain.assemble() for translated_domain in translated_domains]
 
+print translated_domains
 # PWA system
 
 pwa_system = DTPWASystem(translated_affine_systems, translated_domains)

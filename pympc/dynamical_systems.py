@@ -249,12 +249,23 @@ def dare(A, B, Q, R):
     K = - linalg.inv(B.T.dot(P).dot(B)+R).dot(B.T).dot(P).dot(A)
     return P, K
 
-def moas_closed_loop(A, B, K, X, U):
+def moas_closed_loop_from_orthogonal_domains(A, B, K, X, U):
     # closed loop dynamics
     A_cl = A + B.dot(K)
     # constraints for the maximum output admissible set
     lhs_cl = np.vstack((X.lhs_min, U.lhs_min.dot(K)))
     rhs_cl = np.vstack((X.rhs_min, U.rhs_min))
+    X_cl = Polytope(lhs_cl, rhs_cl)
+    X_cl.assemble()
+    # compute maximum output admissible set
+    return moas(A_cl, X_cl)
+
+def moas_closed_loop(A, B, K, D):
+    # closed loop dynamics
+    A_cl = A + B.dot(K)
+    # constraints for the maximum output admissible set
+    lhs_cl = D.lhs_min[:,:A.shape[0]] + D.lhs_min[:,A.shape[0]:].dot(K)
+    rhs_cl = D.rhs_min
     X_cl = Polytope(lhs_cl, rhs_cl)
     X_cl.assemble()
     # compute maximum output admissible set
