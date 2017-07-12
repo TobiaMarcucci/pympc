@@ -249,7 +249,8 @@ class BoxAtlasPWAModel(object):
         #P, K = dare(translated_affine_systems[terminal_mode].A, translated_affine_systems[terminal_mode].B, Q, R)
         #X_N = ds.moas_closed_loop(translated_affine_systems[terminal_mode].A, translated_affine_systems[terminal_mode].B, K, X[1], U[1])
         P = Q
-        X_N.assemble()
+        if not X_N.assembled:
+            X_N.assemble()
 
         # hybrid controller
         return MPCHybridController(self.pwa_system, N, objective_norm, Q, R, P, X_N)
