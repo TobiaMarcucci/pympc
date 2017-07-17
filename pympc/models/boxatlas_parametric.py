@@ -6,6 +6,17 @@ from pympc.dynamical_systems import DTAffineSystem, DTPWASystem, dare, moas_clos
 from pympc.control import MPCHybridController
 import pympc.plot as mpc_plt
 import matplotlib.pyplot as plt
+from director.thirdparty import transformations
+import scipy.spatial as spatial
+import director.viewerclient as vc
+
+from pyhull.halfspace import Halfspace, HalfspaceIntersection
+
+
+
+# from matplotlib.path import Path
+# import matplotlib.patches as patches
+
 
 class MovingLimb():
     def __init__(self, A, b, contact_surface):
@@ -69,7 +80,7 @@ class BoxAtlas():
         return u_eq
 
     def _get_contact_modes(self):
-        modes_tuples = product(*[range(len(self.moving_limbs)) for limb in self.moving_limbs])
+        modes_tuples = product(*[range(len(self.topology['moving'][limb])) for limb in self.moving_limbs])
         contact_modes = []
         for mode_tuple in modes_tuples:
             mode = dict()
@@ -237,3 +248,120 @@ class BoxAtlas():
             X_mode.assemble()
             state_domains.append(X_mode)
         return state_domains, input_domains
+
+    def _state_vector_to_dict(self, x_vec):
+        x_dict = dict()
+        for i, limb in enumerate(self.moving_limbs):
+            x_dict[limb] = x_vec[i*2:(i+1)*2, :]
+        x_dict['bq'] = x_vec[(i+1)*2:(i+2)*2, :]
+        x_dict['bv'] = x_vec[(i+2)*2:(i+3)*2, :]
+        return x_dict
+
+    def visualize_environment(self, vis):
+        z_lim = [-.3,.3]
+        environment_limits = np.ones((2,1)) * .6
+        for limb in self.moving_limbs:
+            for i, moving_limb in enumerate(self.topology['moving'][limb]):
+                if moving_limb.contact_surface is not None:
+                    contact_domain = Polytope(moving_limb.A, moving_limb.b)
+                    contact_domain.add_bounds(-environment_limits, environment_limits)
+                    contact_domain.assemble()
+                    contact_domain = extrude_2d_polytope(contact_domain, z_lim)
+                    vis = visualize_3d_polytope(contact_domain, 'w_' + limb + '_' + str(i), vis)
+        for limb in self.fixed_limbs:
+            fixed_limb = self.topology['fixed'][limb]
+            b = fixed_limb.normal.T.dot(fixed_limb.position)
+            contact_domain = Polytope(fixed_limb.normal.T, b)
+            contact_domain.add_bounds(-environment_limits, environment_limits)
+            contact_domain.assemble()
+            contact_domain = extrude_2d_polytope(contact_domain, z_lim)
+            vis = visualize_3d_polytope(contact_domain, 'w_' + limb, vis)
+        return vis
+
+    def visualize(self, vis, x_vec):
+        x_dict = self._state_vector_to_dict(x_vec)
+        for limb in self.moving_limbs:
+            translation = [0.] + list((self.nominal_limb_positions[limb] + x_dict[limb]).flatten())
+            vis[limb].settransform(transformations.translation_matrix(translation))
+        for limb in self.fixed_limbs:
+            translation = [0.] + list((self.topology['fixed'][limb].position).flatten())
+            vis[limb].settransform(transformations.translation_matrix(translation))
+        translation = [0.] + list(x_dict['bq'].flatten())
+        vis['bq'].settransform(transformations.translation_matrix(translation))
+        return vis
+
+    # def visualize(self, x_vec):
+    #     x_dict = self._state_vector_to_dict(x_vec)
+    #     body_vertices = [[.1, .1],[-.1,.1],[-.1,-.1],[.1,-.1],[.1, .1]]
+    #     body_vertices = [[vertex[0] + x_dict['bq'][0,0], vertex[1] + x_dict['bq'][1,0]] for vertex in body_vertices]
+    #     codes = [Path.MOVETO] + [Path.LINETO]*(len(body_vertices)-2) + [Path.CLOSEPOLY]
+    #     path = Path(body_vertices, codes)
+    #     ax = plt.gca()
+    #     body_patch = patches.PathPatch(path, facecolor='b')
+    #     patches = [body_patch]
+    #     ax.add_patch(body)
+    #     for limb in self.moving_limbs:
+    #         limb_position = tuple((self.nominal_limb_positions[limb] + x_dict[limb]).flatten())
+    #         limb_patch = plt.Circle(limb_position, 0.05, facecolor='g', edgecolor='k')
+    #         patches.append(limb_patch)
+    #         ax.add_artist(limb_patch)
+    #     for limb in self.fixed_limbs:
+    #         limb_position = tuple((self.topology['fixed'][limb].position).flatten())
+    #         limb_patch = plt.Circle(limb_position, 0.05, facecolor='g', edgecolor='k')
+    #         patches.append(limb_patch)
+    #         ax.add_artist(limb_patch)
+    #     return body_patch
+
+
+class Mesh(vc.BaseGeometry):
+    __slots__ = ["vertices", "triangular_faces"]
+
+    def __init__(self, vertices, faces):
+        self.vertices = vertices
+        self.triangular_faces = []
+        for face in faces:
+            for i in range(1, len(face)-1):
+                self.triangular_faces.append([face[0], face[i], face[i+1]])
+
+    def serialize(self):
+        return {
+            "type": "mesh_data",
+            "vertices": self.vertices,
+            "faces": self.triangular_faces
+        }
+
+def visualize_3d_polytope(p, name, visualizer):
+    p = reorder_coordinates(p)
+    halfspaces = []
+    # change of coordinates because qhull is stupid...
+    b_qhull = p.rhs_min - p.lhs_min.dot(p.center)
+    for i in range(p.lhs_min.shape[0]):
+        halfspace = Halfspace(p.lhs_min[i,:].tolist(), (-b_qhull[i,0]).tolist())
+        halfspaces.append(halfspace)
+    p_qhull = HalfspaceIntersection(halfspaces, np.zeros(p.center.shape).flatten().tolist())
+    vertices = p_qhull.vertices + np.hstack([p.center]*len(p_qhull.vertices)).T
+    mesh = Mesh(vertices.tolist(), p_qhull.facets_by_halfspace)
+    visualizer[name].setgeometry(mesh)
+    return visualizer
+
+def extrude_2d_polytope(p_2d, z_limits):
+    A = np.vstack((
+        np.hstack((p_2d.lhs_min, np.zeros((p_2d.lhs_min.shape[0], 1)))),
+        np.hstack((np.zeros((2, p_2d.lhs_min.shape[1])), np.array([[1.],[-1.]])))
+        ))
+    b = np.vstack((p_2d.rhs_min, np.array([[z_limits[1]],[-z_limits[0]]])))
+    p_3d = Polytope(A, b)
+    p_3d.assemble()
+    return p_3d
+
+def reorder_coordinates(p):
+    T = np.array([[0.,1.,0.],[0.,0.,1.],[1.,0.,0.]])
+    A = p.lhs_min.dot(T)
+    p_rotated = Polytope(A, p.rhs_min)
+    p_rotated.assemble()
+    return p_rotated
+
+
+
+
+
