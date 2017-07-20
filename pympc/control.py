@@ -237,13 +237,13 @@ class MPCHybridController:
         model = self.mip_constraints(model, x_np, u_np, z, d)
 
         # set parameters
-        time_limit = 60.
+        time_limit = 600.
         model.setParam('OutputFlag', False)
         model.setParam('TimeLimit', time_limit)
-        model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
-        model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
-        model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
-        model.setParam(grb.GRB.Param.MIPGap, 1.e-9)
+        # model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
+        # model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
+        # model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
+        # model.setParam(grb.GRB.Param.MIPGap, 1.e-9)
 
         # run optimization
         model.optimize()
@@ -371,7 +371,99 @@ class MPCHybridController:
         # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
         return prog
 
+# class FeasibleSetLibrary:
+#     """
+#     library[switching_sequence]
+#     - program
+#     - feasible_set
+#     """
 
+#     def __init__(self, controller):
+#         self.controller = controller
+#         self.library = dict()
+#         return
+
+#     def sample_policy(self, n_samples, X=None):
+#         for i in range(n_samples):
+#             print('Sample ' + str(i) + ':'),
+#             x = self.random_sample(X)
+#             if not self.sampling_rejection(x):
+#                 ss = self.controller.feedforward(x)[2]
+#                 if not any(np.isnan(ss)):
+#                     print('new switching sequence ' + str(ss) + '.')
+#                     self.library[ss] = dict()
+#                     prog = self.controller.condense_program(ss)
+#                     self.library[ss]['program'] = prog
+#                     self.library[ss]['feasible_set'] = prog.feasible_set
+#                 else:
+#                     print('unfeasible.')
+#             else:
+#                 print('rejected.')
+#         return
+
+#     def random_sample(self, X=None):
+#         if X is None:
+#             x = np.random.rand(self.controller.sys.n_x, 1)
+#             x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
+#         else:
+#             is_inside = False
+#             while not is_inside:
+#                 x = np.random.rand(self.controller.sys.n_x,1)
+#                 x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
+#                 is_inside = X.applies_to(x)
+#         return x
+
+#     def sampling_rejection(self, x):
+#         for ss_value in self.library.values():
+#             if ss_value['feasible_set'].applies_to(x):
+#                 return True
+#         return False
+
+#     def get_feasible_switching_sequences(self, x):
+#         return [ss for ss, ss_values in self.library.items() if ss_values['feasible_set'].applies_to(x)]
+
+#     def feedforward(self, x, given_ss=None):
+#         fss = self.get_feasible_switching_sequences(x)
+#         if given_ss is not None:
+#             fss.insert(0, given_ss)
+#         if not fss:
+#             V_star = np.nan
+#             u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
+#             ss_star = [np.nan]*self.controller.N
+#             return u_star, V_star, ss_star
+#         else:
+#             V_star = np.inf
+#             for ss in fss:
+#                 u, V = self.library[ss]['program'].solve(x)
+#                 if V < V_star:
+#                     V_star = V
+#                     u_star = [u[i*self.controller.sys.n_u:(i+1)*self.controller.sys.n_u,:] for i in range(self.controller.N)]
+#                     ss_star = ss
+#         return u_star, V_star, ss_star
+
+#     def feedback(self, x, given_ss=None):
+#         u_star, V_star, ss_star = self.feedforward(x, given_ss)
+#         return u_star[0], ss_star
+
+#     def add_shifted_switching_sequences(self, terminal_domain):
+#         for ss in self.library.keys():
+#             for shifted_ss in self.shift_switching_sequence(ss, terminal_domain):
+#                 if not self.library.has_key(shifted_ss):
+#                     self.library[shifted_ss] = dict()
+#                     self.library[shifted_ss]['program'] = self.controller.condense_program(shifted_ss)
+#                     self.library[shifted_ss]['feasible_set'] = EmptyFeasibleSet()
+
+#     @staticmethod
+#     def shift_switching_sequence(ss, terminal_domain):
+#         return [ss[i:] + (terminal_domain,)*i for i in range(1,len(ss))]
+
+#     def plot_partition(self):
+#         for ss_value in self.library.values():
+#             color = np.random.rand(3,1)
+#             fs = ss_value['feasible_set']
+#             if not fs.empty:
+#                 fs.plot(facecolor=color, alpha=.5)
+#         return
 
 
 
@@ -387,35 +479,59 @@ class FeasibleSetLibrary:
         self.library = dict()
         return
 
-    def sample_policy(self, n_samples, X=None):
+    def sample_policy(self, n_samples, state_domains=None):
+        n_rejected = 0
+        n_included = 0
+        n_new_ss = 0
+        n_unfeasible = 0
         for i in range(n_samples):
-            print('Sample ' + str(i) + ':'),
-            x = self.random_sample(X)
+            print('Sample ' + str(i) + ': ')
+            x = self.random_sample(state_domains)
             if not self.sampling_rejection(x):
+                print('solving MIQP... '),
+                tic = time.time()
                 ss = self.controller.feedforward(x)[2]
+                print('solution found in ' + str(time.time()-tic) + ' s.')
                 if not any(np.isnan(ss)):
                     if self.library.has_key(ss):
+                        n_included += 1
                         print('included.')
+                        print('including sample in inner approximation... '),
+                        tic = time.time()
                         self.library[ss]['feasible_set'].include_point(x)
+                        print('sample included in ' + str(time.time()-tic) + ' s.')
                     else:
-                        print('new switching sequence.')
+                        n_new_ss += 1
+                        print('new switching sequence ' + str(ss) + '.')
                         self.library[ss] = dict()
+                        print('condensing QP... '),
+                        tic = time.time()
                         prog = self.controller.condense_program(ss)
+                        print('QP condensed in ' + str(time.time()-tic) + ' s.')
                         self.library[ss]['program'] = prog
                         lhs = np.hstack((-prog.C_x, prog.C_u))
                         rhs = prog.C
                         residual_dimensions = range(prog.C_x.shape[1])
+                        print('constructing inner simplex... '),
+                        tic = time.time()
                         feasible_set = PolytopeProjectionInnerApproximation(lhs, rhs, residual_dimensions)
+                        print('inner simplex constructed in ' + str(time.time()-tic) + ' s.')
+                        print('including sample in inner approximation... '),
+                        tic = time.time()
                         feasible_set.include_point(x)
+                        print('sample included in ' + str(time.time()-tic) + ' s.')
                         self.library[ss]['feasible_set'] = feasible_set
                 else:
+                    n_unfeasible += 1
                     print('unfeasible.')
             else:
+                n_rejected += 1
                 print('rejected.')
+        print('\nTotal number of samples: ' + str(n_samples) + ', switching sequences found: ' + str(n_new_ss) + ', included samples: ' + str(n_included) + ', rejected samples: ' + str(n_rejected) + ', unfeasible samples: ' + str(n_unfeasible) + '.')
         return
 
-    def random_sample(self, X=None):
-        if X is None:
+    def random_sample(self, state_domains=None):
+        if state_domains is None:
             x = np.random.rand(self.controller.sys.n_x, 1)
             x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
         else:
@@ -423,7 +539,10 @@ class FeasibleSetLibrary:
             while not is_inside:
                 x = np.random.rand(self.controller.sys.n_x,1)
                 x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
-                is_inside = X.applies_to(x)
+                for X in state_domains:
+                    if X.applies_to(x):
+                        is_inside = True
+                        break
         return x
 
     def sampling_rejection(self, x):
@@ -477,7 +596,7 @@ class FeasibleSetLibrary:
             if not fs.empty:
                 p = Polytope(fs.hull.A, fs.hull.b)
                 p.assemble()#redundant=False, vertices=fs.hull.points)
-                p.plot(color=color, alpha=.5)
+                p.plot(facecolor=color, alpha=.5)
         return
 
 
@@ -749,3 +868,19 @@ def quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
     F_x = 2.*A_bar.T.dot(Q_bar).dot(c_bar)
     F = c_bar.T.dot(Q_bar).dot(c_bar)
     return F_uu, F_xu, F_xx, F_u, F_x, F
+
+def remove_initial_state_constraints(prog, tol=1e-10):
+    C_u_rows_norm = list(np.linalg.norm(prog.C_u, axis=1))
+    intial_state_contraints = [i for i, row_norm in enumerate(C_u_rows_norm) if row_norm < tol]
+    prog.C_u = np.delete(prog.C_u,intial_state_contraints, 0)
+    prog.C_x = np.delete(prog.C_x,intial_state_contraints, 0)
+    prog.C = np.delete(prog.C,intial_state_contraints, 0)
+    prog.remove_linear_terms()
+    return prog
+
+
+def explict_solution_from_hybrid_condensing(prog, tol=1e-10):
+    porg = remove_initial_state_constraints(prog)
+    mpqp_solution = MPQPSolver(prog)
+    critical_regions = mpqp_solution.critical_regions
+    return critical_regions

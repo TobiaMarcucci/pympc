@@ -5,6 +5,7 @@ from itertools import combinations
 from pympc.geometry.chebyshev_center import chebyshev_center
 from pympc.optimization.pnnls import linear_program
 import copy
+from scipy.spatial import ConvexHull as ScipyConvexHull
 
 class ConvexHull(object):
 
@@ -224,7 +225,9 @@ class PolytopeProjectionInnerApproximation:
         # initialize inner approximation with a simplex
         simplex_vertices = first_two_points(self.A_switched, self.b, len(resiudal_dimensions))
         simplex_vertices = inner_simplex(self.A_switched, self.b, simplex_vertices)
-        self.hull = ConvexHull(simplex_vertices)
+
+        self.hull = ConvexHull(simplex_vertices) # my version
+        # self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
 
         return
 
@@ -234,13 +237,18 @@ class PolytopeProjectionInnerApproximation:
         n_proj = len(self.resiudal_dimensions)
 
         # violation of the approximation boundaires
-        residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces]
+        residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
+        # residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
 
-        # expand the most violated buondary until inclusion
+
+        # expand the most violated boundary until inclusion
         while max(residuals) > tol:
             facet_to_expand = residuals.index(max(residuals))
             a = np.zeros((self.A.shape[1], 1))
-            hs = self.hull.halfspaces[facet_to_expand]
+
+            hs = self.hull.halfspaces[facet_to_expand] # my version
+            # hs = [self.hull.equations[facet_to_expand:facet_to_expand+1,:-1].T, - self.hull.equations[facet_to_expand:facet_to_expand+1,-1:]] # qhull version
+
             a[:n_proj,:] = hs[0]
             sol = linear_program(-a, self.A_switched, self.b)
 
@@ -251,10 +259,12 @@ class PolytopeProjectionInnerApproximation:
                 break
 
             # add vertex to the hull
-            self.hull.add_point(sol.argmin[:n_proj,:])
+            self.hull.add_point(sol.argmin[:n_proj,:]) # my version
+            # self.hull.add_points(sol.argmin[:n_proj,:].T) # qhull version
 
             # new residuals
-            residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces]
+            residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
+            # residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
 
         return
 
@@ -262,7 +272,8 @@ class PolytopeProjectionInnerApproximation:
         """
         Determines if the given point belongs to the polytope (returns True or False).
         """
-        is_inside = np.max(self.hull.A.dot(x) - self.hull.b) <= tol
+        is_inside = np.max(self.hull.A.dot(x) - self.hull.b) <= tol # my version
+        # is_inside = max((self.hull.equations[:,:-1].dot(x) + self.hull.equations[:,-1:]).flatten().tolist()) <= tol # qhull version
         return is_inside
 
 

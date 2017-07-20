@@ -105,7 +105,7 @@ class Polytope:
         """
         Normalizes the H-polytope dividing each row of A by its norm and each entry of b by the norm of the corresponding row of A.
         """
-        for i in range(0, self.n_facets):
+        for i in range(self.n_facets):
             norm_factor = np.linalg.norm(self.A[i,:])
             if norm_factor > tol:
                 self.A[i,:] = self.A[i,:]/norm_factor

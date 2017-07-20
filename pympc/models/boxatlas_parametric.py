@@ -198,12 +198,12 @@ class BoxAtlas():
                 -self.kinematic_limits[limb]['min']
                 ))
             X.add_facets(lhs, rhs)
-        q_b_max = np.array([[.2],[.2]])
-        q_b_min = - q_b_max
-        v_b_max = np.ones((2,1))
-        v_b_min = - v_b_max
-        X.add_bounds(q_b_min, q_b_max, [2*n, 2*n+1])
-        X.add_bounds(v_b_min, v_b_max, [2*n+2, 2*n+3])
+        for limb in self.fixed_limbs:
+            q_b_min = self.nominal_limb_positions[limb] - self.kinematic_limits[limb]['max']
+            q_b_max = self.nominal_limb_positions[limb] - self.kinematic_limits[limb]['min']
+            X.add_bounds(q_b_min, q_b_max, [2*n,2*n+1])
+        X.add_bounds(self.kinematic_limits['b']['min'], self.kinematic_limits['b']['max'], [2*n, 2*n+1])
+        X.add_bounds(self.velocity_limits['b']['min'], self.velocity_limits['b']['max'], [2*n+2, 2*n+3])
         X = Polytope(X.A, X.b - X.A.dot(self.x_eq))
         return X
 
@@ -248,6 +248,13 @@ class BoxAtlas():
             X_mode.assemble()
             state_domains.append(X_mode)
         return state_domains, input_domains
+
+    def penalize_relative_positions(self, Q):
+        T = np.eye(self.n_x)
+        n = len(self.moving_limbs)
+        for i in range(n):
+            T[2*i:2*(i+1),2*n:2*(n+1)] = -np.eye(2)
+        return T.T.dot(Q).dot(T)
 
     def _state_vector_to_dict(self, x_vec):
         x_dict = dict()
@@ -311,6 +318,23 @@ class BoxAtlas():
     #         patches.append(limb_patch)
     #         ax.add_artist(limb_patch)
     #     return body_patch
+
+    def print_state(self):
+        x = []
+        for limb in self.moving_limbs:
+            x += ['q_' + limb + '_x', 'q_' + limb + '_y']
+        x += ['q_b_x', 'q_b_y', 'v_b_x', 'v_b_x']
+        print x
+        return
+
+    def print_input(self):
+        u = []
+        for limb in self.moving_limbs:
+            u += ['v_' + limb + '_x', 'v_' + limb + '_y']
+        for limb in self.fixed_limbs:
+            u += ['f_' + limb + '_n', 'f_' + limb + '_t']
+        print u
+        return
 
 
 class Mesh(vc.BaseGeometry):
