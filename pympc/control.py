@@ -555,19 +555,18 @@ class FeasibleSetLibrary:
         return [ss for ss, ss_values in self.library.items() if ss_values['feasible_set'].applies_to(x)]
 
     def feedforward(self, x, given_ss=None):
+        V_star = np.nan
+        u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
+        ss_star = [np.nan]*self.controller.N
         fss = self.get_feasible_switching_sequences(x)
         if given_ss is not None:
             fss.insert(0, given_ss)
         if not fss:
-            V_star = np.nan
-            u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
-            ss_star = [np.nan]*self.controller.N
             return u_star, V_star, ss_star
         else:
-            V_star = np.inf
             for ss in fss:
                 u, V = self.library[ss]['program'].solve(x)
-                if V < V_star:
+                if V < V_star or (np.isnan(V_star) and not np.isnan(V)):
                     V_star = V
                     u_star = [u[i*self.controller.sys.n_u:(i+1)*self.controller.sys.n_u,:] for i in range(self.controller.N)]
                     ss_star = ss

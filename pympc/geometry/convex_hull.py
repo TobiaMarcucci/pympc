@@ -171,14 +171,20 @@ def first_two_points(A, b, n_proj):
 
     return v_proj
 
-def inner_simplex(A, b, v_proj, tol=1.e-7):
+def inner_simplex(A, b, v_proj, x=None, tol=1.e-7):
 
     n_proj = v_proj[0].shape[0]
     for i in range(2, n_proj+1):
         a, d = plane_through_points([v[:i,:] for v in v_proj])
         a = np.vstack((a, np.zeros((A.shape[1]-i, 1))))
-        sol = linear_program(-a, A, b)
-        if -sol.min < d[0,0] + tol:
+        # pick the right sign for a
+        sign = 1.
+        if x is not None:
+            sign = np.sign((a.T.dot(x) + d)[0,0])
+        sol = linear_program(-sign*a, A, b)
+        if np.linalg.norm(a.T.dot(sol.argmin) + d) < tol:
+        #sol = linear_program(-a, A, b)
+        #if -sol.min < d[0,0] + tol:
             a = -a
             sol = linear_program(-a, A, b)
         v_proj.append(sol.argmin[:n_proj,:])
@@ -210,28 +216,25 @@ def expand_simplex(A, b, hull, tol=1.e-7):
 
 class PolytopeProjectionInnerApproximation:
 
-    def __init__(self, A, b, resiudal_dimensions):
+    def __init__(self, A, b, resiudal_dimensions, ):
 
         # data
         self.empty = False
         self.A = A
         self.b = b
         self.resiudal_dimensions = resiudal_dimensions
+        self.hull = None
 
         # put the variables to be eliminated at the end
         dropped_dimensions = [i for i in range(A.shape[1]) if i not in resiudal_dimensions]
         self.A_switched = np.hstack((A[:, resiudal_dimensions], A[:, dropped_dimensions]))
 
-        # initialize inner approximation with a simplex
-        simplex_vertices = first_two_points(self.A_switched, self.b, len(resiudal_dimensions))
-        simplex_vertices = inner_simplex(self.A_switched, self.b, simplex_vertices)
-
-        self.hull = ConvexHull(simplex_vertices) # my version
-        # self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
-
         return
 
     def include_point(self, point, tol=1e-7):
+
+        if self.hull is None:
+            self._initialize(point)
 
         # dimension of the projection space
         n_proj = len(self.resiudal_dimensions)
@@ -240,6 +243,12 @@ class PolytopeProjectionInnerApproximation:
         residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
         # residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
 
+        # # for the plot on the paper
+        # import copy
+        # from pympc.geometry.polytope import Polytope
+        # p_inner_plot = Polytope(self.hull.A, self.hull.b)
+        # p_inner_plot.assemble()
+        # p_list = [p_inner_plot]
 
         # expand the most violated boundary until inclusion
         while max(residuals) > tol:
@@ -266,12 +275,32 @@ class PolytopeProjectionInnerApproximation:
             residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
             # residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
 
+        #     # for the plot on the paper
+        #     p_inner_plot = Polytope(self.hull.A, self.hull.b)
+        #     p_inner_plot.assemble()
+        #     p_list.append(p_inner_plot)
+        # return p_list
+
         return
+
+    def _initialize(self, x=None):
+
+        # initialize inner approximation with a simplex
+        simplex_vertices = first_two_points(self.A_switched, self.b, len(self.resiudal_dimensions))
+        simplex_vertices = inner_simplex(self.A_switched, self.b, simplex_vertices, x)
+
+        self.hull = ConvexHull(simplex_vertices) # my version
+        # self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
+
+        return
+
 
     def applies_to(self, x, tol=1.e-9):
         """
         Determines if the given point belongs to the polytope (returns True or False).
         """
+        if self.hull is None:
+            return False
         is_inside = np.max(self.hull.A.dot(x) - self.hull.b) <= tol # my version
         # is_inside = max((self.hull.equations[:,:-1].dot(x) + self.hull.equations[:,-1:]).flatten().tolist()) <= tol # qhull version
         return is_inside

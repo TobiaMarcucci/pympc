@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.linalg as linalg
 from itertools import product
 from copy import copy
 from pympc.geometry.polytope import Polytope
@@ -59,11 +60,8 @@ class BoxAtlas():
         self.n_u = self.u_eq.shape[0]
         self.contact_modes = self._get_contact_modes()
         self.affine_systems = self._get_affine_systems()
-        self.state_domains, self.input_domains = self._domains()
-        self.pwa_system = DTPWASystem.from_orthogonal_domains(
-            self.affine_systems,
-            self.state_domains,
-            self.input_domains)
+        self.domains = self._domains()
+        self.pwa_system = DTPWASystem(self.affine_systems, self.domains)
         return
 
     def _equilibrium_state(self):
@@ -115,8 +113,8 @@ class BoxAtlas():
         if moving_limb.contact_surface is None:
             return np.zeros((2,1))
         else:
-            a = moving_limb.A[moving_limb.contact_surface,:]
-            b = moving_limb.b[moving_limb.contact_surface,0]
+            a = moving_limb.A[moving_limb.contact_surface, :]
+            b = moving_limb.b[moving_limb.contact_surface, 0]
             c_block = self.parameters['stiffness'] * b * np.array([[a[0]],[a[1]]]) / self.parameters['mass']
             return c_block
 
@@ -204,10 +202,11 @@ class BoxAtlas():
             X.add_bounds(q_b_min, q_b_max, [2*n,2*n+1])
         X.add_bounds(self.kinematic_limits['b']['min'], self.kinematic_limits['b']['max'], [2*n, 2*n+1])
         X.add_bounds(self.velocity_limits['b']['min'], self.velocity_limits['b']['max'], [2*n+2, 2*n+3])
-        X = Polytope(X.A, X.b - X.A.dot(self.x_eq))
+        # X = Polytope(X.A, X.b - X.A.dot(self.x_eq))
         return X
 
     def _input_constraints(self):
+        # bounds
         u_min = np.zeros((0,1))
         u_max = np.zeros((0,1))
         for limb in self.moving_limbs:
@@ -217,37 +216,79 @@ class BoxAtlas():
             u_min = np.vstack((u_min, self.force_limits[limb]['min']))
             u_max = np.vstack((u_max, self.force_limits[limb]['max']))
         U = Polytope.from_bounds(u_min, u_max)
-        U = Polytope(U.A, U.b - U.A.dot(self.u_eq))
+        # friction limits
+        n_moving = len(self.moving_limbs)
+        n_fixed = len(self.fixed_limbs)
+        lhs_friction = np.array([
+            [-self.parameters['friction_coefficient'], 1.],
+            [-self.parameters['friction_coefficient'], -1.]
+            ])
+        lhs = np.hstack((
+            np.zeros((n_fixed*2, n_moving*2)),
+            linalg.block_diag(*[lhs_friction]*n_fixed)
+            ))
+        rhs = np.zeros((n_fixed*2,1))
+        U.add_facets(lhs, rhs)
+        # U = Polytope(U.A, U.b - U.A.dot(self.u_eq))
         return U
 
-    def _contact_mode_constraints(self, contact_mode):
+    def _contact_mode_constraints(self, contact_mode, X, U):
         n = len(self.moving_limbs)
-        X = Polytope(np.zeros((0, 2*(n+2))), np.zeros((0, 1)))
+        X_mode = copy(X)
+        # force the limbs to stay inside the polyhedra
         for i, limb in enumerate(self.moving_limbs):
-            A = self.topology['moving'][limb][contact_mode[limb]].A
-            b = self.topology['moving'][limb][contact_mode[limb]].b
+            moving_limb = self.topology['moving'][limb][contact_mode[limb]]
+            A = moving_limb.A
+            b = moving_limb.b
             lhs = np.hstack((
                     np.zeros((A.shape[0], i*2)),
                     A,
                     np.zeros((A.shape[0], 2*(n-i)+2))
                     ))
-            X.add_facets(lhs, b)
-        X = Polytope(X.A, X.b - X.A.dot(self.x_eq))
-        return X
+            X_mode.add_facets(lhs, b)
+        # gather state and input constraints
+        lhs = linalg.block_diag(*[X_mode.A, U.A])
+        rhs = np.vstack((X_mode.b, U.b))
+        D = Polytope(lhs, rhs)
+        # friction constraints
+        mu = self.parameters['friction_coefficient']
+        k = self.parameters['stiffness']
+        c = self.parameters['damping']
+        for i, limb in enumerate(self.moving_limbs):
+            moving_limb = self.topology['moving'][limb][contact_mode[limb]]
+            if moving_limb.contact_surface is not None:
+                a = moving_limb.A[moving_limb.contact_surface, :]
+                b = moving_limb.b[moving_limb.contact_surface, 0]
+                lhs = np.zeros((2, self.n_x + self.n_u))
+                lhs[:,i*2:(i+1)*2] = mu*k*np.array([
+                    [a[0], a[1]],
+                    [a[0], a[1]]
+                    ])
+                lhs[:,self.n_x+i*2:self.n_x+(i+1)*2] = c*np.array([
+                    [-a[1], a[0]],
+                    [a[1], -a[0]]
+                    ])
+                rhs = mu*k*b*np.ones((2,1))
+                D.add_facets(lhs, rhs)
+        xu_eq = np.vstack((self.x_eq, self.u_eq))
+        D = Polytope(D.A, D.b - D.A.dot(xu_eq))
+        D.assemble()
+        return D
 
     def _domains(self):
         state_domains = []
         input_domains = []
         X = self._state_constraints()
         U = self._input_constraints()
-        U.assemble()
-        input_domains = [U] * len(self.contact_modes)
-        for contact_mode in self.contact_modes:
-            X_mode = self._contact_mode_constraints(contact_mode)
-            X_mode.add_facets(X.A, X.b)
-            X_mode.assemble()
-            state_domains.append(X_mode)
-        return state_domains, input_domains
+        domain_list = []
+        non_empty_domains = []
+        for i, contact_mode in enumerate(self.contact_modes):
+            D = self._contact_mode_constraints(contact_mode, X, U)
+            if not D.empty:
+                domain_list.append(D)
+                non_empty_domains.append(i)
+        self.contact_modes = [self.contact_modes[i] for i in non_empty_domains]
+        return domain_list
 
     def penalize_relative_positions(self, Q):
         T = np.eye(self.n_x)
