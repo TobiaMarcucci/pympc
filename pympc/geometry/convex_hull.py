@@ -105,7 +105,14 @@ def plane_through_points(points):
     offset = np.random.rand(points[0].shape[0],1)
     points = [p + offset for p in points]
     P = np.hstack(points).T
+    if P.shape[0] != P.shape[1] or np.linalg.matrix_rank(P) != P.shape[0]:
+        print 'lhs:', P
+        print 'lhs shape:', P.shape
+        print 'lhs rank:', np.linalg.matrix_rank(P)
+        print 'rhs:', np.ones(offset.shape)
+        raise ValueError('aaa')
     a = np.linalg.solve(P, np.ones(offset.shape))
+    #print P, np.ones(offset.shape)
     b = 1. - a.T.dot(offset)
     a_norm = np.linalg.norm(a)
     a /= a_norm
@@ -176,15 +183,18 @@ def inner_simplex(A, b, v_proj, x=None, tol=1.e-7):
     n_proj = v_proj[0].shape[0]
     for i in range(2, n_proj+1):
         a, d = plane_through_points([v[:i,:] for v in v_proj])
-        a = np.vstack((a, np.zeros((A.shape[1]-i, 1))))
         # pick the right sign for a
         sign = 1.
         if x is not None:
-            sign = np.sign((a.T.dot(x) + d)[0,0])
+            sign = np.sign((a.T.dot(x[:i,:]) - d)[0,0])
+        a = np.vstack((a, np.zeros((A.shape[1]-i, 1))))
         sol = linear_program(-sign*a, A, b)
-        if np.linalg.norm(a.T.dot(sol.argmin) + d) < tol:
+        if -sol.min - sign*d[0,0] < tol:
+        #if np.linalg.norm(a.T.dot(sol.argmin) + d) < tol:
         #sol = linear_program(-a, A, b)
         #if -sol.min < d[0,0] + tol:
+            if x is not None:
+                print 'This is not supposed to happen!'
             a = -a
             sol = linear_program(-a, A, b)
         v_proj.append(sol.argmin[:n_proj,:])
@@ -216,7 +226,7 @@ def expand_simplex(A, b, hull, tol=1.e-7):
 
 class PolytopeProjectionInnerApproximation:
 
-    def __init__(self, A, b, resiudal_dimensions, ):
+    def __init__(self, A, b, resiudal_dimensions):
 
         # data
         self.empty = False
@@ -228,6 +238,16 @@ class PolytopeProjectionInnerApproximation:
         # put the variables to be eliminated at the end
         dropped_dimensions = [i for i in range(A.shape[1]) if i not in resiudal_dimensions]
         self.A_switched = np.hstack((A[:, resiudal_dimensions], A[:, dropped_dimensions]))
+
+        return
+
+    def _initialize(self, x=None):
+
+        # initialize inner approximation with a simplex
+        simplex_vertices = first_two_points(self.A_switched, self.b, len(self.resiudal_dimensions))
+        simplex_vertices = inner_simplex(self.A_switched, self.b, simplex_vertices, x)
+        self.hull = ConvexHull(simplex_vertices) # my version
+        # self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
 
         return
 
@@ -282,18 +302,6 @@ class PolytopeProjectionInnerApproximation:
         # return p_list
 
         return
-
-    def _initialize(self, x=None):
-
-        # initialize inner approximation with a simplex
-        simplex_vertices = first_two_points(self.A_switched, self.b, len(self.resiudal_dimensions))
-        simplex_vertices = inner_simplex(self.A_switched, self.b, simplex_vertices, x)
-
-        self.hull = ConvexHull(simplex_vertices) # my version
-        # self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
-
-        return
-
 
     def applies_to(self, x, tol=1.e-9):
         """

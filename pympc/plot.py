@@ -149,8 +149,8 @@ def state_space_trajectory(x_trajectory, state_components=[0,1], **kwargs):
         # plt.text(x_trajectory[k][0], x_trajectory[k][1], r'$x('+str(k)+')$')
     # ax = plt.axes()
     x_0 = (x_trajectory[0][state_components[0]][0], x_trajectory[0][state_components[1]][0])
-    plt.scatter(x_0[0], x_0[1], color='b')
-    plt.text(x_0[0], x_0[1], r'$x(0)$')
+    plt.scatter(x_0[0], x_0[1], color='w', edgecolor='k')
+    # plt.text(x_0[0], x_0[1], r'$x(0)$')
     plt.xlabel(r'$x_{' + str(state_components[0]+1) + '}$')
     plt.ylabel(r'$x_{' + str(state_components[1]+1) + '}$')
     return

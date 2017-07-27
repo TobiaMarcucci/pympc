@@ -231,14 +231,14 @@ class Polytope:
             self._vertices = [np.reshape(vertex, (vertex.shape[0],1)) for vertex in self._vertices]
         return self._vertices
 
-    def orthogonal_projection(self, residual_variables, mehtod='convex_hull'):
+    def orthogonal_projection(self, residual_variables, method='convex_hull'):
 
-        if mehtod == 'convex_hull':
+        if method == 'convex_hull':
             A_proj, b_proj, v_proj = orthogonal_projection_CHM(self.lhs_min, self.rhs_min, residual_variables)
             p_proj = Polytope(A_proj, b_proj)
             p_proj.assemble(redundant=False, vertices=v_proj)
 
-        # elif mehtod == 'block_elimination':
+        # elif method == 'block_elimination':
         #     drop_variables = [i+1 for i in range(self.n_variables) if i not in residual_variables]
         #     M = np.hstack((self.rhs_min, -self.lhs_min))
         #     M = cdd.Matrix([list(m) for m in M])
@@ -250,7 +250,7 @@ class Polytope:
         #     p_proj = Polytope(A_proj, b_proj)
         #     p_proj.assemble()
 
-        elif mehtod == 'vertex_enumeration':
+        elif method == 'vertex_enumeration':
             v_proj = np.hstack(self.vertices).T[:,residual_variables]
             if len(residual_variables) > 1:
                 hull = spatial.ConvexHull(v_proj)
@@ -290,7 +290,7 @@ class Polytope:
                 break
         return inclusion
 
-    def applies_to(self, x, tol=1.e-9):
+    def applies_to(self, x, tol=1.e-6):
         """
         Determines if the given point belongs to the polytope (returns True or False).
         """

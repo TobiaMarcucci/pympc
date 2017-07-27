@@ -5,6 +5,7 @@ from copy import copy
 from pympc.geometry.polytope import Polytope
 from pympc.dynamical_systems import DTAffineSystem, DTPWASystem, dare, moas_closed_loop_from_orthogonal_domains
 from pympc.control import MPCHybridController
+from pympc.optimization.pnnls import linear_program
 import pympc.plot as mpc_plt
 import matplotlib.pyplot as plt
 from director.thirdparty import transformations
@@ -12,8 +13,6 @@ import scipy.spatial as spatial
 import director.viewerclient as vc
 
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
-
-
 
 # from matplotlib.path import Path
 # import matplotlib.patches as patches
@@ -32,6 +31,26 @@ class FixedLimb():
         self.position = position
         self.normal = normal/np.linalg.norm(normal)
         return
+
+class Trajectory:
+    
+    def __init__(self, x, u, Q, R, P):
+        self.x = x
+        self.u = u
+        self.Q = Q
+        self.R = R
+        self.P = P
+        self.cost = self._cost()
+        return
+        
+    def _cost(self):
+        cost = 0
+        for u in self.u:
+            cost += u.T.dot(self.R).dot(u)
+        for x in self.x[:-1]:
+            cost += x.T.dot(self.Q).dot(x)
+        cost += self.x[-1].T.dot(self.P).dot(self.x[-1])
+        return cost
 
 class BoxAtlas():
 
@@ -287,6 +306,7 @@ class BoxAtlas():
             if not D.empty:
                 domain_list.append(D)
                 non_empty_domains.append(i)
+        self.affine_systems = [self.affine_systems[i] for i in non_empty_domains]
         self.contact_modes = [self.contact_modes[i] for i in non_empty_domains]
         return domain_list
 
@@ -304,6 +324,20 @@ class BoxAtlas():
         x_dict['bq'] = x_vec[(i+1)*2:(i+2)*2, :]
         x_dict['bv'] = x_vec[(i+2)*2:(i+3)*2, :]
         return x_dict
+
+    def is_inside_a_domain(self, x):
+        is_inside = False
+        for D in self.domains:
+            A_x = D.lhs_min[:,:self.n_x]
+            A_u = D.lhs_min[:,self.n_x:]
+            b_u = D.rhs_min - A_x.dot(x)
+            cost = np.zeros((self.n_u, 1))
+            sol = linear_program(cost, A_u, b_u)
+            if not np.isnan(sol.min):
+                is_inside = True
+                break
+        return is_inside
+
 
     def visualize_environment(self, vis):
         z_lim = [-.3,.3]
@@ -364,8 +398,8 @@ class BoxAtlas():
         x = []
         for limb in self.moving_limbs:
             x += ['q_' + limb + '_x', 'q_' + limb + '_y']
-        x += ['q_b_x', 'q_b_y', 'v_b_x', 'v_b_x']
-        print x
+        x += ['q_b_x', 'q_b_y', 'v_b_x', 'v_b_y']
+        print 'Box-atlas state:\n', x
         return
 
     def print_input(self):
@@ -374,9 +408,8 @@ class BoxAtlas():
             u += ['v_' + limb + '_x', 'v_' + limb + '_y']
         for limb in self.fixed_limbs:
             u += ['f_' + limb + '_n', 'f_' + limb + '_t']
-        print u
+        print 'Box-atlas input:\n', u
         return
-
 
 class Mesh(vc.BaseGeometry):
     __slots__ = ["vertices", "triangular_faces"]
@@ -396,7 +429,7 @@ class Mesh(vc.BaseGeometry):
         }
 
 def visualize_3d_polytope(p, name, visualizer):
-    p = reorder_coordinates(p)
+    p = reorder_coordinates_visualizer(p)
     halfspaces = []
     # change of coordinates because qhull is stupid...
     b_qhull = p.rhs_min - p.lhs_min.dot(p.center)
@@ -419,14 +452,9 @@ def extrude_2d_polytope(p_2d, z_limits):
     p_3d.assemble()
     return p_3d
 
-def reorder_coordinates(p):
+def reorder_coordinates_visualizer(p):
     T = np.array([[0.,1.,0.],[0.,0.,1.],[1.,0.,0.]])
     A = p.lhs_min.dot(T)
     p_rotated = Polytope(A, p.rhs_min)
     p_rotated.assemble()
     return p_rotated
-
-
-
-
-

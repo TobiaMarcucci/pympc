@@ -285,7 +285,7 @@ def moas(A, X):
 
     # ensure that the system is stable (otherwise the algorithm doesn't converge)
     eig_max = np.max(np.absolute(np.linalg.eig(A)[0]))
-    if eig_max > 1:
+    if eig_max > 1.:
         raise ValueError('Cannot compute MOAS for unstable systems')
 
     # Gilber and Tan algorithm
