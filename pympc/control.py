@@ -19,6 +19,17 @@ from pympc.geometry.convex_hull import PolytopeProjectionInnerApproximation
 
 
 class MPCController:
+    """
+    Model Predictive Controller.
+
+    VARIABLES:
+        sys: DTLinearSystem (see dynamical_systems.py)
+        N: horizon of the controller
+        objective_norm: 'one' or 'two'
+        Q, R, P: weight matrices for the controller (state stage cost, input stage cost, and state terminal cost, respectively)
+        X, U: state and input domains (see the Polytope class in geometry.polytope)
+        X_N: terminal constraint (Polytope)
+    """
 
     def __init__(self, sys, N, objective_norm, Q, R, P=None, X=None, U=None, X_N=None):
         self.sys = sys
@@ -41,6 +52,9 @@ class MPCController:
         return
 
     def condense_program(self):
+        """
+        Depending on the norm of the controller, creates a parametric LP or QP in the initial state of the system (see ParametricLP or ParametricQP classes).
+        """
         c = np.zeros((self.sys.n_x, 1))
         a_sys = DTAffineSystem(self.sys.A, self.sys.B, c)
         sys_list = [a_sys]*self.N
@@ -53,6 +67,9 @@ class MPCController:
         return
 
     def remove_intial_state_contraints(self, tol=1e-10):
+        """
+        This is needed since OCP_condenser() is the same for PWA systems anb linear systems. OCP for PWA systems have constraints also on the initial state of the system (x(0) has to belong to a domain of the state partition of the PWA system). For linear system this constraint has to be removed.
+        """
         C_u_rows_norm = list(np.linalg.norm(self.condensed_program.C_u, axis=1))
         intial_state_contraints = [i for i, row_norm in enumerate(C_u_rows_norm) if row_norm < tol]
         if len(intial_state_contraints) > self.X.lhs_min.shape[0]:
@@ -63,6 +80,9 @@ class MPCController:
         return
 
     def feedforward(self, x0):
+        """
+        Given the state of the system, returns the optimal sequence of N inputs and the related cost.
+        """
         u_feedforward, cost = self.condensed_program.solve(x0)
         u_feedforward = [u_feedforward[self.sys.n_u*i:self.sys.n_u*(i+1),:] for i in range(self.N)]
         # if any(np.isnan(u_feedforward).flatten()):
@@ -70,11 +90,16 @@ class MPCController:
         return u_feedforward, cost
 
     def feedback(self, x0):
+        """
+        Returns the a single input vector (the first of feedforward(x0)).
+        """
         return self.feedforward(x0)[0][0]
 
     def get_explicit_solution(self):
         """
-        Attention: since the method remove_intial_state_contraints() modifies the variables of condensed_program, I have to call remove_linear_terms() again!
+        (Only for controllers with norm = 2).
+        Returns the partition of the state space in critical regions (explicit MPC solution).
+        Temporary fix: since the method remove_intial_state_contraints() modifies the variables of condensed_program, I have to call remove_linear_terms() again!
         """
         self.condensed_program.remove_linear_terms()
         mpqp_solution = MPQPSolver(self.condensed_program)
@@ -82,6 +107,9 @@ class MPCController:
         return
 
     def feedforward_explicit(self, x0):
+        """
+        Finds the critical region where the state x0 is, and returns the PWA feedforward.
+        """
         if self.critical_regions is None:
             raise ValueError('Explicit solution not available, call .get_explicit_solution()')
         cr_x0 = self.critical_regions.lookup(x0)
@@ -97,9 +125,15 @@ class MPCController:
         return u_feedforward, cost
 
     def feedback_explicit(self, x0):
-            return self.feedforward(x0)[0][0]
+        """
+        Returns the a single input vector (the first of feedforward_explicit(x0)).
+        """
+        return self.feedforward(x0)[0][0]
 
     def optimal_value_function(self, x0):
+        """
+        Returns the optimal value function for the state x0.
+        """
         if self.critical_regions is None:
             raise ValueError('Explicit solution not available, call .get_explicit_solution()')
         cr_x0 = self.critical_regions.lookup(x0)
@@ -128,6 +162,16 @@ class MPCController:
 
 
 class MPCHybridController:
+    """
+    Hybrid Model Predictive Controller.
+
+    VARIABLES:
+        sys: DTPWASystem (see dynamical_systems.py)
+        N: horizon of the controller
+        objective_norm: 'one' or 'two'
+        Q, R, P: weight matrices for the controller (state stage cost, input stage cost, and state terminal cost, respectively)
+        X_N: terminal constraint (Polytope)
+    """
 
     def __init__(self, sys, N, objective_norm, Q, R, P, X_N):
         self.sys = sys
@@ -143,7 +187,10 @@ class MPCHybridController:
 
     def compute_M_domains(self):
         """
-        Denoting with s the number of affine systems, M_domains is a list with s elements, each element has other s elements, each one of these is a bigM vector.
+        Computes all the bigMs for the domains of the PWA system.
+        When the system is in mode j, n_i bigMs are needed to drop each one the n_i inequalities of the polytopic domain for the mode i.
+        With s number of modes, M_domains is a list containing s lists, each list then constains s bigM vector of size n_i.
+        M_domains[j][i] is used to drop the inequalities of the domain i when the system is in mode j.
         """
         self.M_domains = []
         for i, domain_i in enumerate(self.sys.domains):
@@ -161,6 +208,12 @@ class MPCHybridController:
         return
 
     def compute_M_dynamics(self):
+        """
+        Computes all the smallMs and bigMs for the dynamics of the PWA system.
+        When the system is in mode j, n_x smallMs and n_x bigMs are needed to drop the equations of motion for the mode i.
+        With s number of modes, m_dynamics and M_dynamics are two lists containing s lists, each list then constains s bigM vector of size n_x.
+        m_dynamics[j][i] and M_dynamics[j][i] are used to drop the equations of motion of the mode i when the system is in mode j.
+        """
         self.M_dynamics = []
         self.m_dynamics = []
         for i in range(self.sys.n_sys):
@@ -187,6 +240,13 @@ class MPCHybridController:
         return
 
     def feedforward(self, x0, u_ws=None, x_ws=None, ss_ws=None):
+        """
+        Sets up a MILP or MIQP in gurobipy (depending on the objective norm), to derive the optimal feedforward for the PWA system in state x0.
+
+        INPUTS:
+            x0: state of the PWA system.
+            u_ws, x_ws, ss_ws: warm starts for the input sequence, state sequence, and switching sequence (mode sequence).
+        """
 
         # gurobi model
         model = grb.Model()
@@ -266,6 +326,9 @@ class MPCHybridController:
         return u_feedforward, x_trajectory, tuple(switching_sequence), cost
 
     def mip_objective(self, model, x_np, u_np, x_ws=None, u_ws=None):
+        """
+        Constructs the cost function for the mixed integer program. Depending on the norm of requires (1 or 2).
+        """
 
         # linear objective
         if self.objective_norm == 'one':
@@ -311,6 +374,9 @@ class MPCHybridController:
         return model
 
     def mip_constraints(self, model, x_np, u_np, z, d):
+        """
+        Constructs the constraints for the mixed integer program.
+        """
 
         with suppress_stdout():
 
@@ -360,110 +426,22 @@ class MPCHybridController:
         return model
 
     def feedback(self, x0):
+        """
+        Reuturns the first input from feedforward().
+        """
         return self.feedforward(x0)[0][0]
 
     def condense_program(self, switching_sequence):
-        tic = time.time()
+        """
+        Given a mode sequence, returns the condensed LP or QP (see ParametricLP or ParametricQP classes).
+        """
+        # tic = time.time()
         # print('\nCondensing the OCP for the switching sequence ' + str(switching_sequence) + ' ...')
         if len(switching_sequence) != self.N:
             raise ValueError('Switching sequence not coherent with the controller horizon.')
         prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
         # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
         return prog
-
-# class FeasibleSetLibrary:
-#     """
-#     library[switching_sequence]
-#     - program
-#     - feasible_set
-#     """
-
-#     def __init__(self, controller):
-#         self.controller = controller
-#         self.library = dict()
-#         return
-
-#     def sample_policy(self, n_samples, X=None):
-#         for i in range(n_samples):
-#             print('Sample ' + str(i) + ':'),
-#             x = self.random_sample(X)
-#             if not self.sampling_rejection(x):
-#                 ss = self.controller.feedforward(x)[2]
-#                 if not any(np.isnan(ss)):
-#                     print('new switching sequence ' + str(ss) + '.')
-#                     self.library[ss] = dict()
-#                     prog = self.controller.condense_program(ss)
-#                     self.library[ss]['program'] = prog
-#                     self.library[ss]['feasible_set'] = prog.feasible_set
-#                 else:
-#                     print('unfeasible.')
-#             else:
-#                 print('rejected.')
-#         return
-
-#     def random_sample(self, X=None):
-#         if X is None:
-#             x = np.random.rand(self.controller.sys.n_x, 1)
-#             x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
-#         else:
-#             is_inside = False
-#             while not is_inside:
-#                 x = np.random.rand(self.controller.sys.n_x,1)
-#                 x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
-#                 is_inside = X.applies_to(x)
-#         return x
-
-#     def sampling_rejection(self, x):
-#         for ss_value in self.library.values():
-#             if ss_value['feasible_set'].applies_to(x):
-#                 return True
-#         return False
-
-#     def get_feasible_switching_sequences(self, x):
-#         return [ss for ss, ss_values in self.library.items() if ss_values['feasible_set'].applies_to(x)]
-
-#     def feedforward(self, x, given_ss=None):
-#         fss = self.get_feasible_switching_sequences(x)
-#         if given_ss is not None:
-#             fss.insert(0, given_ss)
-#         if not fss:
-#             V_star = np.nan
-#             u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
-#             ss_star = [np.nan]*self.controller.N
-#             return u_star, V_star, ss_star
-#         else:
-#             V_star = np.inf
-#             for ss in fss:
-#                 u, V = self.library[ss]['program'].solve(x)
-#                 if V < V_star:
-#                     V_star = V
-#                     u_star = [u[i*self.controller.sys.n_u:(i+1)*self.controller.sys.n_u,:] for i in range(self.controller.N)]
-#                     ss_star = ss
-#         return u_star, V_star, ss_star
-
-#     def feedback(self, x, given_ss=None):
-#         u_star, V_star, ss_star = self.feedforward(x, given_ss)
-#         return u_star[0], ss_star
-
-#     def add_shifted_switching_sequences(self, terminal_domain):
-#         for ss in self.library.keys():
-#             for shifted_ss in self.shift_switching_sequence(ss, terminal_domain):
-#                 if not self.library.has_key(shifted_ss):
-#                     self.library[shifted_ss] = dict()
-#                     self.library[shifted_ss]['program'] = self.controller.condense_program(shifted_ss)
-#                     self.library[shifted_ss]['feasible_set'] = EmptyFeasibleSet()
-
-#     @staticmethod
-#     def shift_switching_sequence(ss, terminal_domain):
-#         return [ss[i:] + (terminal_domain,)*i for i in range(1,len(ss))]
-
-#     def plot_partition(self):
-#         for ss_value in self.library.values():
-#             color = np.random.rand(3,1)
-#             fs = ss_value['feasible_set']
-#             if not fs.empty:
-#                 fs.plot(facecolor=color, alpha=.5)
-#         return
 
 
 
@@ -617,7 +595,7 @@ class EmptyFeasibleSet:
         return False
 
 
-class parametric_lp:
+class ParametricLP:
 
     def __init__(self, F_u, F_x, F, C_u, C_x, C):
         """
@@ -668,7 +646,7 @@ class parametric_lp:
         return u_star, sol.min
 
 
-class parametric_qp:
+class ParametricQP:
 
     def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):
         """
@@ -819,10 +797,10 @@ def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
     G, W, E = constraint_condenser(sys, X_N, switching_sequence)
     if objective_norm == 'one':
         F_u, F_x, F = linear_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
-        parametric_program = parametric_lp(F_u, F_x, F, G, E, W)
+        parametric_program = ParametricLP(F_u, F_x, F, G, E, W)
     elif objective_norm == 'two':
         F_uu, F_xu, F_xx, F_u, F_x, F = quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
-        parametric_program = parametric_qp(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W)
+        parametric_program = ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W)
     # print 'total condensing time is', str(time.time()-tic),'s.\n'
     return parametric_program
 
