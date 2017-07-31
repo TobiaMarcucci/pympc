@@ -144,109 +144,68 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub
         
     return x_star, V_star
 
-def real_variable(model, d_list):
+def real_variable(model, d_list, **kwargs):
     """
     Creates a Gurobi variable with dimension d_list (e.g., [3,4,5]) with minus infinity as lower bounds.
     """
     lb_x = [-grb.GRB.INFINITY]
     for d in d_list:
         lb_x = [lb_x * d]
-    x = model.addVars(*d_list, lb=lb_x, name='x')
+    x = model.addVars(*d_list, lb=lb_x, **kwargs)
     return x, model
 
-def point_inside_polyhedron(model, A, b, x):
-    """
-    Adds to the model the constraint
-    x \in P
-    where P := {x | A x <= b} is a polyhedron.
-    """
-    # number of facets
-    n_f = A.shape[0]
+# def point_inside_polyhedron(model, A, b, x):
+#     """
+#     Adds to the model the constraint
+#     x \in P
+#     where P := {x | A x <= b} is a polyhedron.
+#     """
+#     # number of facets
+#     n_f = A.shape[0]
 
-    # constraint
-    x_np = np.array([[x[k]] for k in range(len(x))])
-    expr = A.dot(x_np) - b
-    model.addConstrs((expr[k,0] <= 0. for k in range(n_f)))
+#     # constraint
+#     x_np = np.array([[x[k]] for k in range(len(x))])
+#     expr = A.dot(x_np) - b
+#     model.addConstrs((expr[k,0] <= 0. for k in range(n_f)))
 
-    return model
+#     return model
 
-# def iff_point_in_polyhedron(model, A, b, x, X, eps=0.):
+
+# def iff_point_in_halfspace(model, A, b, x, X, eps=1.e-4):
+#     """
+#     Adds to the model the logical constraint
+#     [d = 1] <-> [A x <= b]
+#     where H := {x | A x <= b} is an halfspace.
+#     """
+#     x_np = np.array([[x[i]] for i in range(len(x))])
+#     d = model.addVar(vtype=grb.GRB.BINARY)
+#     model.update()
+#     m = linear_program(A.T, X.lhs_min, X.rhs_min)[1] - b[0,0]
+#     M = - linear_program(- A.T, X.lhs_min, X.rhs_min)[1] - b[0,0]
+#     expr = (A.dot(x_np) - b)[0,0]
+#     model.addConstr(expr >= m*d + eps)
+#     model.addConstr(expr <= M*(1.-d))
+#     return model, d
+
+
+# def iff_point_in_polyhedron(model, A, b, x, X):
 #     """
 #     Adds to the model the logical constraint
 #     [d = 1] <-> [A x <= b]
 #     where P := {x | A x <= b} is a polyhedron.
 #     """
-
-#     # inputs
-#     n_f = A.shape[0]
 #     x_np = np.array([[x[i]] for i in range(len(x))])
-
-#     # bigMs
-#     alpha = 0.
-#     beta = 0.
-#     for i in range(n_f):
-#         alpha_i = linear_program(A[i,:], X.lhs_min, X.rhs_min)[1] - b[i,0]
-#         beta_i = - linear_program(-A[i,:], X.lhs_min, X.rhs_min)[1] - b[i,0]
-#         alpha = min(alpha, alpha_i)
-#         beta = max(beta, beta_i)
-
-#     # check bigM
-#     if alpha == 0:
-#         raise ValueError('Disjunct polyhedron and domain.')
-#     if beta == 0:
-#         raise ValueError('Domain included in the polyhedron.')
-
-#     # binary variable
 #     d = model.addVar(vtype=grb.GRB.BINARY)
+#     model.update()
+#     n_f = A.shape[0]
+#     d_list = []
+#     for i in range(n_f):
+#         model, d_i = iff_point_in_halfspace(model, A[i:i+1,:], b[i:i+1,:], x, X)
+#         d_list.append(d_i)
+#     model.addConstr(d >= sum(d_list) - n_f + .5)
+#     model.addConstr(d <= sum(d_list)/n_f)
 
-#     # slack variable
-#     s = model.addVar(lb=-grb.GRB.INFINITY)
-
-#     # MI constraints
-#     expr = A.dot(x_np) - b
-#     model.addConstrs((s >= expr[k,0] for k in range(expr.shape[0])))
-#     model.addConstr(d >= s/alpha + eps)
-#     model.addConstr(d <= 1 - s/beta)
-#     # model.addConstr(d >= (s-1.)/(alpha-1.))
-#     # model.addConstr(d <= (s-beta)/(1.-beta))
-    
-#     return model, d, s
-
-def iff_point_in_halfspace(model, A, b, x, X, eps=1.e-4):
-    """
-    Adds to the model the logical constraint
-    [d = 1] <-> [A x <= b]
-    where H := {x | A x <= b} is an halfspace.
-    """
-    x_np = np.array([[x[i]] for i in range(len(x))])
-    d = model.addVar(vtype=grb.GRB.BINARY)
-    model.update()
-    m = linear_program(A.T, X.lhs_min, X.rhs_min)[1] - b[0,0]
-    M = - linear_program(- A.T, X.lhs_min, X.rhs_min)[1] - b[0,0]
-    expr = (A.dot(x_np) - b)[0,0]
-    model.addConstr(expr >= m*d + eps)
-    model.addConstr(expr <= M*(1.-d))
-    return model, d
-
-
-def iff_point_in_polyhedron(model, A, b, x, X):
-    """
-    Adds to the model the logical constraint
-    [d = 1] <-> [A x <= b]
-    where P := {x | A x <= b} is a polyhedron.
-    """
-    x_np = np.array([[x[i]] for i in range(len(x))])
-    d = model.addVar(vtype=grb.GRB.BINARY)
-    model.update()
-    n_f = A.shape[0]
-    d_list = []
-    for i in range(n_f):
-        model, d_i = iff_point_in_halfspace(model, A[i:i+1,:], b[i:i+1,:], x, X)
-        d_list.append(d_i)
-    model.addConstr(d >= sum(d_list) - n_f + .5)
-    model.addConstr(d <= sum(d_list)/n_f)
-
-    return model, d, d_list
+#     return model, d, d_list
 
 
 import sys, os
