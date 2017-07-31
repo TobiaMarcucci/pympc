@@ -14,6 +14,7 @@ from optimization.mpqpsolver import MPQPSolver, CriticalRegion
 from pympc.geometry.convex_hull import ConvexHull
 import cdd
 from pympc.geometry.convex_hull import PolytopeProjectionInnerApproximation
+from copy import copy
 
 
 
@@ -181,18 +182,19 @@ class MPCHybridController:
         self.R = R
         self.P = P
         self.X_N = X_N
-        self.compute_M_domains()
-        self.compute_M_dynamics()
+        self._get_bigM_domains()
+        self._get_bigM_dynamics()
+        self._MIP_model()
         return
 
-    def compute_M_domains(self):
+    def _get_bigM_domains(self, tol=1.e-8):
         """
         Computes all the bigMs for the domains of the PWA system.
         When the system is in mode j, n_i bigMs are needed to drop each one the n_i inequalities of the polytopic domain for the mode i.
         With s number of modes, M_domains is a list containing s lists, each list then constains s bigM vector of size n_i.
         M_domains[j][i] is used to drop the inequalities of the domain i when the system is in mode j.
         """
-        self.M_domains = []
+        self._M_domains = []
         for i, domain_i in enumerate(self.sys.domains):
             M_i = []
             for j, domain_j in enumerate(self.sys.domains):
@@ -204,18 +206,18 @@ class MPCHybridController:
                         M_ij.append(M_ijk)
                 M_ij = np.reshape(M_ij, (len(M_ij), 1))
                 M_i.append(M_ij)
-            self.M_domains.append(M_i)
+            self._M_domains.append(M_i)
         return
 
-    def compute_M_dynamics(self):
+    def _get_bigM_dynamics(self, tol=1.e-8):
         """
         Computes all the smallMs and bigMs for the dynamics of the PWA system.
         When the system is in mode j, n_x smallMs and n_x bigMs are needed to drop the equations of motion for the mode i.
         With s number of modes, m_dynamics and M_dynamics are two lists containing s lists, each list then constains s bigM vector of size n_x.
         m_dynamics[j][i] and M_dynamics[j][i] are used to drop the equations of motion of the mode i when the system is in mode j.
         """
-        self.M_dynamics = []
-        self.m_dynamics = []
+        self._M_dynamics = []
+        self._m_dynamics = []
         for i in range(self.sys.n_sys):
             M_i = []
             m_i = []
@@ -235,195 +237,239 @@ class MPCHybridController:
                 m_ij = np.reshape(m_ij, (len(m_ij), 1))
                 M_i.append(M_ij)
                 m_i.append(np.array(m_ij))
-            self.M_dynamics.append(M_i)
-            self.m_dynamics.append(m_i)
+            self._M_dynamics.append(M_i)
+            self._m_dynamics.append(m_i)
+        return
+
+    def _MIP_model(self):
+        self._model = grb.Model()
+        self._MIP_variables()
+        self._MIP_objective()
+        self._MIP_constraints()
+        self._MIP_parameters()
+        self._model.update()
+        return
+
+    def _MIP_variables(self):
+        x = self._add_real_variable([self.N+1, self.sys.n_x], name='x')
+        u = self._add_real_variable([self.N, self.sys.n_u], name='u')
+        self._x_np = [np.array([[x[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
+        self._u_np = [np.array([[u[k,i]] for i in range(self.sys.n_u)]) for k in range(self.N)]
+        self._z = self._add_real_variable([self.N, self.sys.n_sys, self.sys.n_x], name='z')
+        self._d = self._model.addVars(self.N, self.sys.n_sys, vtype=grb.GRB.BINARY, name='d')
+        self._model.update()
+        return
+
+    def _add_real_variable(self, dimensions, name, **kwargs):
+        lb_var = [-grb.GRB.INFINITY]
+        for d in dimensions:
+            lb_var = [lb_var * d]
+        var = self._model.addVars(*dimensions, lb=lb_var, name=name, **kwargs)
+        return var
+
+    def _MIP_objective(self):
+        if self.objective_norm == 'one':
+            self._MILP_objective()
+        elif self.objective_norm == 'two':
+            self._MIQP_objective()
+        else:
+            raise ValueError('Unknown norm ' + self.objective_norm + '.')
+        return
+
+    def _MILP_objective(self):
+        Q = clean_matrix(self.Q)
+        R = clean_matrix(self.R)
+        P = clean_matrix(self.P)
+        self._phi = self._model.addVars(self.N+1, self.sys.n_x, name='phi')
+        self._psi = self._model.addVars(self.N, self.sys.n_u, name='psi')
+        self._model.update()
+        V = 0.
+        for k in range(self.N+1):
+            for i in range(self.sys.n_x):
+                V += self._phi[k,i]
+        for k in range(self.N):
+            for i in range(self.sys.n_u):
+                V += self._psi[k,i]
+        self._model.setObjective(V)
+        for k in range(self.N):
+            for i in range(self.sys.n_x):
+                self._model.addConstr(self._phi[k,i] >= Q[i,:].dot(self._x_np[k])[0])
+                self._model.addConstr(self._phi[k,i] >= - Q[i,:].dot(self._x_np[k])[0])
+            for i in range(self.sys.n_u):
+                self._model.addConstr(self._psi[k,i] >= R[i,:].dot(self._u_np[k])[0])
+                self._model.addConstr(self._psi[k,i] >= - R[i,:].dot(self._u_np[k])[0])
+        for i in range(self.sys.n_x):
+            self._model.addConstr(self._phi[self.N,i] >= P[i,:].dot(self._x_np[self.N])[0])
+            self._model.addConstr(self._phi[self.N,i] >= - P[i,:].dot(self._x_np[self.N])[0])
+        return
+
+    def _MIQP_objective(self):
+        Q = clean_matrix(self.Q)
+        R = clean_matrix(self.R)
+        P = clean_matrix(self.P)
+        V = 0.
+        for k in range(self.N):
+            V += self._x_np[k].T.dot(Q).dot(self._x_np[k]) + self._u_np[k].T.dot(R).dot(self._u_np[k])
+        V += self._x_np[self.N].T.dot(P).dot(self._x_np[self.N])
+        self._model.setObjective(V[0,0])
+        return
+
+    def _MIP_constraints(self):
+        self._disjunction_modes()
+        self._constraint_domains()
+        self._constraint_dynamics()
+        self._terminal_contraint()
+        return
+
+    def _disjunction_modes(self):
+        for k in range(self.N):
+            self._model.addConstr(np.sum([self._d[k,i] for i in range(self.sys.n_sys)]) == 1.)
+            #self._model.addSOS(grb.GRB.SOS_TYPE1, [self._d[k,i] for i in range(self.sys.n_sys)], [1]*self.sys.n_sys)
+        return
+
+    def _constraint_domains(self):
+        M_domains = [[clean_matrix(self._M_domains[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
+        for i in range(self.sys.n_sys):
+            lhs = clean_matrix(self.sys.domains[i].lhs_min)
+            rhs = clean_matrix(self.sys.domains[i].rhs_min)
+            for k in range(self.N):
+                expr_xu = lhs.dot(np.vstack((self._x_np[k], self._u_np[k]))) - rhs
+                expr_M = np.sum([M_domains[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                expr = expr_xu - expr_M
+                self._model.addConstrs((expr[j][0] <= 0. for j in range(len(expr))))
+        return
+
+    def _constraint_dynamics(self):
+        M_dynamics = [[clean_matrix(self._M_dynamics[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
+        m_dynamics = [[clean_matrix(self._m_dynamics[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
+        for k in range(self.N):
+            for j in range(self.sys.n_x):
+                expr = 0.
+                for i in range(self.sys.n_sys):
+                    expr += self._z[k,i,j]
+                self._model.addConstr(self._x_np[k+1][j,0] == expr)
+        for k in range(self.N):
+            for i in range(self.sys.n_sys):
+                expr_M = M_dynamics[i][i]*self._d[k,i]
+                expr_m = m_dynamics[i][i]*self._d[k,i]
+                for j in range(self.sys.n_x):
+                    self._model.addConstr(self._z[k,i,j] <= expr_M[j,0])
+                    self._model.addConstr(self._z[k,i,j] >= expr_m[j,0])
+        for i in range(self.sys.n_sys):
+            A = clean_matrix(self.sys.affine_systems[i].A)
+            B = clean_matrix(self.sys.affine_systems[i].B)
+            c = clean_matrix(self.sys.affine_systems[i].c)
+            for k in range(self.N):
+                expr = A.dot(self._x_np[k]) + B.dot(self._u_np[k]) + c
+                expr_M = expr - np.sum([M_dynamics[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                expr_m = expr - np.sum([m_dynamics[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                for j in range(self.sys.n_x):
+                    self._model.addConstr(self._z[k,i,j] >= expr_M[j,0])
+                    self._model.addConstr(self._z[k,i,j] <= expr_m[j,0])
+        return
+
+    def _terminal_contraint(self):
+        lhs = clean_matrix(self.X_N.lhs_min) 
+        rhs = clean_matrix(self.X_N.rhs_min) 
+        expr = lhs.dot(self._x_np[self.N]) - rhs
+        self._model.addConstrs((expr[i,0] <= 0. for i in range(len(self.X_N.minimal_facets))))
+        return
+
+    def _MIP_parameters(self):
+        self._model.setParam('OutputFlag', False)
+        time_limit = 600.
+        self._model.setParam('TimeLimit', time_limit)
+        self._model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
+        self._model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
+        self._model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
+        self._model.setParam(grb.GRB.Param.MIPGap, 1.e-9)
         return
 
     def feedforward(self, x0, u_ws=None, x_ws=None, ss_ws=None):
-        """
-        Sets up a MILP or MIQP in gurobipy (depending on the objective norm), to derive the optimal feedforward for the PWA system in state x0.
 
-        INPUTS:
-            x0: state of the PWA system.
-            u_ws, x_ws, ss_ws: warm starts for the input sequence, state sequence, and switching sequence (mode sequence).
-        """
-
-        # gurobi model
-        model = grb.Model()
-
-        # variables
-        x, model = real_variable(model, [self.N+1, self.sys.n_x])
-        u, model = real_variable(model, [self.N, self.sys.n_u])
-        z, model = real_variable(model, [self.N, self.sys.n_sys, self.sys.n_x])
-        d = model.addVars(self.N, self.sys.n_sys, vtype=grb.GRB.BINARY, name='d')
-        model.update()
+        # initial condition
+        for i in range(self.sys.n_x):
+            if self._model.getConstrByName('intial_condition_' + str(i)) is not None:
+                self._model.remove(self._model.getConstrByName('intial_condition_' + str(i)))
+            self._model.addConstr(self._x_np[0][i,0] == x0[i,0], name='intial_condition_' + str(i))
 
         # warm start
-        if x_ws is not None:
-            for i in range(self.sys.n_x):
-                for k in range(self.N+1):
-                    x[k,i].setAttr('Start', x_ws[k][i,0])
-            if ss_ws is not None:
-                for i in range(self.sys.n_x):
-                    for j in range(self.sys.n_sys):
-                        for k in range(self.N):
-                            if j == ss_ws[k]:
-                                z[k,j,i].setAttr('Start', x_ws[k+1][i,0])
-                            else:
-                                z[k,j,i].setAttr('Start', 0.)
         if u_ws is not None:
-            for i in range(self.sys.n_u):
-                for k in range(self.N):
-                    u[k,i].setAttr('Start', u_ws[k][i,0])
+            self._warm_start_input(u_ws)
+        if x_ws is not None:
+            self._warm_start_state(x_ws)
         if ss_ws is not None:
+            self._warm_start_modes(ss_ws)
+        if x_ws is not None and ss_ws is not None:
+            self._warm_start_sum_of_states(x_ws, ss_ws)
+        if self.objective_norm == 'one' and (x_ws is not None or u_ws is not None):
+            self._warm_start_slack_variables_MILP(x_ws, u_ws)
+        self._model.update()
+
+        # run optimization
+        self._model.optimize()
+
+        return self._return_solution()
+
+    def _warm_start_input(self, u_ws):
+        for i in range(self.sys.n_u):
+            for k in range(self.N):
+                self._u_np[k][i,0].setAttr('Start', u_ws[k][i,0])
+        return
+
+    def _warm_start_state(self, x_ws):
+        for i in range(self.sys.n_x):
+            for k in range(self.N+1):
+                self._x_np[k][i,0].setAttr('Start', x_ws[k][i,0])
+        return
+
+    def _warm_start_modes(self, ss_ws):
+        for j in range(self.sys.n_sys):
+            for k in range(self.N):
+                if j == ss_ws[k]:
+                    self._d[k,j].setAttr('Start', 1.)
+                else:
+                    self._d[k,j].setAttr('Start', 0.)
+        return
+
+    def _warm_start_sum_of_states(self, x_ws, ss_ws):
+        for i in range(self.sys.n_x):
             for j in range(self.sys.n_sys):
                 for k in range(self.N):
                     if j == ss_ws[k]:
-                        d[k,j].setAttr('Start', 1)
+                        self._z[k,j,i].setAttr('Start', x_ws[k+1][i,0])
                     else:
-                        d[k,j].setAttr('Start', 0)
+                        self._z[k,j,i].setAttr('Start', 0.)
+        return
 
-        # numpy variables (list of numpy matrices ordered in time)
-        x_np = [np.array([[x[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
-        u_np = [np.array([[u[k,i]] for i in range(self.sys.n_u)]) for k in range(self.N)]
+    def _warm_start_slack_variables_MILP(self, x_ws, u_ws):
+        if x_ws is not None:
+            for i in range(self.sys.n_x):
+                for k in range(self.N):
+                    self._phi[k,i].setAttr('Start', self.Q[i,:].dot(x_ws[k]))
+                self._phi[self.N,i].setAttr('Start', self.P[i,:].dot(x_ws[self.N]))
+        if u_ws is not None:
+            for i in range(self.sys.n_u):
+                for k in range(self.N):
+                    self._psi[k,i].setAttr('Start', self.R[i,:].dot(u_ws[k]))
+        return
 
-        # set objective
-        model = self.mip_objective(model, x_np, u_np)
-
-        # initial condition
-        model.addConstrs((x[0,i] == x0[i,0] for i in range(self.sys.n_x)))
-
-        # set constraints
-        model = self.mip_constraints(model, x_np, u_np, z, d)
-
-        # set parameters
-        time_limit = 600.
-        model.setParam('OutputFlag', False)
-        model.setParam('TimeLimit', time_limit)
-        # model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
-        # model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
-        # model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
-        # model.setParam(grb.GRB.Param.MIPGap, 1.e-9)
-
-        # run optimization
-        model.optimize()
-
-        # return solution
-        if model.status != grb.GRB.Status.OPTIMAL:
-            # print('Unfeasible initial condition x_0 = ' + str(x0.tolist()))
+    def _return_solution(self):
+        if self._model.status != grb.GRB.Status.OPTIMAL:
             u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
             x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
             cost = np.nan
             switching_sequence = [np.nan]*self.N
         else:
-            if model.status == grb.GRB.Status.TIME_LIMIT:
-                print('The solution of the MIQP excedeed the time limit of ' + str(time_limit))
-            cost = model.objVal
-            u_feedforward = [np.array([[model.getAttr('x', u)[k,i]] for i in range(self.sys.n_u)]) for k in range(self.N)]
-            x_trajectory = [np.array([[model.getAttr('x', x)[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
-            d_star = [np.array([[model.getAttr('x', d)[k,i]] for i in range(self.sys.n_sys)]) for k in range(self.N)]
+            if self._model.status == grb.GRB.Status.TIME_LIMIT:
+                print('The solution of the MIQP excedeed the time limit of ' + str(time_limit) + '.')
+            cost = self._model.objVal
+            u_feedforward = [np.array([[self._u_np[k][i,0].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
+            x_trajectory = [np.array([[self._x_np[k][i,0].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
+            d_star = [np.array([[self._d[k,i].x] for i in range(self.sys.n_sys)]) for k in range(self.N)]
             switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
         return u_feedforward, x_trajectory, tuple(switching_sequence), cost
 
-    def mip_objective(self, model, x_np, u_np, x_ws=None, u_ws=None):
-        """
-        Constructs the cost function for the mixed integer program. Depending on the norm of requires (1 or 2).
-        """
-
-        # linear objective
-        if self.objective_norm == 'one':
-            phi = model.addVars(self.N+1, self.sys.n_x, name='phi')
-            if x_ws is not None:
-                for i in range(self.sys.n_x):
-                    for k in range(self.N):
-                        phi[k,i].setAttr('Start', self.Q[i,:].dot(x_ws[k]))
-                    phi[self.N,i].setAttr('Start', self.P[i,:].dot(x_ws[self.N]))
-            psi = model.addVars(self.N, self.sys.n_u, name='psi')
-            if u_ws is not None:
-                for i in range(self.sys.n_u):
-                    for k in range(self.N):
-                        psi[k,i].setAttr('Start', self.R[i,:].dot(u_ws[k]))
-            model.update()
-            V = 0.
-            for k in range(self.N+1):
-                for i in range(self.sys.n_x):
-                    V += phi[k,i]
-            for k in range(self.N):
-                for i in range(self.sys.n_u):
-                    V += psi[k,i]
-            model.setObjective(V)
-            for k in range(self.N):
-                for i in range(self.sys.n_x):
-                    model.addConstr(phi[k,i] >= self.Q[i,:].dot(x_np[k])[0])
-                    model.addConstr(phi[k,i] >= - self.Q[i,:].dot(x_np[k])[0])
-                for i in range(self.sys.n_u):
-                    model.addConstr(psi[k,i] >= self.R[i,:].dot(u_np[k])[0])
-                    model.addConstr(psi[k,i] >= - self.R[i,:].dot(u_np[k])[0])
-            for i in range(self.sys.n_x):
-                model.addConstr(phi[self.N,i] >= self.P[i,:].dot(x_np[self.N])[0])
-                model.addConstr(phi[self.N,i] >= - self.P[i,:].dot(x_np[self.N])[0])
-
-       # quadratic objective
-        elif self.objective_norm == 'two':
-            V = 0.
-            for k in range(self.N):
-                V += x_np[k].T.dot(self.Q).dot(x_np[k]) + u_np[k].T.dot(self.R).dot(u_np[k])
-            V += x_np[self.N].T.dot(self.P).dot(x_np[self.N])
-            model.setObjective(V[0,0])
-
-        return model
-
-    def mip_constraints(self, model, x_np, u_np, z, d):
-        """
-        Constructs the constraints for the mixed integer program.
-        """
-
-        with suppress_stdout():
-
-            # disjuction
-            for k in range(self.N):
-                model.addConstr(np.sum([d[k,i] for i in range(self.sys.n_sys)]) == 1.)
-
-            # relaxation of the domains
-            for k in range(self.N):
-                for i in range(self.sys.n_sys):
-                    expr_xu = self.sys.domains[i].lhs_min.dot(np.vstack((x_np[k], u_np[k]))) - self.sys.domains[i].rhs_min
-                    expr_M = np.sum([self.M_domains[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                    expr = expr_xu - expr_M
-                    model.addConstrs((expr[j][0] <= 0. for j in range(len(expr))))
-
-            # state transition
-            for k in range(self.N):
-                for j in range(self.sys.n_x):
-                    expr = 0.
-                    for i in range(self.sys.n_sys):
-                        expr += z[k,i,j]
-                    model.addConstr(x_np[k+1][j,0] == expr)
-
-            # relaxation of the dynamics, part 1
-            for k in range(self.N):
-                for i in range(self.sys.n_sys):
-                    expr_M = self.M_dynamics[i][i]*d[k,i]
-                    expr_m = self.m_dynamics[i][i]*d[k,i]
-                    for j in range(self.sys.n_x):
-                        model.addConstr(z[k,i,j] <= expr_M[j,0])
-                        model.addConstr(z[k,i,j] >= expr_m[j,0])
-
-            # relaxation of the dynamics, part 2
-            for k in range(self.N):
-                for i in range(self.sys.n_sys):
-                    expr = self.sys.affine_systems[i].A.dot(x_np[k]) + self.sys.affine_systems[i].B.dot(u_np[k]) + self.sys.affine_systems[i].c
-                    expr_M = expr - np.sum([self.M_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                    expr_m = expr - np.sum([self.m_dynamics[i][j]*d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                    for j in range(self.sys.n_x):
-                        model.addConstr(z[k,i,j] >= expr_M[j,0])
-                        model.addConstr(z[k,i,j] <= expr_m[j,0])
-
-            # terminal constraint
-            expr = self.X_N.lhs_min.dot(x_np[self.N]) - self.X_N.rhs_min
-            model.addConstrs((expr[i,0] <= 0. for i in range(len(self.X_N.minimal_facets))))
-
-        return model
 
     def feedback(self, x0):
         """
@@ -788,6 +834,14 @@ def linearly_independent_rows(A, tol=1.e-6):
     R = linalg.qr(A.T)[1]
     R_diag = np.abs(np.diag(R))
     return list(np.where(R_diag > tol)[0])
+
+def clean_matrix(M, tol=1.e-7):
+    M_clean = copy(M)
+    for i in range(M.shape[0]):
+        for j in range(M.shape[1]):
+            if np.abs(M[i,j]) < tol:
+                M_clean[i,j] = 0.
+    return M_clean
 
 def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
     tic = time.time()
