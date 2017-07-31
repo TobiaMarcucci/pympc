@@ -25,6 +25,9 @@ class DTLinearSystem:
         return
 
     def condense(self, N):
+        """
+        Generates a fake PWA system and calls condense_dynamical_system().
+        """
         c = np.zeros((self.n_x, 1))
         sys = DTAffineSystem(self.A, self.B, c)
         affine_systems = [sys]
@@ -68,6 +71,9 @@ class DTAffineSystem:
         self.n_x, self.n_u = np.shape(B)
 
     def condense(self, N):
+        """
+        Generates a fake PWA system and calls condense_dynamical_system().
+        """
         affine_systems = [self]
         switching_sequence = [0]*N
         return condense_dynamical_system(affine_systems, switching_sequence)
@@ -89,15 +95,15 @@ class DTAffineSystem:
 class DTPWASystem(object):
     """
     Discrete time piecewise affine systems in the form:
-    x_{k+1} = A_i x_k + B_i u_k + c_i   if   x_k \in X_i and u_k \in U_i
+    x_{k+1} = A_i x_k + B_i u_k + c_i   if   (x_k, u_k) \in D_i
 
     VARIABLES:
         affine_systems: list of affine systems
-        state_domains: list of state domains for the affine systems
-        input_domains: list of input domains for the affine systems
+        domains: list of state AND input domains D_i (D_i are polytopes, see the Polytope class in geometry.polytope)
         n_x: number of sates
         n_u: number of inputs
         n_sys: number of affine subsystems
+        x_min, x_max: minimum and maximum (elementwise) values of x (state), for x in the union of the domains D_i (useful for sampling in the state space)
     """
 
     def __init__(self, affine_systems, domains):
@@ -111,9 +117,15 @@ class DTPWASystem(object):
         return
 
     def condense(self, switching_sequence):
+        """
+        See condense_dynamical_system().
+        """
         return condense_dynamical_system(self.affine_systems, switching_sequence)
 
     def simulate(self, x0, u_list):
+        """
+        Given the initial state x0 and a list of inputs, simulates the PWA dynamics and returns: i) the state trajectory as a list of state vectors, ii) the mode sequence. If the couple (x_k, u_k) goes out of the domains D_i raises a ValueError.
+        """
         N = len(u_list)
         x_list = [x0]
         switching_sequence = []
@@ -128,6 +140,9 @@ class DTPWASystem(object):
         return x_list, switching_sequence
 
     def find_domain(self, x, u):
+        """
+        Given (x,u) returns the i such that (x,u) \in D_i.
+        """
         for i in range(self.n_sys):
             if self.domains[i].applies_to(np.vstack((x, u))):
                 return i
@@ -149,6 +164,9 @@ class DTPWASystem(object):
 
     @staticmethod
     def from_orthogonal_domains(affine_systems, state_domains, input_domains):
+        """
+        Allows to construct a PWA system when the domain of the state and the input are orthogonal, i.e.: D_i = X_i \times U_i. It requires the list of domains for state and input: state_domains = [X_0, ... , X_s], input_domains = [U_0, ... , U_s]
+        """
         domains = []
         for i in range(len(state_domains)):
             A_i = linalg.block_diag(state_domains[i].lhs_min, input_domains[i].lhs_min)
@@ -186,6 +204,13 @@ def simulate_affine_dynamics(A_bar, B_bar, c_bar, x0, u_list):
     return x_list
 
 def condense_dynamical_system(affine_systems, switching_sequence):
+    """
+    For the PWA system
+    x(t+1) = A_i x(t) + B_i u(t) + c_i    if    (x(t), u(t)) \in D_i,
+    given the mode sequence z = (z(0), ... , z(N-1)), returns the matrices A_bar, B_bar, c_bar such that
+    x_bar = A_bar x(0) + B_bar u_bar + c_bar
+    with x_bar = (x(0), ... , x(N)) and u_bar = (u(0), ... , u(N-1)).
+    """
 
     # system dimensions
     n_x = affine_systems[0].n_x
