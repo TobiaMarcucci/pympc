@@ -323,8 +323,8 @@ class MPCHybridController:
 
     def _disjunction_modes(self):
         for k in range(self.N):
-            self._model.addConstr(np.sum([self._d[k,i] for i in range(self.sys.n_sys)]) == 1.)
-            #self._model.addSOS(grb.GRB.SOS_TYPE1, [self._d[k,i] for i in range(self.sys.n_sys)], [1]*self.sys.n_sys)
+            #self._model.addConstr(np.sum([self._d[k,i] for i in range(self.sys.n_sys)]) == 1.)
+            self._model.addSOS(grb.GRB.SOS_TYPE1, [self._d[k,i] for i in range(self.sys.n_sys)], [1]*self.sys.n_sys)
         return
 
     def _constraint_domains(self):
@@ -455,19 +455,19 @@ class MPCHybridController:
         return
 
     def _return_solution(self):
-        if self._model.status != grb.GRB.Status.OPTIMAL:
-            u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
-            x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
-            cost = np.nan
-            switching_sequence = [np.nan]*self.N
-        else:
-            if self._model.status == grb.GRB.Status.TIME_LIMIT:
-                print('The solution of the MIQP excedeed the time limit of ' + str(time_limit) + '.')
+        if self._model.status == grb.GRB.Status.OPTIMAL:
             cost = self._model.objVal
             u_feedforward = [np.array([[self._u_np[k][i,0].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
             x_trajectory = [np.array([[self._x_np[k][i,0].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
             d_star = [np.array([[self._d[k,i].x] for i in range(self.sys.n_sys)]) for k in range(self.N)]
             switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
+        else:
+            if self._model.status == grb.GRB.Status.TIME_LIMIT:
+                print('The solution of the MIQP excedeed the time limit of ' + str(time_limit) + '.')
+            u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
+            x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
+            cost = np.nan
+            switching_sequence = [np.nan]*self.N
         return u_feedforward, x_trajectory, tuple(switching_sequence), cost
 
 
