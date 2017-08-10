@@ -6,6 +6,8 @@ from pympc.optimization.gurobi import quadratic_program as qp_gurobi
 
 class TestMPCTools(unittest.TestCase):
     def test_linear_program(self):
+        np.random.seed(1)
+        
         for linear_program in [lp_pnnls, lp_gurobi]:
 
             # trivial lp

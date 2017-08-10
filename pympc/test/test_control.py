@@ -30,6 +30,7 @@ class TestMPCTools(unittest.TestCase):
         self.assertEqual(true_candidate_active_sets, candidate_active_sets)
 
     def test_MPCController(self):
+        np.random.seed(1)
 
         # double integrator
         A = np.array([[0., 1.],[0., 0.]])
@@ -75,6 +76,7 @@ class TestMPCTools(unittest.TestCase):
                 # self.assertTrue(controller.condensed_program.feasible_set.applies_to(x0))
 
     def test_MPCHybridController(self):
+        np.random.seed(1)
 
         # PWA dynamics
         t_s = .1

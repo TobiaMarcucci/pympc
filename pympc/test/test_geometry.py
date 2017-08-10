@@ -145,6 +145,7 @@ class TestGeometry(unittest.TestCase):
         # self.assertTrue(row_1 in rows)
 
     def test_orthogonal_projection(self):
+        np.random.seed(1)
 
         # test plane generator
         points = [np.array([[1.],[0.],[0.]]), np.array([[-1.],[0.],[0.]]), np.array([[0.],[1.],[0.]])]
