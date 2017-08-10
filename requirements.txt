@@ -2,4 +2,5 @@ pyhull
 scipy
 numpy
 matplotlib
+cython
 git+https://github.com/rdeits/pycddlib@4df43450
