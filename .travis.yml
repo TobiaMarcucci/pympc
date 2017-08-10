@@ -5,6 +5,7 @@ python:
 notifications: 
   email: false
 install: 
+  - pip install Cython
   - pip install -r requirements.txt
   - pip install nose
   - pip install codecov
