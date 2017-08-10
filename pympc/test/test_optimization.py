@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from pympc.optimization.pnnls import linear_program as lp_pnnls
+from pympc.optimization.pnnls import quadratic_program as qp_pnnls
 from pympc.optimization.gurobi import linear_program as lp_gurobi
 from pympc.optimization.gurobi import quadratic_program as qp_gurobi
 
@@ -20,7 +21,7 @@ class TestMPCTools(unittest.TestCase):
             self.assertTrue(np.allclose(sol.inequality_multipliers, np.array([[0.],[1.],[0.],[1.]])))
             self.assertFalse(sol.primal_degenerate)
             self.assertFalse(sol.dual_degenerate)
-            
+
             # unfeasible lp
             f = np.ones((2,1))
             A = np.array([[0.,1.],[0.,-1.]])
@@ -148,7 +149,7 @@ class TestMPCTools(unittest.TestCase):
 
     def test_quadratic_program(self):
 
-        for quadratic_program in [qp_gurobi]:
+        for quadratic_program in [qp_gurobi, qp_pnnls]:
 
             # trivial qp
             H = np.eye(2)
@@ -157,19 +158,50 @@ class TestMPCTools(unittest.TestCase):
             b = np.array([[-1.],[-1.]])
             true_x_min = np.array([[-1.],[-1.]])
             true_cost_min = 1.
-            [x_min, cost_min] = quadratic_program(H, f, A, b)
-            self.assertTrue(np.isclose(cost_min, true_cost_min))
-            self.assertTrue(all(np.isclose(x_min, true_x_min)))
+            sol = quadratic_program(H, f, A, b)
+            self.assertTrue(np.isclose(sol.min, true_cost_min))
+            self.assertTrue(all(np.isclose(sol.argmin, true_x_min)))
 
             # unfeasible qp
             H = np.eye(2)
             f = np.zeros((2,1))
             A = np.array([[0.,1.],[0.,-1.]])
             b = np.array([[0.],[-1.]])
-            [x_min, cost_min] = quadratic_program(H, f, A, b)
-            self.assertTrue(np.isnan(cost_min))
-            self.assertTrue(all(np.isnan(x_min)))
+            sol = quadratic_program(H, f, A, b)
+            self.assertTrue(np.isnan(sol.min))
+            self.assertTrue(all(np.isnan(sol.argmin)))
+
+        # random qps
+        for i in range(100):
+            n_variables = np.random.randint(10, 100)
+            n_ineq = np.random.randint(10, 100)
+            n_eq = np.random.randint(1, 9)
+            f = np.random.randn(n_variables, 1)
+            H = np.random.random((n_variables,n_variables))
+            H = H.T.dot(H)+np.eye(n_variables)*1.e-3
+            A = np.random.randn(n_ineq, n_variables)
+            b = np.random.rand(n_ineq, 1)
+            #C = np.random.randn(n_eq, n_variables)
+            #d = np.random.rand(n_eq, 1)
+            sol_pnnls = qp_pnnls(H, f, A, b)
+            sol_gurobi = qp_gurobi(H, f, A, b)
+            if np.isnan(sol_pnnls.min):
+                self.assertTrue(np.isnan(sol_gurobi.min))
+                self.assertTrue(all(np.isnan(sol_pnnls.argmin)))
+                self.assertTrue(all(np.isnan(sol_gurobi.argmin)))
+            else:
+                print ("number of iteration", i)
+                print np.linalg.norm(sol_gurobi.min-sol_pnnls.min)
+                print np.linalg.norm(sol_gurobi.argmin - sol_pnnls.argmin)
+                print np.linalg.det(H)
+                print n_variables
+                print n_ineq
+                if(np.linalg.norm(sol_gurobi.min-sol_pnnls.min)>0.001):
+                    print np.linalg.eig(H)[0][0]
+                    print np.linalg.eig(H)[0][-1]
+
+                self.assertTrue(np.allclose(sol_pnnls.argmin, sol_gurobi.argmin,1.e-3,1.e-5))
+                self.assertTrue(np.isclose(sol_pnnls.min, sol_gurobi.min,1.e-3,1.e-5))
 
 if __name__ == '__main__':
     unittest.main()
-
