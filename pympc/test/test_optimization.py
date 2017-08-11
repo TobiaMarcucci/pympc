@@ -148,6 +148,7 @@ class TestMPCTools(unittest.TestCase):
                 self.assertTrue(sol_pnnls.dual_degenerate == sol_gurobi.dual_degenerate)
 
     def test_quadratic_program(self):
+        np.random.seed(1)
 
         for quadratic_program in [qp_gurobi, qp_pnnls]:
             # trivial qp
@@ -180,10 +181,10 @@ class TestMPCTools(unittest.TestCase):
             H = H.T.dot(H)+np.eye(n_variables)*1.e-3
             A = np.random.randn(n_ineq, n_variables)
             b = np.random.rand(n_ineq, 1)
-            #C = np.random.randn(n_eq, n_variables)
-            #d = np.random.rand(n_eq, 1)
-            sol_pnnls = qp_pnnls(H, f, A, b)
-            sol_gurobi = qp_gurobi(H, f, A, b)
+            C = np.random.randn(n_eq, n_variables)
+            d = np.random.rand(n_eq, 1)
+            sol_pnnls = qp_pnnls(H, f, A, b, C, d)
+            sol_gurobi = qp_gurobi(H, f, A, b, C, d)
             if np.isnan(sol_pnnls.min):
                 self.assertTrue(np.isnan(sol_gurobi.min))
                 self.assertTrue(all(np.isnan(sol_pnnls.argmin)))

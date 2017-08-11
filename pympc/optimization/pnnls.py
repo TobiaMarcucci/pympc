@@ -134,7 +134,11 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub
         x_star: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
         V_star: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
     """
+
     try:
+        if((C is not None) and (d is not None)):
+            A = np.vstack((A,C,-C))
+            b = np.vstack((b,d,-d))
         n_x = H.shape[1]
         L = np.linalg.cholesky(H)
         L = L.T
