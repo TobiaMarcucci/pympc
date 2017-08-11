@@ -150,7 +150,6 @@ class TestMPCTools(unittest.TestCase):
     def test_quadratic_program(self):
 
         for quadratic_program in [qp_gurobi, qp_pnnls]:
-
             # trivial qp
             H = np.eye(2)
             f = np.zeros((2,1))
@@ -190,16 +189,6 @@ class TestMPCTools(unittest.TestCase):
                 self.assertTrue(all(np.isnan(sol_pnnls.argmin)))
                 self.assertTrue(all(np.isnan(sol_gurobi.argmin)))
             else:
-                print ("number of iteration", i)
-                print np.linalg.norm(sol_gurobi.min-sol_pnnls.min)
-                print np.linalg.norm(sol_gurobi.argmin - sol_pnnls.argmin)
-                print np.linalg.det(H)
-                print n_variables
-                print n_ineq
-                if(np.linalg.norm(sol_gurobi.min-sol_pnnls.min)>0.001):
-                    print np.linalg.eig(H)[0][0]
-                    print np.linalg.eig(H)[0][-1]
-
                 self.assertTrue(np.allclose(sol_pnnls.argmin, sol_gurobi.argmin,1.e-3,1.e-5))
                 self.assertTrue(np.isclose(sol_pnnls.min, sol_gurobi.min,1.e-3,1.e-5))
 
