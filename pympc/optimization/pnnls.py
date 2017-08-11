@@ -3,6 +3,8 @@ import numpy as np
 from collections import namedtuple
 
 LPSolution = namedtuple('LPSolution',  ['argmin', 'min', 'active_set', 'inequality_multipliers', 'equality_multipliers', 'primal_degenerate', 'dual_degenerate'])
+QPSolution = namedtuple('QPSolution',  ['argmin', 'min'])
+
 
 def pnnls(A, B, c):
     """
@@ -47,42 +49,43 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
         V_star: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
     """
 
+
+
+    # empty inequalities if not provided
+    n_x = f.shape[0]
+    if A is None or b is None:
+        A = np.array([[]]*n_x)
+        b = np.array([[]])
+    n_ineq = A.shape[0]
+
+    # state equalities as inequalities
+    n_eq = 0
+    if C is not None and d is not None:
+        n_eq = C.shape[0]
+        A = np.vstack((A, C, -C))
+        b = np.vstack((b, d, -d))
+
+    # matrices for the pnnls solver
+    A_pnnls = np.vstack((
+        np.hstack((                                     b.T,   np.zeros((1, n_ineq+2*n_eq)))),
+        np.hstack((np.zeros((n_ineq+2*n_eq, n_ineq+2*n_eq)),          np.eye(n_ineq+2*n_eq))),
+        np.hstack((                                     A.T, np.zeros((n_x, n_ineq+2*n_eq))))
+        ))
+    B_pnnls = np.vstack((f.T, A, np.zeros((n_x, n_x))))
+    f = np.reshape(f, (n_x,1))
+    c_pnnls = np.vstack((0., b, -f))
+
+    # initialize output
+    argmin = np.full((n_x,1), np.nan)
+    V_star = np.nan
+    active_set = None
+    mult_ineq = np.full((n_ineq,1), np.nan)
+    mult_eq = np.full((n_eq,1), np.nan)
+    primal_degenerate = None
+    dual_degenerate = None
+
+    # solve pnnls
     try:
-        
-        # empty inequalities if not provided
-        n_x = f.shape[0]
-        if A is None or b is None:
-            A = np.array([[]]*n_x)
-            b = np.array([[]])
-        n_ineq = A.shape[0]
-
-        # state equalities as inequalities
-        n_eq = 0
-        if C is not None and d is not None:
-            n_eq = C.shape[0]
-            A = np.vstack((A, C, -C))
-            b = np.vstack((b, d, -d))
-
-        # matrices for the pnnls solver
-        A_pnnls = np.vstack((
-            np.hstack((                                     b.T,   np.zeros((1, n_ineq+2*n_eq)))),
-            np.hstack((np.zeros((n_ineq+2*n_eq, n_ineq+2*n_eq)),          np.eye(n_ineq+2*n_eq))),
-            np.hstack((                                     A.T, np.zeros((n_x, n_ineq+2*n_eq))))
-            ))
-        B_pnnls = np.vstack((f.T, A, np.zeros((n_x, n_x))))
-        f = np.reshape(f, (n_x,1))
-        c_pnnls = np.vstack((0., b, -f))
-
-        # initialize output
-        argmin = np.full((n_x,1), np.nan)
-        V_star = np.nan
-        active_set = None
-        mult_ineq = np.full((n_ineq,1), np.nan)
-        mult_eq = np.full((n_eq,1), np.nan)
-        primal_degenerate = None
-        dual_degenerate = None
-
-        # solve pnnls
         ys_star, x_star, r_star = pnnls(A_pnnls, B_pnnls, c_pnnls)
 
         # populate output
@@ -116,5 +119,48 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
         # print('Too many iterations in PNNLS LP solver, switched to gurobi.')
         from gurobi import linear_program as lp_gurobi
         sol = lp_gurobi(f, A, b, C, d)
+
+    return sol
+
+def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None, tol=1.e-7):
+    """
+    Solves the strictly convex (H > 0) quadratic program
+    min  .5 x^T H x + f^T x
+    s.t. A x <= b
+         C x  = d
+         x_lb <= x <= x_ub
+
+    OUTPUTS:
+        x_star: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
+        V_star: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
+    """
+
+    try:
+        if((C is not None) and (d is not None)):
+            A = np.vstack((A,C,-C))
+            b = np.vstack((b,d,-d))
+        n_x = H.shape[1]
+        L = np.linalg.cholesky(H)
+        L = L.T
+        M = A.dot(np.linalg.inv(L))
+        d = b + A.dot(np.linalg.inv(H)).dot(f)
+        gamma = 1
+        [y_star, rvalue_star] = nnls(np.vstack((-M.T,-d.T)),np.vstack((np.zeros((n_x,1)),gamma)).flatten())
+        y_star = np.reshape(y_star,(len(y_star),1))
+        r_star = np.vstack((-M.T,-d.T)).dot(y_star)-np.vstack((np.zeros((n_x,1)),gamma))
+        if (np.linalg.norm(r_star)<tol):
+            x_star = np.full((n_x,1), np.nan)
+            V_star = np.nan
+        else:
+            x_star = -np.linalg.inv(H).dot(f+A.T.dot(y_star)/(gamma+d.T.dot(y_star)))
+            V_star = (0.5 * x_star.T.dot(H).dot(x_star) + f.T.dot(x_star))[0,0]
+        sol = QPSolution(
+            argmin = x_star,
+            min = V_star)
+
+    except RuntimeError:
+        # print('Too many iterations in PNNLS LP solver, switched to gurobi.')
+        from gurobi import quadratic_program as qp_gurobi
+        sol = qp_gurobi(H, f, A, b, C, d)
 
     return sol
