@@ -35,6 +35,8 @@ class Polytope:
 
     def __init__(self, A, b):
         self.A = A
+        if len(b.shape) == 1:
+            b = np.reshape(b, (b.shape[0], 1))
         self.b = b
         self.assembled = False
         return
@@ -43,10 +45,12 @@ class Polytope:
         if self.assembled:
             raise ValueError('Polytope already assembled, cannot add facets!')
         self.A = np.vstack((self.A, A))
+        if len(b.shape) == 1:
+            b = np.reshape(b, (b.shape[0], 1))
         self.b = np.vstack((self.b, b))
         return
 
-    def bound_selection_matrix(self, bound_indices):
+    def _bound_selection_matrix(self, bound_indices):
         n_variables = self.A.shape[1]
         if bound_indices is None:
             bound_indices = range(n_variables)
@@ -57,14 +61,18 @@ class Polytope:
     def add_lower_bounds(self, x_min, bound_indices=None):
         if self.assembled:
             raise ValueError('Polytope already assembled, cannot add bounds!')
-        selection_matrix = self.bound_selection_matrix(bound_indices)
+        if isinstance(x_min, float):
+            x_min = np.array([[x_min]])
+        selection_matrix = self._bound_selection_matrix(bound_indices)
         self.add_facets(-selection_matrix, -x_min)
         return
 
     def add_upper_bounds(self, x_max, bound_indices=None):
         if self.assembled:
             raise ValueError('Polytope already assembled, cannot add bounds!')
-        selection_matrix = self.bound_selection_matrix(bound_indices)
+        if isinstance(x_max, float):
+            x_max = np.array([[x_max]])
+        selection_matrix = self._bound_selection_matrix(bound_indices)
         self.add_facets(selection_matrix, x_max)
         return
 

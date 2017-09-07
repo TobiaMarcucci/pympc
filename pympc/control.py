@@ -463,7 +463,7 @@ class MPCHybridController:
             switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
         else:
             if self._model.status == grb.GRB.Status.TIME_LIMIT:
-                print('The solution of the MIQP excedeed the time limit of ' + str(time_limit) + '.')
+                print('The solution of the MIQP excedeed the time limit.')
             u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
             x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
             cost = np.nan
@@ -488,6 +488,11 @@ class MPCHybridController:
         prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
         # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
         return prog
+
+
+"""
+to do: np.save can't save the gurobi model, hence the library. find a way to save only the necessary data to the library but be able then to upload it and use maybe also sample again...
+"""
 
 
 
@@ -585,7 +590,7 @@ class FeasibleSetLibrary:
         u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
         ss_star = [np.nan]*self.controller.N
         fss = self.get_feasible_switching_sequences(x)
-        print 'number of feasible QPs:', len(fss)
+        # print 'number of feasible QPs:', len(fss)
         if given_ss is not None:
             fss.insert(0, given_ss)
         if not fss:
@@ -628,6 +633,22 @@ class FeasibleSetLibrary:
                 p.assemble()#redundant=False, vertices=fs.hull.points)
                 p.plot(facecolor=color, alpha=.5)
         return
+
+    def save(self, name):
+        self.controller._model = None
+        self.controller._u_np = None
+        self.controller._x_np = None
+        self.controller._z = None
+        self.controller._d = None
+        np.save(name, self)
+        self.controller._MIP_model()
+        return
+
+def load_library(name):
+    library = np.load(name + '.npy').item()
+    library.controller._MIP_model()
+    return library
+
 
 
 
@@ -710,7 +731,7 @@ class ParametricQP:
         self.C_x = C_x
         self.C = C
         self.remove_linear_terms()
-        self._feasible_set = None
+        # self._feasible_set = None
         return
 
     def solve(self, x0, u_length=None):
@@ -749,15 +770,15 @@ class ParametricQP:
         self.W = self.C + self.C_u.dot(self.H_inv).dot(self.F_u)
         return
 
-    @property
-    def feasible_set(self):
-        if self._feasible_set is None:
-            augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
-            augmented_polytope.assemble()
-            if augmented_polytope.empty:
-                return None
-            self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
-        return self._feasible_set
+    # @property
+    # def feasible_set(self):
+    #     if self._feasible_set is None:
+    #         augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
+    #         augmented_polytope.assemble()
+    #         if augmented_polytope.empty:
+    #             return None
+    #         self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
+    #     return self._feasible_set
 
 
     def get_z_sensitivity(self, active_set):

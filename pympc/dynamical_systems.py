@@ -41,12 +41,12 @@ class DTLinearSystem:
         return simulate_affine_dynamics(A_bar, B_bar, c_bar, x0, u_list)
 
     @staticmethod
-    def from_continuous(A, B, t_s, method='zoh'):
+    def from_continuous(A, B, h, method='zoh'):
         c = np.zeros((A.shape[0], 1))
         if method == 'zoh':
-            A_d, B_d, _ = zero_order_hold(A, B, c, t_s)
+            A_d, B_d, _ = zero_order_hold(A, B, c, h)
         elif method == 'explicit_euler':
-            A_d, B_d, _ = explicit_euler(A, B, c, t_s)
+            A_d, B_d, _ = explicit_euler(A, B, c, h)
         return DTLinearSystem(A_d, B_d)
 
 
@@ -84,11 +84,22 @@ class DTAffineSystem:
         return simulate_affine_dynamics(A_bar, B_bar, c_bar, x0, u_list)
 
     @staticmethod
-    def from_continuous(A, B, c, t_s, method='zoh'):
+    def from_continuous(A, B, c, h, method='zoh'):
+        if len(c.shape) == 1:
+            c = np.reshape(c, (c.shape[0], 1))
         if method == 'zoh':
-            A_d, B_d, c_d = zero_order_hold(A, B, c, t_s)
+            A_d, B_d, c_d = zero_order_hold(A, B, c, h)
         elif method == 'explicit_euler':
-            A_d, B_d, c_d = explicit_euler(A, B, c, t_s)
+            A_d, B_d, c_d = explicit_euler(A, B, c, h)
+        elif method == 'semi_implicit_euler':
+            n = A.shape[0]/2
+            A_q = A[n:, :n]
+            A_v = A[n:, n:]
+            B_v = B[n:, :]
+            c_v = c[n:, :]
+            A_d, B_d, c_d = semi_implicit_euler(A_q, A_v, B_v, c_v, h)
+        else:
+            raise ValueError('Unknown discretization method.')
         return DTAffineSystem(A_d, B_d, c_d)
 
 
@@ -242,7 +253,7 @@ def condense_dynamical_system(affine_systems, switching_sequence):
 
     return A_bar, B_bar, c_bar
 
-def zero_order_hold(A, B, c, t_s):
+def zero_order_hold(A, B, c, h):
 
     # system dimensions
     n_x = np.shape(A)[0]
@@ -251,7 +262,7 @@ def zero_order_hold(A, B, c, t_s):
     # zero order hold (see Bicchi - Fondamenti di Automatica 2)
     mat_c = np.zeros((n_x+n_u+1, n_x+n_u+1))
     mat_c[0:n_x,:] = np.hstack((A, B, c))
-    mat_d = linalg.expm(mat_c*t_s)
+    mat_d = linalg.expm(mat_c*h)
 
     # discrete time dynamics
     A_d = mat_d[0:n_x, 0:n_x]
@@ -260,10 +271,20 @@ def zero_order_hold(A, B, c, t_s):
 
     return A_d, B_d, c_d
 
-def explicit_euler(A, B, c, t_s):
-    A_d = A*t_s + np.eye(A.shape[0])
-    B_d = B*t_s
-    c_d = c*t_s
+def explicit_euler(A, B, c, h):
+    A_d = A*h + np.eye(A.shape[0])
+    B_d = B*h
+    c_d = c*h
+    return A_d, B_d, c_d
+
+def semi_implicit_euler(A_q, A_v, B_v, c_v, h):
+    n = A_q.shape[0]
+    A_d = np.vstack((
+        np.hstack((np.eye(n) + (h**2)*A_q, h*np.eye(n) + (h**2)*A_v)),
+        np.hstack((h*A_q, np.eye(n) + h*A_v))
+            ))
+    B_d = np.vstack(((h**2)*B_v, h*B_v))
+    c_d = np.vstack(((h**2)*c_v, h*c_v))
     return A_d, B_d, c_d
 
 
