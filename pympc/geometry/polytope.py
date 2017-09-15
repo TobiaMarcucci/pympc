@@ -5,6 +5,7 @@ import cdd
 from pympc.optimization.pnnls import linear_program
 from pympc.geometry.chebyshev_center import chebyshev_center
 from pympc.geometry.convex_hull import orthogonal_projection_CHM
+from pympc.algebra import rangespace_basis, nullspace_basis
 import scipy.spatial as spatial
 from matplotlib.path import Path
 import matplotlib.patches as patches
@@ -50,14 +51,6 @@ class Polytope:
         self.b = np.vstack((self.b, b))
         return
 
-    def _bound_selection_matrix(self, bound_indices):
-        n_variables = self.A.shape[1]
-        if bound_indices is None:
-            bound_indices = range(n_variables)
-        unbound_indices = [i for i in range(n_variables) if i not in bound_indices]
-        selection_matrix = np.eye(n_variables)
-        return np.delete(selection_matrix, unbound_indices, 0)
-
     def add_lower_bounds(self, x_min, bound_indices=None):
         if self.assembled:
             raise ValueError('Polytope already assembled, cannot add bounds!')
@@ -82,6 +75,14 @@ class Polytope:
         self.add_lower_bounds(x_min, bound_indices)
         self.add_upper_bounds(x_max, bound_indices)
         return
+
+    def _bound_selection_matrix(self, bound_indices):
+        n_variables = self.A.shape[1]
+        if bound_indices is None:
+            bound_indices = range(n_variables)
+        unbound_indices = [i for i in range(n_variables) if i not in bound_indices]
+        selection_matrix = np.eye(n_variables)
+        return np.delete(selection_matrix, unbound_indices, 0)
 
     def assemble(self, redundant=True, vertices=None):
         if self.assembled:
@@ -376,3 +377,43 @@ class Polytope:
         b = np.vstack((x_max, -x_min))
         p = Polytope(A, b)
         return p
+
+class LowerDimensionalPolytope:
+
+    def __init__(self, A, b, C, d):
+        self.A = A
+        self.C = C
+        if len(b.shape) == 1:
+            b = np.reshape(b, (b.shape[0], 1))
+        self.b = b
+        if len(d.shape) == 1:
+            d = np.reshape(d, (d.shape[0], 1))
+        self.d = d
+        self.lhs_min = np.vstack((A, C, -C))
+        self.rhs_min = np.vstack((b, d, -d))
+        self.minimal_facets = range(self.lhs_min.shape[0])
+        return
+
+    # def assemble(self):
+    #     """
+    #     With Y and Z denoting a basis of the rangespace and nullspace of C, we make the change the varibles
+    #     x = [Y, Z] [y; z]
+    #     Then we solve the equalities for y as
+    #     y = (C * Y)^(-1) * d
+    #     Substituting in the inequalities we have
+    #     A * (Y * y + Z * z) <= b
+    #     which then assumes the form
+    #     A * Z * z <= b - A * Y * y
+    #     """
+    #     # project in the null space of the equalities
+    #     Y = rangespace_basis(C)
+    #     Z = nullspace_basis(C)
+    #     y = np.linalg.inv(C.dot(Y)).dot(d)
+    #     y = np.reshape(y, (y.shape[0],1))
+    #     A_projected = A.dot(Z)
+    #     b_projected = b - A.dot(Y).dot(y)
+    #     p_projected = Polytope(A_projected, b_projected)
+    #     p_projected.assemble()
+
+    #     return A_projected, b_projected
+

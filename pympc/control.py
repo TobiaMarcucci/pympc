@@ -1,23 +1,17 @@
-import time
-import sys, os
+import time, sys, os
 import numpy as np
 import scipy.linalg as linalg
 import matplotlib.pyplot as plt
 import gurobipy as grb
 from contextlib import contextmanager
-from optimization.pnnls import linear_program
-from optimization.gurobi import quadratic_program, real_variable
-from geometry.polytope import Polytope
-from dynamical_systems import DTAffineSystem, DTPWASystem
-from optimization.mpqpsolver import MPQPSolver, CriticalRegion
-# from scipy.spatial import ConvexHull
-from pympc.geometry.convex_hull import ConvexHull
-import cdd
-from pympc.geometry.convex_hull import PolytopeProjectionInnerApproximation
 from copy import copy
 
-
-
+from optimization.pnnls import linear_program
+from optimization.parametric_programs import ParametricLP, ParametricQP
+from optimization.mpqpsolver import MPQPSolver, CriticalRegion
+from dynamical_systems import DTAffineSystem, DTPWASystem
+from algebra import clean_matrix, nullspace_basis, rangespace_basis
+from geometry.polytope import Polytope
 
 class MPCController:
     """
@@ -100,7 +94,7 @@ class MPCController:
         """
         (Only for controllers with norm = 2).
         Returns the partition of the state space in critical regions (explicit MPC solution).
-        Temporary fix: since the method remove_intial_state_contraints() modifies the variables of condensed_program, I have to call remove_linear_terms() again!
+        Temporary fix: since the method remove_intial_state_contraints() modifies the variables of condensed_program, I have to call remove_linear_terms() again...
         """
         self.condensed_program.remove_linear_terms()
         mpqp_solution = MPQPSolver(self.condensed_program)
@@ -376,13 +370,13 @@ class MPCHybridController:
         return
 
     def _MIP_parameters(self):
-        self._model.setParam('OutputFlag', False)
-        time_limit = 600.
-        self._model.setParam('TimeLimit', time_limit)
-        self._model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
-        self._model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
-        self._model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
-        self._model.setParam(grb.GRB.Param.MIPGap, 1.e-9)
+        self._model.setParam('OutputFlag', True)
+        # time_limit = 6000.
+        # self._model.setParam('TimeLimit', time_limit)
+        # self._model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
+        # self._model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
+        # self._model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
+        self._model.setParam(grb.GRB.Param.MIPGap, 0.1)
         return
 
     def feedforward(self, x0, u_ws=None, x_ws=None, ss_ws=None):
@@ -489,355 +483,30 @@ class MPCHybridController:
         # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
         return prog
 
-
-"""
-to do: np.save can't save the gurobi model, hence the library. find a way to save only the necessary data to the library but be able then to upload it and use maybe also sample again...
-"""
-
-
-
-class FeasibleSetLibrary:
-    """
-    library[switching_sequence]
-    - program
-    - feasible_set
-    """
-
-    def __init__(self, controller):
-        self.controller = controller
-        self.library = dict()
-        return
-
-    def sample_policy(self, n_samples, check_sample_function=None):
-        n_rejected = 0
-        n_included = 0
-        n_new_ss = 0
-        n_unfeasible = 0
-        for i in range(n_samples):
-            try:
-                print('Sample ' + str(i) + ': ')
-                x = self.random_sample(check_sample_function)
-                if not self.sampling_rejection(x):
-                    print('solving MIQP... '),
-                    tic = time.time()
-                    ss = self.controller.feedforward(x)[2]
-                    print('solution found in ' + str(time.time()-tic) + ' s.')
-                    if not any(np.isnan(ss)):
-                        if self.library.has_key(ss):
-                            n_included += 1
-                            print('included.')
-                            print('including sample in inner approximation... '),
-                            tic = time.time()
-                            self.library[ss]['feasible_set'].include_point(x)
-                            print('sample included in ' + str(time.time()-tic) + ' s.')
-                        else:
-                            n_new_ss += 1
-                            print('new switching sequence ' + str(ss) + '.')
-                            self.library[ss] = dict()
-                            print('condensing QP... '),
-                            tic = time.time()
-                            prog = self.controller.condense_program(ss)
-                            print('QP condensed in ' + str(time.time()-tic) + ' s.')
-                            self.library[ss]['program'] = prog
-                            lhs = np.hstack((-prog.C_x, prog.C_u))
-                            rhs = prog.C
-                            residual_dimensions = range(prog.C_x.shape[1])
-                            print('constructing inner simplex... '),
-                            tic = time.time()
-                            feasible_set = PolytopeProjectionInnerApproximation(lhs, rhs, residual_dimensions)
-                            print('inner simplex constructed in ' + str(time.time()-tic) + ' s.')
-                            print('including sample in inner approximation... '),
-                            tic = time.time()
-                            feasible_set.include_point(x)
-                            print('sample included in ' + str(time.time()-tic) + ' s.')
-                            self.library[ss]['feasible_set'] = feasible_set
-                    else:
-                        n_unfeasible += 1
-                        print('unfeasible.')
-                else:
-                    n_rejected += 1
-                    print('rejected.')
-            except ValueError:
-                print 'Something went wrong with this sample...'
-                pass
-        print('\nTotal number of samples: ' + str(n_samples) + ', switching sequences found: ' + str(n_new_ss) + ', included samples: ' + str(n_included) + ', rejected samples: ' + str(n_rejected) + ', unfeasible samples: ' + str(n_unfeasible) + '.')
-        return
-
-    def random_sample(self, check_sample_function=None):
-        if check_sample_function is None:
-            x = np.random.rand(self.controller.sys.n_x, 1)
-            x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
-        else:
-            is_inside = False
-            while not is_inside:
-                x = np.random.rand(self.controller.sys.n_x,1)
-                x = np.multiply(x, (self.controller.sys.x_max - self.controller.sys.x_min)) + self.controller.sys.x_min
-                is_inside = check_sample_function(x)
-        return x
-
-    def sampling_rejection(self, x):
-        for ss_value in self.library.values():
-            if ss_value['feasible_set'].applies_to(x):
-                return True
-        return False
-
-    def get_feasible_switching_sequences(self, x):
-        return [ss for ss, ss_values in self.library.items() if ss_values['feasible_set'].applies_to(x)]
-
-    def feedforward(self, x, given_ss=None, max_qp= None):
-        V_list = []
-        V_star = np.nan
-        u_star = [np.full((self.controller.sys.n_u, 1), np.nan) for i in range(self.controller.N)]
-        ss_star = [np.nan]*self.controller.N
-        fss = self.get_feasible_switching_sequences(x)
-        # print 'number of feasible QPs:', len(fss)
-        if given_ss is not None:
-            fss.insert(0, given_ss)
-        if not fss:
-            return u_star, V_star, ss_star, V_list
-        else:
-            if max_qp is not None and max_qp < len(fss):
-                fss = fss[:max_qp]
-                print 'number of QPs limited to', max_qp
-            for ss in fss:
-                u, V = self.library[ss]['program'].solve(x)
-                V_list.append(V)
-                if V < V_star or (np.isnan(V_star) and not np.isnan(V)):
-                    V_star = V
-                    u_star = [u[i*self.controller.sys.n_u:(i+1)*self.controller.sys.n_u,:] for i in range(self.controller.N)]
-                    ss_star = ss
-        return u_star, V_star, ss_star, V_list
-
-    def feedback(self, x, given_ss=None, max_qp= None):
-        u_star, V_star, ss_star = self.feedforward(x, given_ss, max_qp)[0:-1]
-        return u_star[0], ss_star
-
-    def add_shifted_switching_sequences(self, terminal_domain):
-        for ss in self.library.keys():
-            for shifted_ss in self.shift_switching_sequence(ss, terminal_domain):
-                if not self.library.has_key(shifted_ss):
-                    self.library[shifted_ss] = dict()
-                    self.library[shifted_ss]['program'] = self.controller.condense_program(shifted_ss)
-                    self.library[shifted_ss]['feasible_set'] = EmptyFeasibleSet()
-
-    @staticmethod
-    def shift_switching_sequence(ss, terminal_domain):
-        return [ss[i:] + (terminal_domain,)*i for i in range(1,len(ss))]
-
-    def plot_partition(self):
-        for ss_value in self.library.values():
-            color = np.random.rand(3,1)
-            fs = ss_value['feasible_set']
-            if not fs.empty:
-                p = Polytope(fs.hull.A, fs.hull.b)
-                p.assemble()#redundant=False, vertices=fs.hull.points)
-                p.plot(facecolor=color, alpha=.5)
-        return
-
-    def save(self, name):
-        self.controller._model = None
-        self.controller._u_np = None
-        self.controller._x_np = None
-        self.controller._z = None
-        self.controller._d = None
-        np.save(name, self)
-        self.controller._MIP_model()
-        return
-
-def load_library(name):
-    library = np.load(name + '.npy').item()
-    library.controller._MIP_model()
-    return library
+def canonical_reachability_decomposition(A, B):
+    n = A.shape[0]
+    R = np.hstack([np.linalg.matrix_power(A, i).dot(B) for i in range(n)])
+    n_R = np.linalg.matrix_rank(R)
+    T_R = rangespace_basis(R)
+    T_N = nullspace_basis(R.T)
+    T = np.hstack((T_R, T_N))
+    T_inv = np.linalg.inv(T)
+    A_canonical = T_inv.dot(A).dot(T)
+    B_canonical = T_inv.dot(B)
+    A_RR = A_canonical[:n_R,:n_R]
+    A_RN = A_canonical[:n_R,n_R:]
+    A_NR = A_canonical[n_R:,:n_R]
+    A_NN = A_canonical[n_R:,n_R:]
+    B_R = B_canonical[:n_R,:]
+    B_N = B_canonical[n_R:,:]
+    return {
+    'n_R': n_R,
+    'T': T, 'T_R': T_R, 'T_N':T_N,
+    'A': A_canonical, 'A_RR': A_RR, 'A_RN': A_RN, 'A_NR': A_NR, 'A_NN': A_NN,
+    'B': B_canonical, 'B_R': B_R, 'B_N': B_N
+    }
 
 
-
-
-class EmptyFeasibleSet:
-
-    def __init__(self):
-        self.empty = True
-        return
-
-    def applies_to(self, x):
-        return False
-
-
-class ParametricLP:
-
-    def __init__(self, F_u, F_x, F, C_u, C_x, C):
-        """
-        LP in the form:
-        min  \sum_i | (F_u u + F_x x + F)_i |
-        s.t. C_u u <= C_x x + C
-        """
-        self.F_u = F_u
-        self.F_x = F_x
-        self.F = F
-        self.C_u = C_u
-        self.C_x = C_x
-        self.C = C
-        self.add_slack_variables()
-        return
-
-    def add_slack_variables(self):
-        """
-        Reformulates the LP as:
-        min f^T z
-        s.t. A z <= B x + c
-        """
-        n_slack = self.F.shape[0]
-        n_u = self.F_u.shape[1]
-        self.f = np.vstack((
-            np.zeros((n_u,1)),
-            np.ones((n_slack,1))
-            ))
-        self.A = np.vstack((
-            np.hstack((self.C_u, np.zeros((self.C_u.shape[0], n_slack)))),
-            np.hstack((self.F_u, -np.eye(n_slack))),
-            np.hstack((-self.F_u, -np.eye(n_slack)))
-            ))
-        self.B = np.vstack((self.C_x, -self.F_x, self.F_x))
-        self.c = np.vstack((self.C, -self.F, self.F))
-        self.n_var = n_u + n_slack
-        self.n_cons = self.A.shape[0]
-        return
-
-    def solve(self, x0, u_length=None):
-        x0 = np.reshape(x0, (x0.shape[0], 1))
-        sol = linear_program(self.f, self.A, self.B.dot(x0)+self.c)
-        u_star = sol.argmin[0:self.F_u.shape[1]]
-        if u_length is not None:
-            if not float(u_star.shape[0]/u_length).is_integer():
-                raise ValueError('Uncoherent dimension of the input u_length.')
-            u_star = [u_star[i*u_length:(i+1)*u_length,:] for i in range(u_star.shape[0]/u_length)]
-        return u_star, sol.min
-
-
-class ParametricQP:
-
-    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):
-        """
-        Multiparametric QP in the form:
-        min  .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
-        s.t. C_u u <= C_x x + C
-        """
-        self.F_uu = F_uu
-        self.F_xx = F_xx
-        self.F_xu = F_xu
-        self.F_u = F_u
-        self.F_x = F_x
-        self.F = F
-        self.C_u = C_u
-        self.C_x = C_x
-        self.C = C
-        self.remove_linear_terms()
-        # self._feasible_set = None
-        return
-
-    def solve(self, x0, u_length=None):
-        x0 = np.reshape(x0, (x0.shape[0], 1))
-        H = self.F_uu
-        f = x0.T.dot(self.F_xu) + self.F_u.T
-        A = self.C_u
-        b = self.C + self.C_x.dot(x0)
-        u_star, cost = quadratic_program(H, f, A, b)
-        cost += .5*x0.T.dot(self.F_xx).dot(x0) + self.F_x.T.dot(x0) + self.F
-        if u_length is not None:
-            if not float(u_star.shape[0]/u_length).is_integer():
-                raise ValueError('Uncoherent dimension of the input u_length.')
-            u_star = [u_star[i*u_length:(i+1)*u_length,:] for i in range(u_star.shape[0]/u_length)]
-        return u_star, cost[0,0]
-
-    def get_active_set(self, x, u, tol=1.e-6):
-        u = np.vstack(u)
-        return tuple(np.where((self.C_u.dot(u) - self.C - self.C_x.dot(x)) > -tol)[0])
-
-    def remove_linear_terms(self):
-        """
-        Applies the change of variables z = u + F_uu^-1 (F_xu' x + F_u')
-        that puts the cost function in the form
-        V = 1/2 z' H z + 1/2 x' F_xx_q x + F_x_q' x + F_q
-        and the constraints in the form:
-        G u <= W + S x
-        """
-        self.H_inv = np.linalg.inv(self.F_uu)
-        self.H = self.F_uu
-        self.F_xx_q = self.F_xx - self.F_xu.dot(self.H_inv).dot(self.F_xu.T)
-        self.F_x_q = self.F_x - self.F_xu.dot(self.H_inv).dot(self.F_u)
-        self.F_q = self.F - .5*self.F_u.T.dot(self.H_inv).dot(self.F_u)
-        self.G = self.C_u
-        self.S = self.C_x + self.C_u.dot(self.H_inv).dot(self.F_xu.T)
-        self.W = self.C + self.C_u.dot(self.H_inv).dot(self.F_u)
-        return
-
-    # @property
-    # def feasible_set(self):
-    #     if self._feasible_set is None:
-    #         augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
-    #         augmented_polytope.assemble()
-    #         if augmented_polytope.empty:
-    #             return None
-    #         self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
-    #     return self._feasible_set
-
-
-    def get_z_sensitivity(self, active_set):
-        # clean active set
-        G_A = self.G[active_set,:]
-        if active_set and np.linalg.matrix_rank(G_A) < G_A.shape[0]:
-            lir = linearly_independent_rows(G_A)
-            active_set = [active_set[i] for i in lir]
-
-        # multipliers explicit solution
-        inactive_set = sorted(list(set(range(self.C.shape[0])) - set(active_set)))
-        [G_A, W_A, S_A] = [self.G[active_set,:], self.W[active_set,:], self.S[active_set,:]]
-        [G_I, W_I, S_I] = [self.G[inactive_set,:], self.W[inactive_set,:], self.S[inactive_set,:]]
-        H_A = np.linalg.inv(G_A.dot(self.H_inv).dot(G_A.T))
-        lambda_A_offset = - H_A.dot(W_A)
-        lambda_A_linear = - H_A.dot(S_A)
-
-        # primal variables explicit solution
-        z_offset = - self.H_inv.dot(G_A.T.dot(lambda_A_offset))
-        z_linear = - self.H_inv.dot(G_A.T.dot(lambda_A_linear))
-        return z_offset, z_linear
-
-    def get_u_sensitivity(self, active_set):
-        z_offset, z_linear = self.get_z_sensitivity(active_set)
-
-        # primal original variables explicit solution
-        u_offset = z_offset - self.H_inv.dot(self.F_u)
-        u_linear = z_linear - self.H_inv.dot(self.F_xu.T)
-        return u_offset, u_linear
-
-    def get_cost_sensitivity(self, x_list, active_set):
-        z_offset, z_linear = self.get_z_sensitivity(active_set)
-
-        # optimal value function explicit solution: V_star = .5 x' V_quadratic x + V_linear x + V_offset
-        V_quadratic = z_linear.T.dot(self.H).dot(z_linear) + self.F_xx_q
-        V_linear = z_offset.T.dot(self.H).dot(z_linear) + self.F_x_q.T
-        V_offset = self.F_q + .5*z_offset.T.dot(self.H).dot(z_offset)
-
-        # tangent approximation
-        plane_list = []
-        for x in x_list:
-            A = x.T.dot(V_quadratic) + V_linear
-            b = -.5*x.T.dot(V_quadratic).dot(x) + V_offset
-            plane_list.append([A, b])
-
-        return plane_list
-
-    def solve_free_x(self):
-        H = np.vstack((
-            np.hstack((self.F_uu, self.F_xu.T)),
-            np.hstack((self.F_xu, self.F_xx))
-            ))
-        f = np.vstack((self.F_u, self.F_x))
-        A = np.hstack((self.C_u, -self.C_x))
-        b = self.C
-        z_star, cost = quadratic_program(H, f, A, b)
-        u_star = z_star[0:self.F_uu.shape[0],:]
-        x_star = z_star[self.F_uu.shape[0]:,:]
-        return u_star, x_star, cost
 
 ### AUXILIARY FUNCTIONS
 
@@ -850,19 +519,6 @@ def suppress_stdout():
             yield
         finally:
             sys.stdout = old_stdout
-
-def linearly_independent_rows(A, tol=1.e-6):
-    R = linalg.qr(A.T)[1]
-    R_diag = np.abs(np.diag(R))
-    return list(np.where(R_diag > tol)[0])
-
-def clean_matrix(M, tol=1.e-7):
-    M_clean = copy(M)
-    for i in range(M.shape[0]):
-        for j in range(M.shape[1]):
-            if np.abs(M[i,j]) < tol:
-                M_clean[i,j] = 0.
-    return M_clean
 
 def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
     tic = time.time()
@@ -938,7 +594,6 @@ def remove_initial_state_constraints(prog, tol=1e-10):
     prog.C = np.delete(prog.C,intial_state_contraints, 0)
     prog.remove_linear_terms()
     return prog
-
 
 def explict_solution_from_hybrid_condensing(prog, tol=1e-10):
     porg = remove_initial_state_constraints(prog)

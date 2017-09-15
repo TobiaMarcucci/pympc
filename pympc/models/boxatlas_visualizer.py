@@ -16,15 +16,26 @@ from pyhull.halfspace import Halfspace, HalfspaceIntersection
 
 class BoxAtlasVisualizer():
 
-    def __init__(self, x_nominal, walls, limbs):
-        self.x_nominal = x_nominal
+    def __init__(self, walls, limbs):
         self.walls = walls
         self.limbs = limbs
         self.vis = vc.Visualizer()['box_altas']
-        vertical_translation = - (x_nominal['lf'][1,0] + x_nominal['rf'][1,0]) / 2.
-        self.vis.settransform(vc.transformations.translation_matrix([0.,0.,vertical_translation]))
+        self._translate_visualizer()
         self._visualize_environment()
         self._initialize_body()
+        return
+
+    def _translate_visualizer(self):
+        if self.limbs['moving'].has_key('lf'):
+            h_lf = self.limbs['moving']['lf'].nominal_position[1,0]
+        elif self.limbs['fixed'].has_key('lf'):
+            h_lf = self.limbs['fixed']['lf'].position[1,0]
+        if self.limbs['moving'].has_key('rf'):
+            h_rf = self.limbs['moving']['rf'].nominal_position[1,0]
+        elif self.limbs['fixed'].has_key('rf'):
+            h_rf = self.limbs['fixed']['rf'].position[1,0]
+        vertical_translation = - (h_lf + h_rf) / 2.
+        self.vis.settransform(vc.transformations.translation_matrix([0.,0.,vertical_translation]))
         return
 
     def _visualize_environment(self, depth=[-.3,.3]):
@@ -79,7 +90,7 @@ class BoxAtlasVisualizer():
                     )
             )
 
-        for limb in self.limbs:
+        for limb in self.limbs['moving'].keys() + self.limbs['fixed'].keys():
             self.vis[limb].setgeometry(
                 vc.GeometryData(
                     vc.Sphere(radius = .05),
@@ -89,36 +100,16 @@ class BoxAtlasVisualizer():
         return
 
     def visualize(self, x):
-        translation = [
-        0.,
-        x['b'][0,0] + self.x_nominal['b'][0,0],
-        x['b'][1,0] + self.x_nominal['b'][1,0]
-        ]
+        translation = [0.] + x['b'].flatten().tolist()
         self.vis['b'].settransform(transformations.translation_matrix(translation))
-        for limb in self.limbs:
-            translation = [
-            0.,
-            x[limb][0,0] + self.x_nominal[limb][0,0],
-            x[limb][1,0] + self.x_nominal[limb][1,0]
-            ]
-            self.vis[limb].settransform(transformations.translation_matrix(translation))
+        for limb_key, limb_value in self.limbs['moving'].items():
+            translation = x[limb_key] + limb_value.nominal_position
+            translation = [0.] + translation.flatten().tolist()
+            self.vis[limb_key].settransform(transformations.translation_matrix(translation))
+        for limb_key, limb_value in self.limbs['fixed'].items():
+            translation = [0.] + limb_value.position.flatten().tolist()
+            self.vis[limb_key].settransform(transformations.translation_matrix(translation))
         return
-
-    # def visualize(self, x):
-    #     translation = [
-    #     0.,
-    #     x['qbx'] + self.x_nominal['qbx'],
-    #     x['qby'] + self.x_nominal['qby']
-    #     ]
-    #     self.vis['b'].settransform(transformations.translation_matrix(translation))
-    #     for limb in self.limbs:
-    #         translation = [
-    #         0.,
-    #         x['q' + limb +'x'] + self.x_nominal['q' + limb +'x'],
-    #         x['q' + limb +'y'] + self.x_nominal['q' + limb +'y']
-    #         ]
-    #         self.vis[limb].settransform(transformations.translation_matrix(translation))
-    #     return
 
 class Mesh(vc.BaseGeometry):
     __slots__ = ['vertices', 'triangular_faces']

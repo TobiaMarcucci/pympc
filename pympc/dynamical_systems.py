@@ -3,6 +3,8 @@ import scipy.linalg as linalg
 import matplotlib.pyplot as plt
 from optimization.pnnls import linear_program
 from geometry.polytope import Polytope
+from algebra import rangespace_basis, nullspace_basis
+
 
 ### CLASSES OF DYNAMICAL SYSTEMS
 
@@ -259,7 +261,7 @@ def zero_order_hold(A, B, c, h):
     n_x = np.shape(A)[0]
     n_u = np.shape(B)[1]
 
-    # zero order hold (see Bicchi - Fondamenti di Automatica 2)
+    # zero order hold
     mat_c = np.zeros((n_x+n_u+1, n_x+n_u+1))
     mat_c[0:n_x,:] = np.hstack((A, B, c))
     mat_d = linalg.expm(mat_c*h)
@@ -287,24 +289,12 @@ def semi_implicit_euler(A_q, A_v, B_v, c_v, h):
     c_d = np.vstack(((h**2)*c_v, h*c_v))
     return A_d, B_d, c_d
 
-
 def dare(A, B, Q, R):
     # cost to go
     P = linalg.solve_discrete_are(A, B, Q, R)
     # optimal gain
     K = - linalg.inv(B.T.dot(P).dot(B)+R).dot(B.T).dot(P).dot(A)
     return P, K
-
-def moas_closed_loop_from_orthogonal_domains(A, B, K, X, U):
-    # closed loop dynamics
-    A_cl = A + B.dot(K)
-    # constraints for the maximum output admissible set
-    lhs_cl = np.vstack((X.lhs_min, U.lhs_min.dot(K)))
-    rhs_cl = np.vstack((X.rhs_min, U.rhs_min))
-    X_cl = Polytope(lhs_cl, rhs_cl)
-    X_cl.assemble()
-    # compute maximum output admissible set
-    return moas(A_cl, X_cl)
 
 def moas_closed_loop(A, B, K, D):
     # closed loop dynamics
@@ -316,6 +306,13 @@ def moas_closed_loop(A, B, K, D):
     X_cl.assemble()
     # compute maximum output admissible set
     return moas(A_cl, X_cl)
+
+def moas_closed_loop_from_orthogonal_domains(A, B, K, X, U):
+    lhs = linalg.block_diag(X.lhs_min, U.lhs_min)
+    rhs = np.vstack((X.rhs_min, U.rhs_min))
+    D = Polytope(lhs, rhs)
+    D.assemble()
+    return moas_closed_loop(A, B, K, D)
 
 def moas(A, X):
     """

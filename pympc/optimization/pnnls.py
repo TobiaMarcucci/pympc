@@ -42,14 +42,11 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
     min  f^T x
     s.t. A x <= b
          C x  = d
-         x_lb <= x <= x_ub
 
     OUTPUTS:
         x_star: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
         V_star: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
     """
-
-
 
     # empty inequalities if not provided
     n_x = f.shape[0]
@@ -122,13 +119,12 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
 
     return sol
 
-def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub=None, tol=1.e-7):
+def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, tol=1.e-7):
     """
     Solves the strictly convex (H > 0) quadratic program
     min  .5 x^T H x + f^T x
     s.t. A x <= b
          C x  = d
-         x_lb <= x <= x_ub
 
     OUTPUTS:
         x_star: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
