@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.linalg as linalg
 import matplotlib.pyplot as plt
-from optimization.pnnls import linear_program
+from optimization.gurobi import linear_program
 from geometry.polytope import Polytope
 from algebra import rangespace_basis, nullspace_basis
 
@@ -332,7 +332,7 @@ def moas(A, X):
         raise ValueError('Cannot compute MOAS for unstable systems')
 
     # Gilber and Tan algorithm
-    print 'Computation of MOAS started...',
+    print('Computation of Maximal Invariant Constraint-Admissible Set started.')
     [n_constraints, n_variables] = X.lhs_min.shape
     t = 0
     convergence = False
@@ -352,16 +352,17 @@ def moas(A, X):
             J_sol.append(-sol.min - X.rhs_min[i])
 
         # convergence check
+        print 'Determinedness index: ' + str(t) + ', Convergence index: ' + str(np.max(J_sol)) + ', Number of facets: ' + str(cons_lhs.shape[0]) + '.    \r',
         if np.max(J_sol) < 0:
             convergence = True
         else:
             t += 1
 
     # define polytope
-    print 'MOAS found.'
-    print 'MOAS facets are ' + str(cons_lhs.shape[0]) + ', removing redundant ones...',
+    print '\nMaximal Invariant Constraint-Admissible Set found.'
+    print 'Removing redundant facets ...',
     moas = Polytope(cons_lhs, cons_rhs)
     moas.assemble()
-    print 'redundant factes removed, MOAS facets are ' + str(moas.lhs_min.shape[0]) + '.'
+    print 'minimal facets are ' + str(moas.lhs_min.shape[0]) + '.'
 
     return moas

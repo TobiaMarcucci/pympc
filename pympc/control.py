@@ -245,10 +245,8 @@ class MPCHybridController:
         return
 
     def _MIP_variables(self):
-        x = self._add_real_variable([self.N+1, self.sys.n_x], name='x')
-        u = self._add_real_variable([self.N, self.sys.n_u], name='u')
-        self._x_np = [np.array([[x[k,i]] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
-        self._u_np = [np.array([[u[k,i]] for i in range(self.sys.n_u)]) for k in range(self.N)]
+        self._x = self._add_real_variable([self.N+1, self.sys.n_x], name='x')
+        self._u = self._add_real_variable([self.N, self.sys.n_u], name='u')
         self._z = self._add_real_variable([self.N, self.sys.n_sys, self.sys.n_x], name='z')
         self._d = self._model.addVars(self.N, self.sys.n_sys, vtype=grb.GRB.BINARY, name='d')
         self._model.update()
@@ -261,6 +259,26 @@ class MPCHybridController:
         var = self._model.addVars(*dimensions, lb=lb_var, name=name, **kwargs)
         return var
 
+    @staticmethod
+    def _linear_term(M, x, k, tol=1.e-9):
+        expr_list = []
+        for i in range(M.shape[0]):
+            expr = grb.LinExpr()
+            for j in range(M.shape[1]):
+                if np.abs(M[i,j]) > tol:
+                    expr.add(M[i,j] * x[k,j])
+            expr_list.append(expr)
+        return np.vstack(expr_list)
+
+    @staticmethod
+    def _quadratic_term(M, x, k, tol=1.e-9):
+        expr = grb.QuadExpr()
+        for i in range(M.shape[0]):
+            for j in range(M.shape[1]):
+                if np.abs(M[i,j]) > tol:
+                    expr.add(x[k,i] * M[i,j] * x[k,j])
+        return expr
+
     def _MIP_objective(self):
         if self.objective_norm == 'one':
             self._MILP_objective()
@@ -271,41 +289,36 @@ class MPCHybridController:
         return
 
     def _MILP_objective(self):
-        Q = clean_matrix(self.Q)
-        R = clean_matrix(self.R)
-        P = clean_matrix(self.P)
         self._phi = self._model.addVars(self.N+1, self.sys.n_x, name='phi')
         self._psi = self._model.addVars(self.N, self.sys.n_u, name='psi')
         self._model.update()
-        V = 0.
+        V = grb.LinExpr()
         for k in range(self.N+1):
             for i in range(self.sys.n_x):
-                V += self._phi[k,i]
+                V.add(self._phi[k,i])
         for k in range(self.N):
             for i in range(self.sys.n_u):
-                V += self._psi[k,i]
+                V.add(self._psi[k,i])
         self._model.setObjective(V)
         for k in range(self.N):
             for i in range(self.sys.n_x):
-                self._model.addConstr(self._phi[k,i] >= Q[i,:].dot(self._x_np[k])[0])
-                self._model.addConstr(self._phi[k,i] >= - Q[i,:].dot(self._x_np[k])[0])
+                self._model.addConstr(self._phi[k,i] >= self._linear_term(self.Q[i:i+1,:], self._x, k)[0,0])
+                self._model.addConstr(self._phi[k,i] >= - self._linear_term(self.Q[i:i+1,:], self._x, k)[0,0])
             for i in range(self.sys.n_u):
-                self._model.addConstr(self._psi[k,i] >= R[i,:].dot(self._u_np[k])[0])
-                self._model.addConstr(self._psi[k,i] >= - R[i,:].dot(self._u_np[k])[0])
+                self._model.addConstr(self._psi[k,i] >= self._linear_term(self.R[i:i+1,:], self._u, k)[0,0])
+                self._model.addConstr(self._psi[k,i] >= - self._linear_term(self.R[i:i+1,:], self._u, k)[0,0])
         for i in range(self.sys.n_x):
-            self._model.addConstr(self._phi[self.N,i] >= P[i,:].dot(self._x_np[self.N])[0])
-            self._model.addConstr(self._phi[self.N,i] >= - P[i,:].dot(self._x_np[self.N])[0])
+            self._model.addConstr(self._phi[self.N,i] >= self._linear_term(self.P[i:i+1,:], self._x, self.N)[0,0])
+            self._model.addConstr(self._phi[self.N,i] >= - self._linear_term(self.P[i:i+1,:], self._x, self.N)[0,0])
         return
 
     def _MIQP_objective(self):
-        Q = clean_matrix(self.Q)
-        R = clean_matrix(self.R)
-        P = clean_matrix(self.P)
-        V = 0.
+        V = grb.QuadExpr()
         for k in range(self.N):
-            V += self._x_np[k].T.dot(Q).dot(self._x_np[k]) + self._u_np[k].T.dot(R).dot(self._u_np[k])
-        V += self._x_np[self.N].T.dot(P).dot(self._x_np[self.N])
-        self._model.setObjective(V[0,0])
+            V.add(self._quadratic_term(self.Q, self._x, k))
+            V.add(self._quadratic_term(self.R, self._u, k))
+        V.add(self._quadratic_term(self.P, self._x, self.N))
+        self._model.setObjective(V)
         return
 
     def _MIP_constraints(self):
@@ -317,31 +330,33 @@ class MPCHybridController:
 
     def _disjunction_modes(self):
         for k in range(self.N):
-            #self._model.addConstr(np.sum([self._d[k,i] for i in range(self.sys.n_sys)]) == 1.)
             self._model.addSOS(grb.GRB.SOS_TYPE1, [self._d[k,i] for i in range(self.sys.n_sys)], [1]*self.sys.n_sys)
         return
 
     def _constraint_domains(self):
+        # clean bigMs from almost zero terms
         M_domains = [[clean_matrix(self._M_domains[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
         for i in range(self.sys.n_sys):
-            lhs = clean_matrix(self.sys.domains[i].lhs_min)
-            rhs = clean_matrix(self.sys.domains[i].rhs_min)
+            lhs = self.sys.domains[i].lhs_min
+            rhs = self.sys.domains[i].rhs_min
             for k in range(self.N):
-                expr_xu = lhs.dot(np.vstack((self._x_np[k], self._u_np[k]))) - rhs
-                expr_M = np.sum([M_domains[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
-                expr = expr_xu - expr_M
-                self._model.addConstrs((expr[j][0] <= 0. for j in range(len(expr))))
+                expr = self._linear_term(lhs[:,:self.sys.n_x], self._x, k)
+                expr = expr + self._linear_term(lhs[:,self.sys.n_x:], self._u, k)
+                expr = expr - np.sum([M_domains[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
+                expr = expr - rhs
+                self._model.addConstrs((expr[j,0] <= 0. for j in range(lhs.shape[0])))
         return
 
     def _constraint_dynamics(self):
+        # clean bigMs from almost zero terms
         M_dynamics = [[clean_matrix(self._M_dynamics[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
         m_dynamics = [[clean_matrix(self._m_dynamics[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
         for k in range(self.N):
             for j in range(self.sys.n_x):
-                expr = 0.
+                expr = grb.LinExpr()
                 for i in range(self.sys.n_sys):
-                    expr += self._z[k,i,j]
-                self._model.addConstr(self._x_np[k+1][j,0] == expr)
+                    expr.add(self._z[k,i,j])
+                self._model.addConstr(self._x[k+1,j] == expr)
         for k in range(self.N):
             for i in range(self.sys.n_sys):
                 expr_M = M_dynamics[i][i]*self._d[k,i]
@@ -350,11 +365,10 @@ class MPCHybridController:
                     self._model.addConstr(self._z[k,i,j] <= expr_M[j,0])
                     self._model.addConstr(self._z[k,i,j] >= expr_m[j,0])
         for i in range(self.sys.n_sys):
-            A = clean_matrix(self.sys.affine_systems[i].A)
-            B = clean_matrix(self.sys.affine_systems[i].B)
-            c = clean_matrix(self.sys.affine_systems[i].c)
             for k in range(self.N):
-                expr = A.dot(self._x_np[k]) + B.dot(self._u_np[k]) + c
+                expr = self._linear_term(self.sys.affine_systems[i].A, self._x, k)
+                expr = expr + self._linear_term(self.sys.affine_systems[i].B, self._u, k)
+                expr = expr + self.sys.affine_systems[i].c
                 expr_M = expr - np.sum([M_dynamics[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
                 expr_m = expr - np.sum([m_dynamics[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
                 for j in range(self.sys.n_x):
@@ -363,9 +377,7 @@ class MPCHybridController:
         return
 
     def _terminal_contraint(self):
-        lhs = clean_matrix(self.X_N.lhs_min) 
-        rhs = clean_matrix(self.X_N.rhs_min) 
-        expr = lhs.dot(self._x_np[self.N]) - rhs
+        expr = self._linear_term(self.X_N.lhs_min, self._x, self.N) - self.X_N.rhs_min
         self._model.addConstrs((expr[i,0] <= 0. for i in range(len(self.X_N.minimal_facets))))
         return
 
@@ -376,7 +388,7 @@ class MPCHybridController:
         # self._model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
         # self._model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
         # self._model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
-        self._model.setParam(grb.GRB.Param.MIPGap, 0.1)
+        self._model.setParam(grb.GRB.Param.MIPGap, 1.e-6)
         return
 
     def feedforward(self, x0, u_ws=None, x_ws=None, ss_ws=None):
@@ -385,7 +397,7 @@ class MPCHybridController:
         for i in range(self.sys.n_x):
             if self._model.getConstrByName('intial_condition_' + str(i)) is not None:
                 self._model.remove(self._model.getConstrByName('intial_condition_' + str(i)))
-            self._model.addConstr(self._x_np[0][i,0] == x0[i,0], name='intial_condition_' + str(i))
+            self._model.addConstr(self._x[0,i] == x0[i,0], name='intial_condition_' + str(i))
 
         # warm start
         if u_ws is not None:
@@ -408,13 +420,13 @@ class MPCHybridController:
     def _warm_start_input(self, u_ws):
         for i in range(self.sys.n_u):
             for k in range(self.N):
-                self._u_np[k][i,0].setAttr('Start', u_ws[k][i,0])
+                self._u[k,i].setAttr('Start', u_ws[k][i,0])
         return
 
     def _warm_start_state(self, x_ws):
         for i in range(self.sys.n_x):
             for k in range(self.N+1):
-                self._x_np[k][i,0].setAttr('Start', x_ws[k][i,0])
+                self._x[k,i].setAttr('Start', x_ws[k][i,0])
         return
 
     def _warm_start_modes(self, ss_ws):
@@ -449,10 +461,10 @@ class MPCHybridController:
         return
 
     def _return_solution(self):
-        if self._model.status == grb.GRB.Status.OPTIMAL:
+        if self._model.status == grb.GRB.Status.OPTIMAL or self._model.status == grb.GRB.Status.INTERRUPTED:
             cost = self._model.objVal
-            u_feedforward = [np.array([[self._u_np[k][i,0].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
-            x_trajectory = [np.array([[self._x_np[k][i,0].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
+            u_feedforward = [np.array([[self._u[k,i].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
+            x_trajectory = [np.array([[self._x[k,i].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
             d_star = [np.array([[self._d[k,i].x] for i in range(self.sys.n_sys)]) for k in range(self.N)]
             switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
         else:

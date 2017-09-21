@@ -76,6 +76,8 @@ class BoxAtlas():
         self.pwa_system = DTPWASystem(affine_systems, domains)
         self.nominal_system, self.nominal_domain = self._extract_nominal_configuration()
         self._check_equilibrium_point()
+        self.Q = self._state_cost_hessian()
+        self.R = self._input_cost_hessian()
         self._visualizer = self._initialize_visualizer()
         return
 
@@ -89,8 +91,8 @@ class BoxAtlas():
         for limb in self.limbs['moving'].values():
             x_equilibrium = np.vstack((x_equilibrium, limb.nominal_position))
 
-        # body state (limbs + body position and velocity)
-        x_equilibrium = np.vstack((x_equilibrium, np.zeros((4,1))))
+        # body state: limbs + body position and velocity (linear + angular)
+        x_equilibrium = np.vstack((x_equilibrium, np.zeros((6,1))))
 
         return x_equilibrium
 
@@ -107,6 +109,41 @@ class BoxAtlas():
             u_equilibrium = np.vstack((u_equilibrium, limb.nominal_force))
 
         return u_equilibrium
+
+    def _differentiable_state(self):
+        """
+        Defines a dictionary with the elements of the state using differentiable arrays from the AD package.
+        """
+
+        # moving limbs
+        x_diff = OrderedDict()
+        for limb in self.limbs['moving'].keys():
+            x_diff['q'+limb] = adnumber(np.zeros((2,1)))
+
+        # body
+        x_diff['qb'] = adnumber(np.zeros((2,1)))
+        x_diff['tb'] = adnumber(np.zeros((1,1)))
+        x_diff['vb'] = adnumber(np.zeros((2,1)))
+        x_diff['ob'] = adnumber(np.zeros((1,1)))
+
+        return x_diff
+
+    def _differentiable_input(self):
+        """
+        Defines a dictionary with the elements of the input using differentiable arrays from the AD package.
+        """
+
+        u_diff = OrderedDict()
+
+        # moving limbs
+        for limb in self.limbs['moving'].keys():
+            u_diff['v'+limb] = adnumber(np.zeros((2,1)))
+
+        # fixed limbs
+        for limb in self.limbs['fixed'].keys():
+            u_diff['f'+limb] = adnumber(np.zeros((2,1)))
+
+        return u_diff
 
     def _get_contact_modes(self):
         """
@@ -133,40 +170,6 @@ class BoxAtlas():
             contact_modes.append(mode)
 
         return contact_modes
-
-    def _differentiable_state(self):
-        """
-        Defines a dictionary with the elements of the state using differentiable arrays from the AD package.
-        """
-
-        x_diff = OrderedDict()
-
-        # moving limbs
-        for limb in self.limbs['moving'].keys():
-            x_diff['q'+limb] = adnumber(np.zeros((2,1)))
-
-        # body
-        x_diff['qb'] = adnumber(np.zeros((2,1)))
-        x_diff['vb'] = adnumber(np.zeros((2,1)))
-
-        return x_diff
-
-    def _differentiable_input(self):
-        """
-        Defines a dictionary with the elements of the input using differentiable arrays from the AD package.
-        """
-
-        u_diff = OrderedDict()
-
-        # moving limbs
-        for limb in self.limbs['moving'].keys():
-            u_diff['v'+limb] = adnumber(np.zeros((2,1)))
-
-        # fixed limbs
-        for limb in self.limbs['fixed'].keys():
-            u_diff['f'+limb] = adnumber(np.zeros((2,1)))
-
-        return u_diff
 
     def _get_domains(self):
         """
@@ -209,11 +212,15 @@ class BoxAtlas():
             constraints.append(limb_value.position - self.x_diff['qb'] - boxatlas_parameters.joint_limits[limb_key]['max'])
             constraints.append(boxatlas_parameters.joint_limits[limb_key]['min'] - limb_value.position + self.x_diff['qb'])
 
-        # body
-        constraints.append(self.x_diff['qb'] - boxatlas_parameters.joint_limits['b']['max'])
-        constraints.append(boxatlas_parameters.joint_limits['b']['min'] - self.x_diff['qb'])
-        constraints.append(self.x_diff['vb'] - boxatlas_parameters.velocity_limits['b']['max'])
-        constraints.append(boxatlas_parameters.velocity_limits['b']['min'] - self.x_diff['vb'])
+        # body position
+        pos_b = np.vstack((self.x_diff['qb'], self.x_diff['tb']))
+        constraints.append(pos_b - boxatlas_parameters.joint_limits['b']['max'])
+        constraints.append(boxatlas_parameters.joint_limits['b']['min'] - pos_b)
+
+        # body velocity
+        vel_b = np.vstack((self.x_diff['vb'], self.x_diff['ob']))
+        constraints.append(vel_b - boxatlas_parameters.velocity_limits['b']['max'])
+        constraints.append(boxatlas_parameters.velocity_limits['b']['min'] - vel_b)
 
         return constraints
 
@@ -283,43 +290,140 @@ class BoxAtlas():
         """
         affine_systems = []
         for mode in self.contact_modes:
-            dynamics = self._continuous_time_dynamics(mode)
-            A_ct, B_ct, c_ct = self._matrices_from_linear_expression(dynamics)
-            sys = DTAffineSystem.from_continuous(
-                A_ct,
-                B_ct,
-                c_ct + A_ct.dot(self.x_eq) + B_ct.dot(self.u_eq), # traslates the equilibrium to the origin
-                boxatlas_parameters.sampling_time,
-                boxatlas_parameters.integrator
-                )
+            A_dt, B_dt, c_dt = self._semi_implicit_euler(mode)
+            sys = DTAffineSystem(A_dt, B_dt, c_dt)
             affine_systems.append(sys)
         return affine_systems
 
-    def _continuous_time_dynamics(self, mode):
-        """
-        Returns the right hand side of the dynamics
-        \dot x = f(x, u)
-        where x and u are AD variables and f(.) is a linear function.
-        """
+    def _first_order_dynamics(self):
 
         # position of the moving limbs (controlled in velocity)
-        dynamics = []
+        dynamics_1 = []
         for limb in self.limbs['moving'].keys():
-            dynamics.append(self.u_diff['v'+limb])
+            dynamics_1.append(self.u_diff['v'+limb])
 
-        # position of the body (simple integrator)
-        dynamics.append(self.x_diff['vb'])
+        return np.vstack(dynamics_1)
 
-        # velocity of the body
+    def _second_order_dynamics(self, mode):
+
+        # body linear velocity
+        dynamics_2 = []
         g = np.array([[0.],[-boxatlas_parameters.gravity]])
         v_dot = adnumber(g)
         for limb in self.limbs['moving'].keys():
             v_dot = v_dot + self._force_moving_limb(limb, mode)/boxatlas_parameters.mass
         for limb in self.limbs['fixed'].keys():
             v_dot = v_dot + self._force_fixed_limb(limb)/boxatlas_parameters.mass
-        dynamics.append(v_dot)
+        dynamics_2.append(v_dot)
 
-        return dynamics
+        # body angular velocity
+        o_dot = adnumber(np.zeros((1,1)))
+        for limb_key, limb_value in self.limbs['moving'].items():
+            r_i = limb_value.nominal_position
+            f_i = self._force_moving_limb(limb_key, mode)
+            o_dot = o_dot + cross_product_2d(r_i, f_i)/boxatlas_parameters.moment_of_inertia
+        for limb_key, limb_value in self.limbs['fixed'].items():
+            r_i = limb_value.position
+            f_i = self._force_fixed_limb(limb_key)
+            o_dot = o_dot + cross_product_2d(r_i, f_i)/boxatlas_parameters.moment_of_inertia
+        dynamics_2.append(o_dot)
+
+        return np.vstack(dynamics_2)
+
+    def _semi_implicit_euler(self, mode):
+        """
+        Impements the semi-impict Euler method for the dynamics of boxatlas:
+        \dot  q_l = B_1 u
+        \ddot q_b = A_21 q_l + A_22 q_b + A_23 \dot q_b + B_2 u + c_2
+        First derives the velocity of the body at the next time step
+        v_b (t+1) = v_b (t) + h * \ddot q_b (t),
+        then updates the position as
+        q_b (t+1) = q_b (t) + h * v_b (t+1),
+        the position of the limbs is updated as
+        q_l (t+1) = q_l (t) + h * \dot  q_l (t).
+        This discretization scheme preserves continuity of the PWA dynamics.
+        """
+
+        # update position of the limbs
+        dynamics_1 = self._first_order_dynamics()
+        h = boxatlas_parameters.sampling_time
+        q_l_next =  np.vstack([self.x_diff['q'+limb] for limb in self.limbs['moving'].keys()]) + h*dynamics_1
+
+        # update velocity of the body
+        dynamics_2 = self._second_order_dynamics(mode)
+        v_b_next = np.vstack((self.x_diff['vb'], self.x_diff['ob'])) + h*dynamics_2
+
+        # update position of the body
+        q_b_next = np.vstack((self.x_diff['qb'], self.x_diff['tb'])) + h*v_b_next
+
+        # extract affine-system matrices
+        discrete_dynamics = np.vstack([q_l_next, q_b_next, v_b_next])
+        A_dt, B_dt, c_dt = self._matrices_from_linear_expression(discrete_dynamics)
+
+        # shift the equilibrium to the origin
+        c_dt = (A_dt - np.eye(self.n_x)).dot(self.x_eq) + B_dt.dot(self.u_eq) + c_dt
+
+        return A_dt, B_dt, c_dt
+
+
+    # def _get_affine_systems(self):
+    #     """
+    #     Returns the list of affine systems, one for each mode of the robot.
+    #     """
+    #     affine_systems = []
+    #     for mode in self.contact_modes:
+    #         dynamics = self._continuous_time_dynamics(mode)
+    #         A_ct, B_ct, c_ct = self._matrices_from_linear_expression(dynamics)
+    #         sys = DTAffineSystem.from_continuous(
+    #             A_ct,
+    #             B_ct,
+    #             c_ct + A_ct.dot(self.x_eq) + B_ct.dot(self.u_eq), # traslates the equilibrium to the origin
+    #             boxatlas_parameters.sampling_time,
+    #             boxatlas_parameters.integrator
+    #             )
+    #         affine_systems.append(sys)
+    #     return affine_systems
+
+    # def _continuous_time_dynamics(self, mode):
+    #     """
+    #     Returns the right hand side of the dynamics
+    #     \dot x = f(x, u)
+    #     where x and u are AD variables and f(.) is a linear function.
+    #     """
+
+    #     # position of the moving limbs (controlled in velocity)
+    #     dynamics = []
+    #     for limb in self.limbs['moving'].keys():
+    #         dynamics.append(self.u_diff['v'+limb])
+
+    #     # body linear position
+    #     dynamics.append(self.x_diff['vb'])
+
+    #     # body angular position
+    #     dynamics.append(self.x_diff['ob'])
+
+    #     # body linear velocity
+    #     g = np.array([[0.],[-boxatlas_parameters.gravity]])
+    #     v_dot = adnumber(g)
+    #     for limb in self.limbs['moving'].keys():
+    #         v_dot = v_dot + self._force_moving_limb(limb, mode)/boxatlas_parameters.mass
+    #     for limb in self.limbs['fixed'].keys():
+    #         v_dot = v_dot + self._force_fixed_limb(limb)/boxatlas_parameters.mass
+    #     dynamics.append(v_dot)
+
+    #     # body angular velocity
+    #     o_dot = adnumber(np.zeros((1,1)))
+    #     for limb_key, limb_value in self.limbs['moving'].items():
+    #         r_i = limb_value.nominal_position
+    #         f_i = self._force_moving_limb(limb_key, mode)
+    #         o_dot = o_dot + cross_product_2d(r_i, f_i)/boxatlas_parameters.moment_of_inertia
+    #     for limb_key, limb_value in self.limbs['fixed'].items():
+    #         r_i = limb_value.position
+    #         f_i = self._force_fixed_limb(limb_key)
+    #         o_dot = o_dot + cross_product_2d(r_i, f_i)/boxatlas_parameters.moment_of_inertia
+    #     dynamics.append(o_dot)
+
+    #     return dynamics
 
     def _force_moving_limb(self, limb, mode):
         """
@@ -399,20 +503,40 @@ class BoxAtlas():
             raise ValueError('Given nominal configuration and forces are not an equilibrium state.')
         return
 
-    def penalize_relative_positions(self, Q_rel):
-        """
-        Given the matrix Q_rel which is intended to minimize
-        x_rel' Q_rel x_rel
-        where x_rel = (q_moving_limb - q_body, q_body, v_body), returns the matrix Q such that
-        x_rel' Q_rel x_rel = x' Q x
-        with x = (q_moving_limb, q_body, v_body).
-        """
-        x_rel = [self.x_diff['q'+limb] - self.x_diff['qb'] for limb in self.limbs['moving'].keys()]+[self.x_diff['qb']]+[self.x_diff['vb']]
-        x_rel = np.vstack(x_rel)
+    def _state_cost_hessian(self):
+
+        # position of moving limbs
+        state_cost = 0.
+        for limb in self.limbs['moving'].keys():
+            q_rel = self.x_diff['q'+limb] - self.x_diff['qb']
+            state_cost += boxatlas_parameters.state_cost['q'+limb+'_rel'] * q_rel.T.dot(q_rel)
+
+        # body
+        for label in ['qb', 'tb', 'vb', 'ob']:
+            state_cost += boxatlas_parameters.state_cost[label] * self.x_diff[label].T.dot(self.x_diff[label])
+
+        # get the hessian matrix
         x = np.vstack(*[self.x_diff.values()])
-        cost = x_rel.T.dot(Q_rel).dot(x_rel)[0,0]
-        Q = .5*np.array(cost.hessian(x.flatten().tolist()))
+        Q = .5*np.array(state_cost[0,0].hessian(x.flatten().tolist()))
+
         return Q
+
+    def _input_cost_hessian(self):
+
+        # velocity of moving limbs
+        input_cost = 0.
+        for limb in self.limbs['moving'].keys():
+            input_cost += boxatlas_parameters.input_cost['v'+limb] * self.u_diff['v'+limb].T.dot(self.u_diff['v'+limb])
+
+        # force on fixed limbs
+        for limb in self.limbs['fixed'].keys():
+            input_cost += boxatlas_parameters.input_cost['f'+limb] * self.u_diff['f'+limb].T.dot(self.u_diff['f'+limb])
+
+        # get the hessian matrix
+        u = np.vstack(*[self.u_diff.values()])
+        R = .5*np.array(input_cost[0,0].hessian(u.flatten().tolist()))
+
+        return R
 
     def is_inside_a_domain(self, x):
         """
@@ -466,24 +590,30 @@ class BoxAtlas():
         configuration = dict()
         for i, limb in enumerate(self.limbs['moving'].keys()):
             configuration[limb] = x[i*2:(i+1)*2, :]
-        configuration['b'] = x[(i+1)*2:(i+2)*2, :]
+        configuration['qb'] = x[(i+1)*2:(i+2)*2, :]
+        configuration['tb'] = x[(i+2)*2:2*i+5, :]
         return configuration
 
-    def state_labels(self):
+    def print_state_labels(self):
         x = []
         for limb in self.limbs['moving'].keys():
             x += ['q' + limb + 'x', 'q' + limb + 'y']
-        x += ['qbx', 'qby', 'vbx', 'vby']
+        x += ['qbx', 'qby', 'tb', 'vbx', 'vby', 'ob']
         print 'Box-Atlas states:\n', x
         return
 
-    def input_labels(self):
+    def print_input_labels(self):
         u = []
         for limb in self.limbs['moving'].keys():
             u += ['v' + limb + 'x', 'v' + limb + 'y']
         for limb in self.limbs['fixed'].keys():
             u += ['f' + limb + 'n', 'f' + limb + 't']
         print 'Box-Atlas inputs:\n', u
+        return
+
+    def print_mode_sequence(self, mode_sequence):
+        for mode in mode_sequence:
+            print self.contact_modes[mode]
         return
 
     def avoid_forbidden_transitions(self, controller):
@@ -497,3 +627,6 @@ class BoxAtlas():
                             expr = controller._d[k, previous_mode] + controller._d[k+1, next_mode]
                             controller._model.addConstr(expr <= 1.)
         return controller
+
+def cross_product_2d(a, b):
+    return np.array([[a[0,0]*b[1,0] - a[1,0]*b[0,0]]])

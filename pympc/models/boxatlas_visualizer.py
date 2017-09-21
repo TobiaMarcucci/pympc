@@ -26,10 +26,12 @@ class BoxAtlasVisualizer():
         return
 
     def _translate_visualizer(self):
+        h_lf = 0.
         if self.limbs['moving'].has_key('lf'):
             h_lf = self.limbs['moving']['lf'].nominal_position[1,0]
         elif self.limbs['fixed'].has_key('lf'):
             h_lf = self.limbs['fixed']['lf'].position[1,0]
+        h_rf = 0.
         if self.limbs['moving'].has_key('rf'):
             h_rf = self.limbs['moving']['rf'].nominal_position[1,0]
         elif self.limbs['fixed'].has_key('rf'):
@@ -100,12 +102,22 @@ class BoxAtlasVisualizer():
         return
 
     def visualize(self, x):
-        translation = [0.] + x['b'].flatten().tolist()
-        self.vis['b'].settransform(transformations.translation_matrix(translation))
+
+        # body
+        translation = [0.] + x['qb'].flatten().tolist()
+        self.vis['b'].settransform(
+            transformations.translation_matrix(translation).dot(
+            transformations.rotation_matrix(x['tb'][0,0], np.array([1.,0.,0.]))
+            )
+            )
+
+        # moving limbs
         for limb_key, limb_value in self.limbs['moving'].items():
             translation = x[limb_key] + limb_value.nominal_position
             translation = [0.] + translation.flatten().tolist()
             self.vis[limb_key].settransform(transformations.translation_matrix(translation))
+
+        # fixed limbs
         for limb_key, limb_value in self.limbs['fixed'].items():
             translation = [0.] + limb_value.position.flatten().tolist()
             self.vis[limb_key].settransform(transformations.translation_matrix(translation))

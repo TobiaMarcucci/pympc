@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
 import cdd
-from pympc.optimization.pnnls import linear_program
+from pympc.optimization.gurobi import linear_program
 from pympc.geometry.chebyshev_center import chebyshev_center
 from pympc.geometry.convex_hull import orthogonal_projection_CHM
 from pympc.algebra import rangespace_basis, nullspace_basis
