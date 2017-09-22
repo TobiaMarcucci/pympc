@@ -338,7 +338,7 @@ class MPCHybridController:
         M_domains = [[clean_matrix(self._M_domains[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
         for i in range(self.sys.n_sys):
             lhs = self.sys.domains[i].lhs_min
-            rhs = self.sys.domains[i].rhs_min
+            rhs = clean_matrix(self.sys.domains[i].rhs_min)
             for k in range(self.N):
                 expr = self._linear_term(lhs[:,:self.sys.n_x], self._x, k)
                 expr = expr + self._linear_term(lhs[:,self.sys.n_x:], self._u, k)
@@ -368,7 +368,7 @@ class MPCHybridController:
             for k in range(self.N):
                 expr = self._linear_term(self.sys.affine_systems[i].A, self._x, k)
                 expr = expr + self._linear_term(self.sys.affine_systems[i].B, self._u, k)
-                expr = expr + self.sys.affine_systems[i].c
+                expr = expr + clean_matrix(self.sys.affine_systems[i].c)
                 expr_M = expr - np.sum([M_dynamics[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
                 expr_m = expr - np.sum([m_dynamics[i][j]*self._d[k,j] for j in range(self.sys.n_sys) if j != i], axis=0)
                 for j in range(self.sys.n_x):
@@ -377,7 +377,7 @@ class MPCHybridController:
         return
 
     def _terminal_contraint(self):
-        expr = self._linear_term(self.X_N.lhs_min, self._x, self.N) - self.X_N.rhs_min
+        expr = self._linear_term(self.X_N.lhs_min, self._x, self.N) - clean_matrix(self.X_N.rhs_min)
         self._model.addConstrs((expr[i,0] <= 0. for i in range(len(self.X_N.minimal_facets))))
         return
 
