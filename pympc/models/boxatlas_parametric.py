@@ -9,6 +9,9 @@ from pympc.dynamical_systems import DTAffineSystem, DTPWASystem
 from pympc.control import MPCHybridController
 from pympc.optimization.pnnls import linear_program
 from pympc.models.boxatlas_visualizer import BoxAtlasVisualizer
+from pympc.dynamical_systems import dare, moas_closed_loop
+from pympc.geometry.polytope import LowerDimensionalPolytope
+from pympc.control import reachability_standard_form
 import boxatlas_parameters
 
 class MovingLimb():
@@ -78,6 +81,7 @@ class BoxAtlas():
         self._check_equilibrium_point()
         self.Q = self._state_cost_hessian()
         self.R = self._input_cost_hessian()
+        self.P, self.K, self.X_N = self._terminal_linear_controller()
         self._visualizer = self._initialize_visualizer()
         return
 
@@ -537,6 +541,36 @@ class BoxAtlas():
         R = .5*np.array(input_cost[0,0].hessian(u.flatten().tolist()))
 
         return R
+
+    def _terminal_linear_controller(self):
+        """
+        Derives the LQR for the terminal mode and the related maximal invariant constraint-admissible set. In case of a terminal mode that is not completely reachable, it applies the reachability standard decomposition and returns a lower dynamensional terminal set.
+        """
+        rsf = reachability_standard_form(self.nominal_system.A, self.nominal_system.B)
+        if rsf['n_R'] < self.nominal_system.A.shape[0]:
+            Q_R = rsf['T_R'].T.dot(self.Q).dot(rsf['T_R'])
+            P_R, K_R = dare(rsf['A_RR'], rsf['B_R'], Q_R, self.R)
+            T_inv = np.linalg.inv(rsf['T'])
+            T_inv_R = T_inv[:rsf['n_R'],:]
+            T_inv_N = T_inv[rsf['n_R']:,:]
+            P = T_inv_R.T.dot(P_R).dot(T_inv_R)
+            K = K_R.dot(T_inv_R)
+            D_lhs_x = self.nominal_domain.lhs_min[:, :self.n_x]
+            D_lhs_u = self.nominal_domain.lhs_min[:, self.n_x:]
+            D_lhs_R = np.hstack((D_lhs_x.dot(rsf['T_R']), D_lhs_u))
+            D_R = Polytope(D_lhs_R, self.nominal_domain.rhs_min)
+            D_R.assemble()
+            X_N_R = moas_closed_loop(rsf['A_RR'], rsf['B_R'], K_R, D_R)
+            X_N = LowerDimensionalPolytope(
+                X_N_R.lhs_min.dot(T_inv_R),
+                X_N_R.rhs_min,
+                T_inv_N,
+                np.zeros((T_inv_N.shape[0], 1))
+                )
+        else:
+            P, K = dare(self.nominal_system.A, self.nominal_system.B, self.Q, self.R)
+            X_N = moas_closed_loop(self.nominal_system.A, self.nominal_system.B, K, self.nominal_domain)
+        return P, K, X_N
 
     def is_inside_a_domain(self, x):
         """

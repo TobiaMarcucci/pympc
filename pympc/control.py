@@ -382,13 +382,13 @@ class MPCHybridController:
         return
 
     def _MIP_parameters(self):
-        self._model.setParam('OutputFlag', True)
-        # time_limit = 6000.
-        # self._model.setParam('TimeLimit', time_limit)
+        self._model.setParam('OutputFlag', False)
+        time_limit = 10.
+        self._model.setParam('TimeLimit', time_limit)
         # self._model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
         # self._model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
         # self._model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
-        self._model.setParam(grb.GRB.Param.MIPGap, 1.e-6)
+        # self._model.setParam(grb.GRB.Param.MIPGap, 1.e-6)
         return
 
     def feedforward(self, x0, u_ws=None, x_ws=None, ss_ws=None):
@@ -461,15 +461,13 @@ class MPCHybridController:
         return
 
     def _return_solution(self):
-        if self._model.status == grb.GRB.Status.OPTIMAL or self._model.status == grb.GRB.Status.INTERRUPTED:
+        if self._model.status in [grb.GRB.Status.OPTIMAL, grb.GRB.Status.INTERRUPTED, grb.GRB.Status.TIME_LIMIT]:
             cost = self._model.objVal
             u_feedforward = [np.array([[self._u[k,i].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
             x_trajectory = [np.array([[self._x[k,i].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
             d_star = [np.array([[self._d[k,i].x] for i in range(self.sys.n_sys)]) for k in range(self.N)]
             switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
         else:
-            if self._model.status == grb.GRB.Status.TIME_LIMIT:
-                print('The solution of the MIQP excedeed the time limit.')
             u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
             x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
             cost = np.nan
@@ -495,14 +493,36 @@ class MPCHybridController:
         # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
         return prog
 
-def canonical_reachability_decomposition(A, B):
+def reachability_standard_form(A, B):
+    """
+    Applies the transformation x = [T_R, T_N] [z_R; z_N] = = T [z_R; z_N] to decompose the linear system
+    \dot x = A x + B u
+    in the reachable and non reachable subsystems
+    \dot z_R = A_RR z_R + A_RN z_N + B_R u
+    \dot z_N = A_NN z_N
+    where z_R \in R^n_R and z_N \in R^(n-n_R).
+    """
+
+    # reachability analysis
     n = A.shape[0]
     R = np.hstack([np.linalg.matrix_power(A, i).dot(B) for i in range(n)])
     n_R = np.linalg.matrix_rank(R)
+    print n_R, n
+    if n_R == n:
+        return {
+        'n_R': n,
+        'T': np.eye(n), 'T_R': np.eye(n), 'T_N':np.array([[]]),
+        'A': A, 'A_RR': A, 'A_RN': np.array([[]]), 'A_NR': np.array([[]]), 'A_NN': np.array([[]]),
+        'B': B, 'B_R': B, 'B_N': np.array([[]])
+        }
+
+    # tranformation to decomposed variables
     T_R = rangespace_basis(R)
     T_N = nullspace_basis(R.T)
     T = np.hstack((T_R, T_N))
     T_inv = np.linalg.inv(T)
+
+    # standard form
     A_canonical = T_inv.dot(A).dot(T)
     B_canonical = T_inv.dot(B)
     A_RR = A_canonical[:n_R,:n_R]
@@ -511,6 +531,7 @@ def canonical_reachability_decomposition(A, B):
     A_NN = A_canonical[n_R:,n_R:]
     B_R = B_canonical[:n_R,:]
     B_N = B_canonical[n_R:,:]
+
     return {
     'n_R': n_R,
     'T': T, 'T_R': T_R, 'T_N':T_N,

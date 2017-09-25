@@ -154,60 +154,6 @@ def real_variable(model, d_list, **kwargs):
     x = model.addVars(*d_list, lb=lb_x, **kwargs)
     return x, model
 
-# def point_inside_polyhedron(model, A, b, x):
-#     """
-#     Adds to the model the constraint
-#     x \in P
-#     where P := {x | A x <= b} is a polyhedron.
-#     """
-#     # number of facets
-#     n_f = A.shape[0]
-
-#     # constraint
-#     x_np = np.array([[x[k]] for k in range(len(x))])
-#     expr = A.dot(x_np) - b
-#     model.addConstrs((expr[k,0] <= 0. for k in range(n_f)))
-
-#     return model
-
-
-# def iff_point_in_halfspace(model, A, b, x, X, eps=1.e-4):
-#     """
-#     Adds to the model the logical constraint
-#     [d = 1] <-> [A x <= b]
-#     where H := {x | A x <= b} is an halfspace.
-#     """
-#     x_np = np.array([[x[i]] for i in range(len(x))])
-#     d = model.addVar(vtype=grb.GRB.BINARY)
-#     model.update()
-#     m = linear_program(A.T, X.lhs_min, X.rhs_min)[1] - b[0,0]
-#     M = - linear_program(- A.T, X.lhs_min, X.rhs_min)[1] - b[0,0]
-#     expr = (A.dot(x_np) - b)[0,0]
-#     model.addConstr(expr >= m*d + eps)
-#     model.addConstr(expr <= M*(1.-d))
-#     return model, d
-
-
-# def iff_point_in_polyhedron(model, A, b, x, X):
-#     """
-#     Adds to the model the logical constraint
-#     [d = 1] <-> [A x <= b]
-#     where P := {x | A x <= b} is a polyhedron.
-#     """
-#     x_np = np.array([[x[i]] for i in range(len(x))])
-#     d = model.addVar(vtype=grb.GRB.BINARY)
-#     model.update()
-#     n_f = A.shape[0]
-#     d_list = []
-#     for i in range(n_f):
-#         model, d_i = iff_point_in_halfspace(model, A[i:i+1,:], b[i:i+1,:], x, X)
-#         d_list.append(d_i)
-#     model.addConstr(d >= sum(d_list) - n_f + .5)
-#     model.addConstr(d <= sum(d_list)/n_f)
-
-#     return model, d, d_list
-
-
 import sys, os
 from contextlib import contextmanager
 

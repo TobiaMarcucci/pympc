@@ -13,6 +13,13 @@ class FeasibleSetLibrary:
     def __init__(self, controller):
         self.controller = controller
         self.library = dict()
+        self.read_gurobi_status = {
+            '2': 'OPTIMAL',
+            '3': 'INFEASIBLE',
+            '4': 'INFEASIBLE OR UNBOUNDED',
+            '9': 'TIME LIMIT',
+            '11': 'INTERRUPTED',
+            }
         return
 
     def sample_policy(self, n_samples, check_sample_function=None):
@@ -28,7 +35,7 @@ class FeasibleSetLibrary:
                     print('solving MIQP... '),
                     tic = time.time()
                     ss = self.controller.feedforward(x)[2]
-                    print('solution found in ' + str(time.time()-tic) + ' s.')
+                    print('time spent: ' + str(time.time()-tic) + ' s, model status: ' + self.read_gurobi_status[str(self.controller._model.status)] + '.')
                     if not any(np.isnan(ss)):
                         if self.library.has_key(ss):
                             n_included += 1
