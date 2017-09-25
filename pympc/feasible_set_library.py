@@ -19,6 +19,7 @@ class FeasibleSetLibrary:
             '4': 'INFEASIBLE OR UNBOUNDED',
             '9': 'TIME LIMIT',
             '11': 'INTERRUPTED',
+            '13': 'SUBOPTIMAL',
             }
         return
 
@@ -67,7 +68,6 @@ class FeasibleSetLibrary:
                             self.library[ss]['feasible_set'] = feasible_set
                     else:
                         n_unfeasible += 1
-                        print('unfeasible.')
                 else:
                     n_rejected += 1
                     print('rejected.')
