@@ -324,7 +324,7 @@ class MPCHybridController:
     def _MIP_constraints(self):
         self._disjunction_modes()
         self._constraint_domains()
-        self._constraint_dynamics()
+        self._dynamic_constraints()
         self._terminal_contraint()
         return
 
@@ -347,7 +347,7 @@ class MPCHybridController:
                 self._model.addConstrs((expr[j,0] <= 0. for j in range(lhs.shape[0])))
         return
 
-    def _constraint_dynamics(self):
+    def _dynamic_constraints(self):
         # clean bigMs from almost zero terms
         M_dynamics = [[clean_matrix(self._M_dynamics[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
         m_dynamics = [[clean_matrix(self._m_dynamics[i][j]) for j in range(self.sys.n_sys)] for i in range(self.sys.n_sys)]
@@ -382,8 +382,8 @@ class MPCHybridController:
         return
 
     def _MIP_parameters(self):
-        self._model.setParam('OutputFlag', False)
-        time_limit = 10.
+        self._model.setParam('OutputFlag', True)
+        time_limit = 600.
         self._model.setParam('TimeLimit', time_limit)
         # self._model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
         # self._model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
@@ -496,24 +496,25 @@ class MPCHybridController:
 def reachability_standard_form(A, B):
     """
     Applies the transformation x = [T_R, T_N] [z_R; z_N] = = T [z_R; z_N] to decompose the linear system
-    \dot x = A x + B u
+    x (t+1) = A x (t) + B u (t)
     in the reachable and non reachable subsystems
-    \dot z_R = A_RR z_R + A_RN z_N + B_R u
-    \dot z_N = A_NN z_N
+    z_R (t+1) = A_RR z_R (t) + A_RN z_N (t) + B_R u (t)
+    z_N (t+1) = A_NN z_N (t)
     where z_R \in R^n_R and z_N \in R^(n-n_R).
     """
 
     # reachability analysis
     n = A.shape[0]
+    m = B.shape[1]
     R = np.hstack([np.linalg.matrix_power(A, i).dot(B) for i in range(n)])
     n_R = np.linalg.matrix_rank(R)
-    print n_R, n
     if n_R == n:
         return {
         'n_R': n,
-        'T': np.eye(n), 'T_R': np.eye(n), 'T_N':np.array([[]]),
-        'A': A, 'A_RR': A, 'A_RN': np.array([[]]), 'A_NR': np.array([[]]), 'A_NN': np.array([[]]),
-        'B': B, 'B_R': B, 'B_N': np.array([[]])
+        'T': np.eye(n), 'T_R': np.eye(n), 'T_N': np.zeros((n, 0)),
+        'T_inv': np.eye(n), 'T_inv_R': np.eye(n), 'T_inv_N': np.zeros((0, n)),
+        'A': A, 'A_RR': A, 'A_RN': np.zeros((n, 0)), 'A_NR': np.zeros((0, n)), 'A_NN': np.zeros((0, 0)),
+        'B': B, 'B_R': B, 'B_N': np.zeros((0, m)),
         }
 
     # tranformation to decomposed variables
@@ -535,6 +536,7 @@ def reachability_standard_form(A, B):
     return {
     'n_R': n_R,
     'T': T, 'T_R': T_R, 'T_N':T_N,
+    'T_inv': T_inv, 'T_inv_R': T_inv[:n_R,:], 'T_inv_N': T_inv[n_R:,:],
     'A': A_canonical, 'A_RR': A_RR, 'A_RN': A_RN, 'A_NR': A_NR, 'A_NN': A_NN,
     'B': B_canonical, 'B_R': B_R, 'B_N': B_N
     }

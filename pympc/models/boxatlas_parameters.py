@@ -7,12 +7,9 @@ damping = 50.
 friction = .5
 gravity = 10.
 sampling_time = .1
-# integrator = 'explicit_euler'
 weight = mass * gravity
 f_min = np.array([[0.], [-friction * weight]])
 f_max = np.array([[weight], [friction * weight]])
-visualizer_min = np.array([[-.6],[-.6]])
-visualizer_max = np.array([[.6],[.4]])
 
 joint_limits = {
         'b': {'min': np.array([[-.2],[-.1],[-.1]]), 'max': np.array([[.2],[.1],[.1]])}, # x,y,theta
@@ -57,3 +54,16 @@ input_cost = {
         'flh': 1.,
         'frh': 1.,
         }
+
+visualizer_min = np.array([[-.6],[-.6]])
+visualizer_max = np.array([[.6],[.4]])
+visualizer_parameters = {
+        'min': np.array([[-.6], [-.6]]),
+        'max': np.array([[.6], [.4]]),
+        'depth': [-.3,.3],
+        'box_fixed_feet': {'tickness': .05, 'width': .1},
+        'body_size': .2,
+        'limbs_size': .05,
+        'body_color': np.hstack((np.array([0.,0.,1.]), 1.)),
+        'limbs_color': np.hstack((np.array([1.,0.,0.]), 1.)),
+}

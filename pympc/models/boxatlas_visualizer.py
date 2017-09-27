@@ -12,17 +12,17 @@ from director.thirdparty import transformations
 import scipy.spatial as spatial
 import director.viewerclient as vc
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
+from boxatlas_parameters import visualizer_parameters as vp
 
 
 class BoxAtlasVisualizer():
 
-    def __init__(self, walls, limbs):
-        self.walls = walls
+    def __init__(self, limbs):
         self.limbs = limbs
         self.vis = vc.Visualizer()['box_altas']
         self._translate_visualizer()
-        self._visualize_environment()
-        self._initialize_body()
+        self._initialize_environment()
+        self._initialize_robot()
         return
 
     def _translate_visualizer(self):
@@ -40,29 +40,66 @@ class BoxAtlasVisualizer():
         self.vis.settransform(vc.transformations.translation_matrix([0.,0.,vertical_translation]))
         return
 
-    def _visualize_environment(self, depth=[-.3,.3]):
-        for i, wall in enumerate(self.walls):
-            self._visualize_2d_polytope(wall, depth, 'wall_'+str(i))
+    def _initialize_environment(self):
+        walls = []
+        for limb_key, limb_value in self.limbs['moving'].items():
+            for mode in limb_value.modes:
+                if limb_value.contact_surfaces[mode] is not None:
+                    name = 'wall_' + limb_key + '_' + mode
+                    wall = Polytope(limb_value.A_domains[mode], limb_value.b_domains[mode])
+                    wall.add_bounds(vp['min'], vp['max'])
+                    wall.assemble()
+                    walls.append([wall, name])
+        for limb_key, limb_value in self.limbs['fixed'].items():
+            name = 'wall_' + limb_key
+            wall = self._box_from_surface(limb_value.position, limb_value.normal, limb_value.normal.T.dot(limb_value.position))
+            walls.append([wall, name])
+        for [wall, name] in walls:
+            self._visualize_2d_polytope(wall, name)
         return
 
-    def _visualize_2d_polytope(self, p2d, depth, name):
-        p3d = self._extrude_2d_polytope(p2d, depth)
+    @staticmethod
+    def _box_from_surface(x, n, d):
+        t = np.array([[-n[1,0]],[n[0,0]]])
+        c = t.T.dot(x)
+        lhs = np.vstack((n.T, -n.T, t.T, -t.T))
+        rhs = np.vstack((
+            d,
+            -d + vp['box_fixed_feet']['tickness'],
+            c + vp['box_fixed_feet']['width'],
+            -c + vp['box_fixed_feet']['width']
+            ))
+        box = Polytope(lhs, rhs)
+        box.assemble()
+        return box
+
+    def _visualize_2d_polytope(self, p2d, name):
+        p3d = self._extrude_2d_polytope(p2d)
         self._visualize_3d_polytope(p3d, name)
         return
 
     @staticmethod
-    def _extrude_2d_polytope(p2d, depth):
+    def _extrude_2d_polytope(p2d):
         A = np.vstack((
-            np.hstack((p2d.lhs_min, np.zeros((p2d.lhs_min.shape[0], 1)))),
-            np.hstack((np.zeros((2, p2d.lhs_min.shape[1])), np.array([[1.],[-1.]])))
+            np.hstack((
+                p2d.lhs_min,
+                np.zeros((p2d.lhs_min.shape[0], 1))
+                )),
+            np.hstack((
+                np.zeros((2, p2d.lhs_min.shape[1])),
+                np.array([[1.],[-1.]])
+                ))
             ))
-        b = np.vstack((p2d.rhs_min, np.array([[depth[1]],[-depth[0]]])))
+        b = np.vstack((
+            p2d.rhs_min,
+            np.array([[vp['depth'][1]], [-vp['depth'][0]]])
+            ))
         p3d = Polytope(A, b)
         p3d.assemble()
         return p3d
 
     def _visualize_3d_polytope(self, p, name):
-        p = self._reorder_coordinates_visualizer(p)
+        p = self._reorder_coordinates(p)
         halfspaces = []
         # change of coordinates because qhull is stupid...
         b_qhull = p.rhs_min - p.lhs_min.dot(p.center)
@@ -76,29 +113,38 @@ class BoxAtlasVisualizer():
         return
 
     @staticmethod
-    def _reorder_coordinates_visualizer(p):
+    def _reorder_coordinates(p):
         T = np.array([[0.,1.,0.],[0.,0.,1.],[1.,0.,0.]])
         A = p.lhs_min.dot(T)
         p_reordered = Polytope(A, p.rhs_min)
         p_reordered.assemble()
         return p_reordered
 
-    def _initialize_body(self):
+    def _initialize_robot(self):
+
+        # body
         self.vis['b'].setgeometry(
             vc.GeometryData(
                 vc.Box(
-                    lengths = [.2]*3),
-                    color = np.hstack((np.array([0.,0.,1.]), 1.))
+                    lengths = [vp['body_size']]*3),
+                    color = vp['body_color']
                     )
             )
 
+        # moving and fixed limbs
         for limb in self.limbs['moving'].keys() + self.limbs['fixed'].keys():
             self.vis[limb].setgeometry(
                 vc.GeometryData(
-                    vc.Sphere(radius = .05),
-                    color = np.hstack((np.array([1.,0.,0.]), 1.))
+                    vc.Sphere(radius = vp['limbs_size']),
+                    color = vp['limbs_color']
                     )
                 )
+
+        # place fixed limbs in nominal position
+        for limb_key, limb_value in self.limbs['fixed'].items():
+            translation = [0.] + limb_value.position.flatten().tolist()
+            self.vis[limb_key].settransform(transformations.translation_matrix(translation))
+
         return
 
     def visualize(self, x):
@@ -117,10 +163,22 @@ class BoxAtlasVisualizer():
             translation = [0.] + translation.flatten().tolist()
             self.vis[limb_key].settransform(transformations.translation_matrix(translation))
 
-        # fixed limbs
-        for limb_key, limb_value in self.limbs['fixed'].items():
-            translation = [0.] + limb_value.position.flatten().tolist()
-            self.vis[limb_key].settransform(transformations.translation_matrix(translation))
+        # parametric walls
+        for limb_key, limb_value in self.limbs['moving'].items():
+            for mode in limb_value.modes:
+                if limb_value.contact_surfaces[mode] is not None:
+                    name = 'wall_' + limb_key + '_' + mode
+                    for parameter in limb_value.parameters:
+                        if parameter.has_key(mode):
+                            p = x[parameter['label']]
+                            A = copy(limb_value.A_domains[mode])
+                            b = copy(limb_value.b_domains[mode])
+                            for i, index in enumerate(parameter[mode]['index']):
+                                b[index, 0] += p * parameter[mode]['coefficient'][i]
+                            wall = Polytope(A, b)
+                            wall.add_bounds(vp['min'], vp['max'])
+                            wall.assemble()
+                            self._visualize_2d_polytope(wall, name)
         return
 
 class Mesh(vc.BaseGeometry):

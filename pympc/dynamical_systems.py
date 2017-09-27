@@ -314,7 +314,7 @@ def moas_closed_loop_from_orthogonal_domains(A, B, K, X, U):
     D.assemble()
     return moas_closed_loop(A, B, K, D)
 
-def moas(A, X):
+def moas(A, X, tol=1.e-9):
     """
     Returns the maximum output admissible set (see Gilbert, Tan - Linear Systems with State and Control Constraints, The Theory and Application of Maximal Output Admissible Sets) for a non-actuated linear system with state constraints (the output vector is supposed to be the entire state of the system, i.e. y=x and C=I).
 
@@ -352,8 +352,8 @@ def moas(A, X):
             J_sol.append(-sol.min - X.rhs_min[i])
 
         # convergence check
-        print 'Determinedness index: ' + str(t) + ', Convergence index: ' + str(np.max(J_sol)) + ', Number of facets: ' + str(cons_lhs.shape[0]) + '.    \r',
-        if np.max(J_sol) < 0:
+        print 'Determinedness index: ' + str(t) + ', Convergence index: ' + str(np.max(J_sol)) + ', Number of facets: ' + str(cons_lhs.shape[0]) + '.                \r',
+        if np.max(J_sol) < tol:
             convergence = True
         else:
             t += 1
