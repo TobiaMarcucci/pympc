@@ -3,7 +3,7 @@ import numpy as np
 import scipy as sp
 from itertools import combinations
 from pympc.geometry.chebyshev_center import chebyshev_center
-from pympc.optimization.pnnls import linear_program
+from pympc.optimization.gurobi import linear_program
 import copy
 from scipy.spatial import ConvexHull as ScipyConvexHull
 
