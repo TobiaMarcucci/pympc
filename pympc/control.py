@@ -325,7 +325,7 @@ class MPCHybridController:
         self._disjunction_modes()
         self._constraint_domains()
         self._dynamic_constraints()
-        self._terminal_contraint()
+        self._terminal_constraint()
         return
 
     def _disjunction_modes(self):

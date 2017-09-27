@@ -536,16 +536,6 @@ class BoxAtlas():
         Q_non_p = self.Q[self.n_p:,self.n_p:]
         rsf = reachability_standard_form(A_non_p, B_non_p)
 
-        # # if the system is controllable
-        # if rsf['n_R'] == self.n_x - self.n_p:
-        #     P_non_p, K_non_p = dare(A_non_p, B_non_p, Q_non_p, self.R)
-        #     P = linalg.block_diag(np.zeros((self.n_p, self.n_p)), P_non_p)
-        #     K = np.hstack((np.zeros((self.n_u, self.n_p)), K_non_p))
-        #     X_N = moas_closed_loop(self.nominal_system.A, self.nominal_system.B, K, self.nominal_domain)
-
-        # # if the system is not controllable
-        # else:
-
         # solve lower-dimensional dare
         Q_R = rsf['T_R'].T.dot(Q_non_p).dot(rsf['T_R'])
         P_R, K_R = dare(rsf['A_RR'], rsf['B_R'], Q_R, self.R)
@@ -604,40 +594,7 @@ class BoxAtlas():
                 break
         return is_inside
 
-    # def _initialize_visualizer(self):
-    #     """
-    #     TO BE MOVED IN boxatlas_visualizer.py!
-    #     """
-    #     walls = []
-    #     for limb in self.limbs['moving'].values():
-    #         for mode in limb.modes:
-    #             if limb.contact_surfaces[mode] is not None:
-    #                 wall = Polytope(limb.A_domains[mode], limb.b_domains[mode])
-    #                 wall.add_bounds(boxatlas_parameters.visualizer_min, boxatlas_parameters.visualizer_max)
-    #                 wall.assemble()
-    #                 walls.append(wall)
-    #     for limb in self.limbs['fixed'].values():
-    #         support_box = self._box_from_surface(limb.position, limb.normal, limb.normal.T.dot(limb.position))
-    #         walls.append(support_box)
-    #     visualizer = BoxAtlasVisualizer(walls, self.limbs)
-    #     return visualizer
-
-    # @staticmethod
-    # def _box_from_surface(x, n, d, depth=.05, width=.1):
-    #     t = np.array([[-n[1,0]],[n[0,0]]])
-    #     c = t.T.dot(x)
-    #     lhs = np.vstack((n.T, -n.T, t.T, -t.T))
-    #     rhs = np.vstack((d, -d+depth, c+width, -c+width))
-    #     box = Polytope(lhs, rhs)
-    #     box.assemble()
-    #     return box
-
     def visualize(self, x):
-        configuration = self._configuration_to_visualizer(x)
-        self._visualizer.visualize(configuration)
-        return
-
-    def _configuration_to_visualizer(self, x):
         configuration = dict()
         i = 0
         for limb in self.limbs['moving'].values():
@@ -648,7 +605,8 @@ class BoxAtlas():
             configuration[limb] = x[i*2+self.n_p:(i+1)*2+self.n_p, :]
         configuration['qb'] = x[(i+1)*2+self.n_p:(i+2)*2+self.n_p, :]
         configuration['tb'] = x[(i+2)*2+self.n_p:2*i+5+self.n_p, :]
-        return configuration
+        self._visualizer.visualize(configuration)
+        return
 
     def print_state_labels(self):
         x = []
