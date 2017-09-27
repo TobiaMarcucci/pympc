@@ -376,7 +376,7 @@ class MPCHybridController:
                     self._model.addConstr(self._z[k,i,j] <= expr_m[j,0])
         return
 
-    def _terminal_contraint(self):
+    def _terminal_constraint(self):
         expr = self._linear_term(self.X_N.lhs_min, self._x, self.N) - clean_matrix(self.X_N.rhs_min)
         self._model.addConstrs((expr[i,0] <= 0. for i in range(len(self.X_N.minimal_facets))))
         return
@@ -461,7 +461,7 @@ class MPCHybridController:
         return
 
     def _return_solution(self):
-        if self._model.status in [grb.GRB.Status.OPTIMAL, grb.GRB.Status.INTERRUPTED, grb.GRB.Status.TIME_LIMIT]:
+        if self._model.status in [grb.GRB.Status.OPTIMAL, grb.GRB.Status.INTERRUPTED, grb.GRB.Status.TIME_LIMIT, grb.GRB.Status.SUBOPTIMAL]:
             cost = self._model.objVal
             u_feedforward = [np.array([[self._u[k,i].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
             x_trajectory = [np.array([[self._x[k,i].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
