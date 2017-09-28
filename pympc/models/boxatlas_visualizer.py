@@ -1,18 +1,10 @@
 import numpy as np
-import scipy.linalg as linalg
-from itertools import product
 from copy import copy
 from pympc.geometry.polytope import Polytope
-from pympc.dynamical_systems import DTAffineSystem, DTPWASystem, dare, moas_closed_loop_from_orthogonal_domains
-from pympc.control import MPCHybridController
-from pympc.optimization.pnnls import linear_program
-import pympc.plot as mpc_plt
-import matplotlib.pyplot as plt
 from director.thirdparty import transformations
-import scipy.spatial as spatial
 import director.viewerclient as vc
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
-from boxatlas_parameters import visualizer_parameters as vp
+from boxatlas_parameters import visualizer as vp
 
 
 class BoxAtlasVisualizer():

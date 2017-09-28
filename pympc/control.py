@@ -168,7 +168,7 @@ class MPCHybridController:
         X_N: terminal constraint (Polytope)
     """
 
-    def __init__(self, sys, N, objective_norm, Q, R, P, X_N):
+    def __init__(self, sys, N, objective_norm, Q, R, P, X_N, gurobi_parameters={}):
         self.sys = sys
         self.N = N
         self.objective_norm = objective_norm
@@ -176,6 +176,7 @@ class MPCHybridController:
         self.R = R
         self.P = P
         self.X_N = X_N
+        self.gurobi_parameters = gurobi_parameters
         self._get_bigM_domains()
         self._get_bigM_dynamics()
         self._MIP_model()
@@ -382,13 +383,8 @@ class MPCHybridController:
         return
 
     def _MIP_parameters(self):
-        self._model.setParam('OutputFlag', True)
-        time_limit = 600.
-        self._model.setParam('TimeLimit', time_limit)
-        # self._model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
-        # self._model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
-        # self._model.setParam(grb.GRB.Param.IntFeasTol, 1.e-9)
-        # self._model.setParam(grb.GRB.Param.MIPGap, 1.e-6)
+        for p_key, p_value in self.gurobi_parameters.items():
+            self._model.setParam(p_key, p_value)
         return
 
     def feedforward(self, x0, u_ws=None, x_ws=None, ss_ws=None):

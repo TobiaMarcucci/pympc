@@ -246,8 +246,8 @@ class PolytopeProjectionInnerApproximation:
         # initialize inner approximation with a simplex
         simplex_vertices = first_two_points(self.A_switched, self.b, len(self.resiudal_dimensions))
         simplex_vertices = inner_simplex(self.A_switched, self.b, simplex_vertices, x)
-        self.hull = ConvexHull(simplex_vertices) # my version
-        # self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
+        # self.hull = ConvexHull(simplex_vertices) # my version
+        self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
 
         return
 
@@ -260,8 +260,8 @@ class PolytopeProjectionInnerApproximation:
         n_proj = len(self.resiudal_dimensions)
 
         # violation of the approximation boundaires
-        residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
-        # residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
+        # residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
+        residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
 
         # # for the plot on the paper
         # import copy
@@ -271,35 +271,47 @@ class PolytopeProjectionInnerApproximation:
         # p_list = [p_inner_plot]
 
         # expand the most violated boundary until inclusion
+        inflations = 0
+        time_lp = 0.
+        time_ch = 0.
         while max(residuals) > tol:
+            inflations += 1
             facet_to_expand = residuals.index(max(residuals))
             a = np.zeros((self.A.shape[1], 1))
 
-            hs = self.hull.halfspaces[facet_to_expand] # my version
-            # hs = [self.hull.equations[facet_to_expand:facet_to_expand+1,:-1].T, - self.hull.equations[facet_to_expand:facet_to_expand+1,-1:]] # qhull version
+            # hs = self.hull.halfspaces[facet_to_expand] # my version
+            hs = [self.hull.equations[facet_to_expand:facet_to_expand+1,:-1].T, - self.hull.equations[facet_to_expand:facet_to_expand+1,-1:]] # qhull version
 
             a[:n_proj,:] = hs[0]
+            tic = time.time()
             sol = linear_program(-a, self.A_switched, self.b)
+            time_lp += time.time() - tic
 
-            # the point might be outside the projection...
+            # the point might be outside the projection
             inflation = - sol.min - hs[1][0,0]
             if inflation < tol:
                 raise ValueError('The given point lies outside the projection.')
                 break
 
             # add vertex to the hull
-            self.hull.add_point(sol.argmin[:n_proj,:]) # my version
-            # self.hull.add_points(sol.argmin[:n_proj,:].T) # qhull version
+            tic = time.time()
+            # self.hull.add_point(sol.argmin[:n_proj,:]) # my version
+            self.hull.add_points(sol.argmin[:n_proj,:].T) # qhull version
+            time_ch += time.time() - tic
 
             # new residuals
-            residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
-            # residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
+            # residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
+            residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
 
         #     # for the plot on the paper
         #     p_inner_plot = Polytope(self.hull.A, self.hull.b)
         #     p_inner_plot.assemble()
         #     p_list.append(p_inner_plot)
         # return p_list
+
+        print '\nNumber of inflations:', inflations
+        print 'Time in linear programming:', time_lp
+        print 'Time in convex hull:', time_ch
 
         return
 
@@ -309,23 +321,6 @@ class PolytopeProjectionInnerApproximation:
         """
         if self.hull is None:
             return False
-        is_inside = np.max(self.hull.A.dot(x) - self.hull.b) <= tol # my version
-        # is_inside = max((self.hull.equations[:,:-1].dot(x) + self.hull.equations[:,-1:]).flatten().tolist()) <= tol # qhull version
+        # is_inside = np.max(self.hull.A.dot(x) - self.hull.b) <= tol # my version
+        is_inside = max((self.hull.equations[:,:-1].dot(x) + self.hull.equations[:,-1:]).flatten().tolist()) <= tol # qhull version
         return is_inside
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

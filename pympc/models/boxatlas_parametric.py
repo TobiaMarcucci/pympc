@@ -6,13 +6,13 @@ from ad import adnumber, jacobian
 from collections import OrderedDict
 from pympc.geometry.polytope import Polytope
 from pympc.dynamical_systems import DTAffineSystem, DTPWASystem
-from pympc.control import MPCHybridController
 from pympc.optimization.pnnls import linear_program
 from pympc.models.boxatlas_visualizer import BoxAtlasVisualizer
 from pympc.dynamical_systems import dare, moas_closed_loop
 from pympc.geometry.polytope import LowerDimensionalPolytope
 from pympc.control import reachability_standard_form
-import boxatlas_parameters
+from pympc.control import MPCHybridController
+import boxatlas_parameters as bap
 
 class MovingLimb():
     def __init__(self, A_domains, b_domains, contact_surfaces, nominal_position, forbidden_transitions=[], parameters=[]):
@@ -88,8 +88,8 @@ class BoxAtlas():
         self.Q = self._state_cost_hessian()
         self.R = self._input_cost_hessian()
         self.P, self.K, self.X_N = self._terminal_lqr_controller()
+        self.controller = self._synthesize_controller()
         self._visualizer = BoxAtlasVisualizer(self.limbs)
-        # self._visualizer = self._initialize_visualizer()
         return
 
     def _get_equilibrium_state(self):
@@ -222,23 +222,23 @@ class BoxAtlas():
 
         # joint limits for the moving limbs
         for limb in self.limbs['moving'].keys():
-            constraints.append(self.x_diff['q'+limb] - self.x_diff['qb'] - boxatlas_parameters.joint_limits[limb]['max'])
-            constraints.append(boxatlas_parameters.joint_limits[limb]['min'] - self.x_diff['q'+limb] + self.x_diff['qb'])
+            constraints.append(self.x_diff['q'+limb] - self.x_diff['qb'] - bap.joint_limits[limb]['max'])
+            constraints.append(bap.joint_limits[limb]['min'] - self.x_diff['q'+limb] + self.x_diff['qb'])
 
         # joint limits for the fixed limbs
         for limb_key, limb_value in self.limbs['fixed'].items():
-            constraints.append(limb_value.position - self.x_diff['qb'] - boxatlas_parameters.joint_limits[limb_key]['max'])
-            constraints.append(boxatlas_parameters.joint_limits[limb_key]['min'] - limb_value.position + self.x_diff['qb'])
+            constraints.append(limb_value.position - self.x_diff['qb'] - bap.joint_limits[limb_key]['max'])
+            constraints.append(bap.joint_limits[limb_key]['min'] - limb_value.position + self.x_diff['qb'])
 
         # joint limits for the body position
         pos_b = np.vstack((self.x_diff['qb'], self.x_diff['tb']))
-        constraints.append(pos_b - boxatlas_parameters.joint_limits['b']['max'])
-        constraints.append(boxatlas_parameters.joint_limits['b']['min'] - pos_b)
+        constraints.append(pos_b - bap.joint_limits['b']['max'])
+        constraints.append(bap.joint_limits['b']['min'] - pos_b)
 
         # velocity limits for the body velocity
         vel_b = np.vstack((self.x_diff['vb'], self.x_diff['ob']))
-        constraints.append(vel_b - boxatlas_parameters.velocity_limits['b']['max'])
-        constraints.append(boxatlas_parameters.velocity_limits['b']['min'] - vel_b)
+        constraints.append(vel_b - bap.velocity_limits['b']['max'])
+        constraints.append(bap.velocity_limits['b']['min'] - vel_b)
 
         # limits for the parameters
         for limb in self.limbs['moving'].values():
@@ -255,18 +255,17 @@ class BoxAtlas():
 
         # moving limbs
         for limb in self.limbs['moving'].keys():
-            constraints.append(self.u_diff['v'+limb] - boxatlas_parameters.velocity_limits[limb]['max'])
-            constraints.append(boxatlas_parameters.velocity_limits[limb]['min'] - self.u_diff['v'+limb])
+            constraints.append(self.u_diff['v'+limb] - bap.velocity_limits[limb]['max'])
+            constraints.append(bap.velocity_limits[limb]['min'] - self.u_diff['v'+limb])
 
         # fixed limbs
-        mu  = boxatlas_parameters.friction
         for limb in self.limbs['fixed'].keys():
-            constraints.append(self.u_diff['f'+limb] - boxatlas_parameters.force_limits[limb]['max'])
-            constraints.append(boxatlas_parameters.force_limits[limb]['min'] - self.u_diff['f'+limb])
+            constraints.append(self.u_diff['f'+limb] - bap.force_limits[limb]['max'])
+            constraints.append(bap.force_limits[limb]['min'] - self.u_diff['f'+limb])
 
             # friction limits
-            constraints.append(-mu*self.u_diff['f'+limb][0,0] + self.u_diff['f'+limb][1,0])
-            constraints.append(-mu*self.u_diff['f'+limb][0,0] - self.u_diff['f'+limb][1,0])
+            constraints.append(-bap.dynamics['friction']*self.u_diff['f'+limb][0,0] + self.u_diff['f'+limb][1,0])
+            constraints.append(-bap.dynamics['friction']*self.u_diff['f'+limb][0,0] - self.u_diff['f'+limb][1,0])
 
         return constraints
 
@@ -274,8 +273,7 @@ class BoxAtlas():
         """
         Adds to the list of contraints the constraints that are mode dependent.
         """
-        
-        mu  = boxatlas_parameters.friction
+
         for limb_key, limb_value in self.limbs['moving'].items():
 
             # moving limbs in the specified domain
@@ -295,10 +293,10 @@ class BoxAtlas():
                 n = A[contact_surface, :].reshape(2,1) # normal vector
                 t = np.array([[-n[1,0]],[n[0,0]]]) # tangential vector
                 d = np.array([[b[contact_surface, 0]]]) # offset
-                f_n = boxatlas_parameters.stiffness*(d - n.T.dot(self.x_diff['q'+limb_key])) # normal force (>0)
-                f_t = - boxatlas_parameters.damping*(t.T.dot(self.u_diff['v'+limb_key])) # tangential force
-                constraints.append(f_t - mu*f_n)
-                constraints.append(- f_t - mu*f_n)
+                f_n = bap.dynamics['normal_stiffness']*(d - n.T.dot(self.x_diff['q'+limb_key])) # normal force (>0)
+                f_t = - bap.dynamics['tangential_damping']*(t.T.dot(self.u_diff['v'+limb_key])) # tangential force
+                constraints.append(f_t - bap.dynamics['friction']*f_n)
+                constraints.append(- f_t - bap.dynamics['friction']*f_n)
 
         return constraints
 
@@ -350,12 +348,12 @@ class BoxAtlas():
 
         # body linear velocity
         dynamics_2 = []
-        g = np.array([[0.],[-boxatlas_parameters.gravity]])
+        g = np.array([[0.],[-bap.dynamics['gravity']]])
         v_dot = adnumber(g)
         for limb in self.limbs['moving'].keys():
-            v_dot = v_dot + self._force_moving_limb(limb, mode)/boxatlas_parameters.mass
+            v_dot = v_dot + self._force_moving_limb(limb, mode)/bap.dynamics['mass']
         for limb in self.limbs['fixed'].keys():
-            v_dot = v_dot + self._force_fixed_limb(limb)/boxatlas_parameters.mass
+            v_dot = v_dot + self._force_fixed_limb(limb)/bap.dynamics['mass']
         dynamics_2.append(v_dot)
 
         # body angular velocity
@@ -363,11 +361,11 @@ class BoxAtlas():
         for limb_key, limb_value in self.limbs['moving'].items():
             r_i = limb_value.nominal_position
             f_i = self._force_moving_limb(limb_key, mode)
-            o_dot = o_dot + cross_product_2d(r_i, f_i)/boxatlas_parameters.moment_of_inertia
+            o_dot = o_dot + cross_product_2d(r_i, f_i)/bap.dynamics['moment_of_inertia']
         for limb_key, limb_value in self.limbs['fixed'].items():
             r_i = limb_value.position
             f_i = self._force_fixed_limb(limb_key)
-            o_dot = o_dot + cross_product_2d(r_i, f_i)/boxatlas_parameters.moment_of_inertia
+            o_dot = o_dot + cross_product_2d(r_i, f_i)/bap.dynamics['moment_of_inertia']
         dynamics_2.append(o_dot)
 
         return np.vstack(dynamics_2)
@@ -388,17 +386,16 @@ class BoxAtlas():
 
         # update parameter dynamics and position of the limbs
         dynamics_1 = self._first_order_dynamics()
-        h = boxatlas_parameters.sampling_time
         p = [self.x_diff[parameter['label']] for limb in self.limbs['moving'].values() for parameter in limb.parameters]
         q_l = [self.x_diff['q'+limb] for limb in self.limbs['moving'].keys()]
-        p_and_q_l_next =  np.vstack(p + q_l) + h*dynamics_1
+        p_and_q_l_next =  np.vstack(p + q_l) + bap.dynamics['sampling_time']*dynamics_1
 
         # update velocity of the body
         dynamics_2 = self._second_order_dynamics(mode)
-        v_b_next = np.vstack((self.x_diff['vb'], self.x_diff['ob'])) + h*dynamics_2
+        v_b_next = np.vstack((self.x_diff['vb'], self.x_diff['ob'])) + bap.dynamics['sampling_time']*dynamics_2
 
         # update position of the body
-        q_b_next = np.vstack((self.x_diff['qb'], self.x_diff['tb'])) + h*v_b_next
+        q_b_next = np.vstack((self.x_diff['qb'], self.x_diff['tb'])) + bap.dynamics['sampling_time']*v_b_next
 
         # extract affine-system matrices
         discrete_dynamics = np.vstack([p_and_q_l_next, q_b_next, v_b_next])
@@ -434,9 +431,9 @@ class BoxAtlas():
             n = A[contact_surface, :].reshape(2,1) # normal vector
             d = np.array([[b[contact_surface, 0]]]) # offset
             penetration = n.T.dot(self.x_diff['q'+limb]) - d
-            f_n = - boxatlas_parameters.stiffness * penetration * n
+            f_n = - bap.dynamics['normal_stiffness'] * penetration * n
             v_t = self.u_diff['v'+limb] - (self.u_diff['v'+limb].T.dot(n)) * n
-            f_t = - boxatlas_parameters.damping * v_t
+            f_t = - bap.dynamics['tangential_damping'] * v_t
             f = f_n + f_t
 
         return f
@@ -476,9 +473,7 @@ class BoxAtlas():
         return A, B, c
 
     def _extract_nominal_configuration(self):
-        for i, mode in enumerate(self.contact_modes):
-            if mode == self.nominal_mode:
-                nominal_mode_index = i
+        nominal_mode_index = self.get_mode_index(self.nominal_mode)
         nominal_system = self.pwa_system.affine_systems[nominal_mode_index]
         nominal_domain = self.pwa_system.domains[nominal_mode_index]
         return nominal_system, nominal_domain
@@ -499,11 +494,11 @@ class BoxAtlas():
         state_cost = 0.
         for limb in self.limbs['moving'].keys():
             q_rel = self.x_diff['q'+limb] - self.x_diff['qb']
-            state_cost += boxatlas_parameters.state_cost['q'+limb+'_rel'] * q_rel.T.dot(q_rel)
+            state_cost += bap.controller['state_cost']['q'+limb+'_rel'] * q_rel.T.dot(q_rel)
 
         # body
         for label in ['qb', 'tb', 'vb', 'ob']:
-            state_cost += boxatlas_parameters.state_cost[label] * self.x_diff[label].T.dot(self.x_diff[label])
+            state_cost += bap.controller['state_cost'][label] * self.x_diff[label].T.dot(self.x_diff[label])
 
         # get the hessian matrix
         x = np.vstack(*[self.x_diff.values()])
@@ -516,11 +511,11 @@ class BoxAtlas():
         # velocity of moving limbs
         input_cost = 0.
         for limb in self.limbs['moving'].keys():
-            input_cost += boxatlas_parameters.input_cost['v'+limb] * self.u_diff['v'+limb].T.dot(self.u_diff['v'+limb])
+            input_cost += bap.controller['input_cost']['v'+limb] * self.u_diff['v'+limb].T.dot(self.u_diff['v'+limb])
 
         # force on fixed limbs
         for limb in self.limbs['fixed'].keys():
-            input_cost += boxatlas_parameters.input_cost['f'+limb] * self.u_diff['f'+limb].T.dot(self.u_diff['f'+limb])
+            input_cost += bap.controller['input_cost']['f'+limb] * self.u_diff['f'+limb].T.dot(self.u_diff['f'+limb])
 
         # get the hessian matrix
         u = np.vstack(*[self.u_diff.values()])
@@ -608,32 +603,23 @@ class BoxAtlas():
         self._visualizer.visualize(configuration)
         return
 
-    def print_state_labels(self):
-        x = []
-        for limb in self.limbs['moving'].values():
-            for parameter in limb.parameters:
-                x += [parameter['label']]
-        for limb in self.limbs['moving'].keys():
-            x += ['q' + limb + 'x', 'q' + limb + 'y']
-        x += ['qbx', 'qby', 'tb', 'vbx', 'vby', 'ob']
-        print 'Box-Atlas states:\n', x
-        return
+    def get_mode_index(self, mode):
+        return np.where([mode == m for m in self.contact_modes])[0][0]
 
-    def print_input_labels(self):
-        u = []
-        for limb in self.limbs['moving'].keys():
-            u += ['v' + limb + 'x', 'v' + limb + 'y']
-        for limb in self.limbs['fixed'].keys():
-            u += ['f' + limb + 'n', 'f' + limb + 't']
-        print 'Box-Atlas inputs:\n', u
-        return
+    def _synthesize_controller(self):
+        controller = MPCHybridController(
+            self.pwa_system,
+            bap.controller['horizon'],
+            bap.controller['objective_norm'],
+            self.Q,
+            self.R,
+            self.P,
+            self.X_N,
+            bap.controller['gurobi'])
+        controller = self._avoid_forbidden_transitions(controller)
+        return controller
 
-    def print_mode_sequence(self, mode_sequence):
-        for mode in mode_sequence:
-            print self.contact_modes[mode]
-        return
-
-    def avoid_forbidden_transitions(self, controller):
+    def _avoid_forbidden_transitions(self, controller):
         for limb_key, limb_value in self.limbs['moving'].items():
             for transition in limb_value.forbidden_transitions:
                 previous_modes = [i for i, mode in enumerate(self.contact_modes) if mode[limb_key] == transition[0]]
@@ -644,6 +630,36 @@ class BoxAtlas():
                             expr = controller._d[k, previous_mode] + controller._d[k+1, next_mode]
                             controller._model.addConstr(expr <= 1.)
         return controller
+
+    def print_state_labels(self):
+        x = []
+        for limb in self.limbs['moving'].values():
+            for parameter in limb.parameters:
+                x += [parameter['label']]
+        for limb in self.limbs['moving'].keys():
+            x += ['q' + limb + 'x', 'q' + limb + 'y']
+        x += ['qbx', 'qby', 'tb', 'vbx', 'vby', 'ob']
+        print '\nBox-Atlas states:'
+        for i, x_i in enumerate(x):
+            print str(i) + ':', x_i
+        return
+
+    def print_input_labels(self):
+        u = []
+        for limb in self.limbs['moving'].keys():
+            u += ['v' + limb + 'x', 'v' + limb + 'y']
+        for limb in self.limbs['fixed'].keys():
+            u += ['f' + limb + 'n', 'f' + limb + 't']
+        print '\nBox-Atlas inputs:'
+        for i, u_i in enumerate(u):
+            print str(i) + ':', u_i
+        return
+
+    def print_modes(self):
+        print '\nBox-atlas modes:'
+        for i, mode in enumerate(self.contact_modes):
+            print str(i) + ':', mode
+        return
 
 def cross_product_2d(a, b):
     return np.array([[a[0,0]*b[1,0] - a[1,0]*b[0,0]]])
