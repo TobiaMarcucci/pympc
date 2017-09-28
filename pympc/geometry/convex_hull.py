@@ -100,17 +100,18 @@ def find_vertices_of_a_simplex(points):
 
 def plane_through_points(points):
     """
-    Returns the plane a^T x = b passing through the input points. It first adds a random offset to be shure that the matrix of the points is invertible (it wouldn't be the case if the plane we are looking for passes through the origin). The a vector has norm equal to one; the scalar b is non-negative.
+    Returns the plane a^T x = b passing through the input points. It first adds a random offset to be sure that the matrix of the points is invertible (it wouldn't be the case if the plane we are looking for passes through the origin). The a vector has norm equal to one; the scalar b is non-negative.
     """
-    offset = np.random.rand(points[0].shape[0],1)
+    offset = np.random.rand(points[0].shape[0], 1)
     points = [p + offset for p in points]
     P = np.hstack(points).T
     if P.shape[0] != P.shape[1] or np.linalg.matrix_rank(P) != P.shape[0]:
-        print 'lhs:', P
+        # print 'lhs:', P
+        # print 'rhs:', np.ones(offset.shape)
         print 'lhs shape:', P.shape
         print 'lhs rank:', np.linalg.matrix_rank(P)
-        print 'rhs:', np.ones(offset.shape)
-        raise ValueError('aaa')
+        import pdb; pdb.set_trace()
+        #raise ValueError('ConvexHull.plane_through_points()')
     a = np.linalg.solve(P, np.ones(offset.shape))
     #print P, np.ones(offset.shape)
     b = 1. - a.T.dot(offset)
@@ -178,22 +179,19 @@ def first_two_points(A, b, n_proj):
 
     return v_proj
 
-def inner_simplex(A, b, v_proj, x=None, tol=1.e-7):
+def inner_simplex(A, b, v_proj, point=None, tol=1.e-7):
 
     n_proj = v_proj[0].shape[0]
     for i in range(2, n_proj+1):
         a, d = plane_through_points([v[:i,:] for v in v_proj])
         # pick the right sign for a
         sign = 1.
-        if x is not None:
-            sign = np.sign((a.T.dot(x[:i,:]) - d)[0,0])
+        if point is not None:
+            sign = np.sign((a.T.dot(point[:i,:]) - d)[0,0])
         a = np.vstack((a, np.zeros((A.shape[1]-i, 1))))
         sol = linear_program(-sign*a, A, b)
         if -sol.min - sign*d[0,0] < tol:
-        #if np.linalg.norm(a.T.dot(sol.argmin) + d) < tol:
-        #sol = linear_program(-a, A, b)
-        #if -sol.min < d[0,0] + tol:
-            if x is not None:
+            if point is not None:
                 print 'This is not supposed to happen!'
             a = -a
             sol = linear_program(-a, A, b)
@@ -241,27 +239,29 @@ class PolytopeProjectionInnerApproximation:
 
         return
 
-    def _initialize(self, x=None):
+    def _initialize(self, point=None):
 
         # initialize inner approximation with a simplex
         simplex_vertices = first_two_points(self.A_switched, self.b, len(self.resiudal_dimensions))
-        simplex_vertices = inner_simplex(self.A_switched, self.b, simplex_vertices, x)
-        # self.hull = ConvexHull(simplex_vertices) # my version
-        self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
+        simplex_vertices = inner_simplex(self.A_switched, self.b, simplex_vertices, point)
+        self.hull = ConvexHull(simplex_vertices) # my version
+        # self.hull = ScipyConvexHull(np.hstack(simplex_vertices).T, incremental=True) # qhull version
 
         return
 
     def include_point(self, point, tol=1e-7):
 
         if self.hull is None:
+            tic = time.time()
             self._initialize(point)
+            print 'simplex initialization time ' + str(time.time()-tic) + ', '
 
         # dimension of the projection space
         n_proj = len(self.resiudal_dimensions)
 
         # violation of the approximation boundaires
-        # residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
-        residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
+        residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
+        # residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
 
         # # for the plot on the paper
         # import copy
@@ -279,8 +279,8 @@ class PolytopeProjectionInnerApproximation:
             facet_to_expand = residuals.index(max(residuals))
             a = np.zeros((self.A.shape[1], 1))
 
-            # hs = self.hull.halfspaces[facet_to_expand] # my version
-            hs = [self.hull.equations[facet_to_expand:facet_to_expand+1,:-1].T, - self.hull.equations[facet_to_expand:facet_to_expand+1,-1:]] # qhull version
+            hs = self.hull.halfspaces[facet_to_expand] # my version
+            # hs = [self.hull.equations[facet_to_expand:facet_to_expand+1,:-1].T, - self.hull.equations[facet_to_expand:facet_to_expand+1,-1:]] # qhull version
 
             a[:n_proj,:] = hs[0]
             tic = time.time()
@@ -295,13 +295,13 @@ class PolytopeProjectionInnerApproximation:
 
             # add vertex to the hull
             tic = time.time()
-            # self.hull.add_point(sol.argmin[:n_proj,:]) # my version
-            self.hull.add_points(sol.argmin[:n_proj,:].T) # qhull version
+            self.hull.add_point(sol.argmin[:n_proj,:]) # my version
+            # self.hull.add_points(sol.argmin[:n_proj,:].T) # qhull version
             time_ch += time.time() - tic
 
             # new residuals
-            # residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
-            residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
+            residuals = [(hs[0].T.dot(point) - hs[1])[0,0] for hs in self.hull.halfspaces] # my version
+            # residuals = (self.hull.equations[:,:-1].dot(point) + self.hull.equations[:,-1:]).flatten().tolist() # qhull version
 
         #     # for the plot on the paper
         #     p_inner_plot = Polytope(self.hull.A, self.hull.b)
@@ -321,6 +321,6 @@ class PolytopeProjectionInnerApproximation:
         """
         if self.hull is None:
             return False
-        # is_inside = np.max(self.hull.A.dot(x) - self.hull.b) <= tol # my version
-        is_inside = max((self.hull.equations[:,:-1].dot(x) + self.hull.equations[:,-1:]).flatten().tolist()) <= tol # qhull version
+        is_inside = np.max(self.hull.A.dot(x) - self.hull.b) <= tol # my version
+        # is_inside = max((self.hull.equations[:,:-1].dot(x) + self.hull.equations[:,-1:]).flatten().tolist()) <= tol # qhull version
         return is_inside

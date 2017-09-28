@@ -1,7 +1,7 @@
 import time
 import numpy as np
 from geometry.polytope import Polytope
-from pympc.geometry.convex_hull import PolytopeProjectionInnerApproximation
+from pympc.geometry.inner_approximation_polytope_projection import InnerApproximationOfPolytopeProjection
 
 class FeasibleSetLibrary:
     """
@@ -57,14 +57,11 @@ class FeasibleSetLibrary:
                             lhs = np.hstack((-prog.C_x, prog.C_u))
                             rhs = prog.C
                             residual_dimensions = range(prog.C_x.shape[1])
-                            print('constructing inner simplex... '),
+                            print('building inner approximation... '),
                             tic = time.time()
-                            feasible_set = PolytopeProjectionInnerApproximation(lhs, rhs, residual_dimensions)
-                            print('inner simplex constructed in ' + str(time.time()-tic) + ' s.')
-                            print('including sample in inner approximation... '),
-                            tic = time.time()
+                            feasible_set = InnerApproximationOfPolytopeProjection(lhs, rhs, residual_dimensions)
                             feasible_set.include_point(x)
-                            print('sample included in ' + str(time.time()-tic) + ' s.')
+                            print('approximation built ' + str(time.time()-tic) + ' s.')
                             self.library[ss]['feasible_set'] = feasible_set
                     else:
                         n_unfeasible += 1

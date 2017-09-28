@@ -395,6 +395,9 @@ class MPCHybridController:
                 self._model.remove(self._model.getConstrByName('intial_condition_' + str(i)))
             self._model.addConstr(self._x[0,i] == x0[i,0], name='intial_condition_' + str(i))
 
+        # reset the model to avoid "random" warm starts from gurobi
+        self._model.reset() 
+
         # warm start
         if u_ws is not None:
             self._warm_start_input(u_ws)
