@@ -51,8 +51,8 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
     # empty inequalities if not provided
     n_x = f.shape[0]
     if A is None or b is None:
-        A = np.array([[]]*n_x)
-        b = np.array([[]])
+        A = np.zeros((0, n_x))
+        b = np.zeros((0, 1))
     n_ineq = A.shape[0]
 
     # state equalities as inequalities
