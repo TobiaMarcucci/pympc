@@ -144,6 +144,64 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, x_lb=None, x_ub
         
     return x_star, V_star
 
+def quadratically_constrained_linear_program(f, A=None, b=None, C=None, d=None, P=None, q=None, r=None, tol=1.e-9):
+
+    # initialize gurobi model
+    model = grb.Model()
+
+    # optimization variables
+    n_x = f.shape[0]
+    x = model.addVars(n_x, lb=[- grb.GRB.INFINITY]*n_x, name='x')
+
+    # linear inequalities
+    if A is not None and b is not None:
+        for i in range(A.shape[0]):
+            lhs = grb.LinExpr()
+            for j in range(n_x):
+                if np.abs(A[i,j]) > tol:
+                    lhs.add(A[i,j]*x[j])
+            model.addConstr(lhs <= b[i])
+
+    # linear equalities
+    if C is not None and d is not None:
+        for i in range(C.shape[0]):
+            lhs = grb.LinExpr()
+            for j in range(n_x):
+                if np.abs(C[i,j]) > tol:
+                    lhs.add(C[i,j]*x[j])
+            model.addConstr(lhs == d[i])
+
+    # quadratic inequalities
+    lhs = grb.QuadExpr()
+    for i in range(n_x):
+        for j in range(n_x):
+            if np.abs(P[i,j]) > tol:
+                lhs.add(x[i]*P[i,j]*x[j])
+    if q is not None:
+        for i in range(n_x):
+            if np.abs(q[i,0]) > tol:
+                lhs.add(q[i,0]*x[i])
+    model.addConstr(lhs <= r)
+
+    # cost function
+    f = np.reshape(f, (n_x, 1))
+    cost = grb.LinExpr()
+    for i in range(n_x):
+        if np.abs(f[i,0]) > tol:
+            cost.add(f[i,0]*x[i])
+    model.setObjective(cost)
+
+    # run the optimization
+    model.setParam('OutputFlag', False)
+    model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
+    model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
+    model.optimize()
+
+    x_star = np.array([[model.getAttr('x', x)[i]] for i in range(n_x)])
+    V_star = cost.getValue()
+
+    return x_star, V_star
+
 def real_variable(model, d_list, **kwargs):
     """
     Creates a Gurobi variable with dimension d_list (e.g., [3,4,5]) with minus infinity as lower bounds.

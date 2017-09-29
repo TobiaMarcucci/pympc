@@ -1,6 +1,9 @@
 import numpy as np
-from pympc.optimization.gurobi import linear_program
+from pympc.optimization.gurobi import linear_program, quadratically_constrained_linear_program
 from scipy.spatial import ConvexHull
+from pympc.algebra import rangespace_basis, nullspace_basis
+import scipy.linalg as linalg
+
 
 # class InnerApproximationOfPolytopeProjection:
 
@@ -122,7 +125,7 @@ class InnerApproximationOfPolytopeProjection:
         while not point_in_convex_hull(point, self.vertices):
 
             # find best direction of growth
-            n, _ = separating_hyperplane_of_maximum_alignment(point, self.vertices)
+            n, _, _ = separating_hyperplane_of_maximum_alignment(point, self.vertices)
             a = np.zeros((self.A.shape[1], 1))
             a[:len(self.residual_dimensions),:] = n
 
@@ -217,6 +220,54 @@ def point_in_convex_hull(point, hull_points):
     else:
         return False
 
+# def separating_hyperplane_of_maximum_alignment(point, hull_points):
+#     """
+#     Given a set of points {v_1, ..., v_n} and a point p which lies outside their convex hull. It returns the separating hyperplane H := {x | a^T x = b} with the normal a as aligned as possible with the segment connecting p and the centroid c := 1/n * \sum_{i = 1}^n v_i.
+#     It solves the linear program
+#     max_{a, b} (p - c)^T a
+#     subject to
+#     abs(b) <= 1
+#     a^T p >= b
+#     a^T v_i <= b \forall i \in {1, ..., n}
+#     (The constraints on the norm of b makes the problem bounded. It is necessary to move the origin of the coordinate system in c, in order to be sure that b=0 is always unfeasible.)
+#     """
+
+#     # centroid of the set of points
+#     n = point.shape[0]
+#     n_h = len(hull_points)
+#     HP = np.hstack(hull_points)
+#     c = (np.sum(HP, axis=1)/n_h).reshape(n,1)
+
+#     # move the coordinates
+#     point = point - c
+#     HP = HP - np.hstack((c for i in range(n_h)))
+
+#     # given point on one side of the plane
+#     lhs = np.hstack((-point.T, np.ones((1,1))))
+#     rhs = np.zeros((1, 1))
+
+#     # hull points on the other side
+#     lhs = np.vstack((lhs, np.hstack((HP.T, -np.ones((n_h,1))))))
+#     rhs = np.vstack((rhs, np.zeros((n_h, 1))))
+
+#     # norm of b lower or equal to one
+#     lhs = np.vstack((lhs,
+#         np.hstack((
+#             np.zeros((2, n)),
+#             np.array([[1.], [-1.]])
+#             ))
+#         ))
+#     rhs = np.vstack((rhs, np.ones((2, 1))))
+
+#     # solve the linear program
+#     f = np.vstack((point, np.zeros((1,1))))
+#     sol = linear_program(-f, lhs, rhs)
+#     a_star = sol.argmin[:n,:]
+#     b_star = sol.argmin[n:,:] + a_star.T.dot(c)
+
+#     return a_star, b_star, c
+
+
 def separating_hyperplane_of_maximum_alignment(point, hull_points):
     """
     Given a set of points {v_1, ..., v_n} and a point p which lies outside their convex hull. It returns the separating hyperplane H := {x | a^T x = b} with the normal a as aligned as possible with the segment connecting p and the centroid c := 1/n * \sum_{i = 1}^n v_i.
@@ -235,31 +286,23 @@ def separating_hyperplane_of_maximum_alignment(point, hull_points):
     HP = np.hstack(hull_points)
     c = (np.sum(HP, axis=1)/n_h).reshape(n,1)
 
-    # move the coordinates
-    point = point - c
-    HP = HP - np.hstack((c for i in range(n_h)))
-
     # given point on one side of the plane
-    lhs = np.hstack((-point.T, np.ones((1,1))))
-    rhs = np.zeros((1, 1))
+    A = np.hstack((-point.T, np.ones((1,1))))
+    b = np.zeros((1, 1))
 
     # hull points on the other side
-    lhs = np.vstack((lhs, np.hstack((HP.T, -np.ones((n_h,1))))))
-    rhs = np.vstack((rhs, np.zeros((n_h, 1))))
+    A = np.vstack((A, np.hstack((HP.T, -np.ones((n_h,1))))))
+    b = np.vstack((b, np.zeros((n_h, 1))))
 
-    # norm of b lower or equal to one
-    lhs = np.vstack((lhs,
-        np.hstack((
-            np.zeros((2, n)),
-            np.array([[1.], [-1.]])
-            ))
-        ))
-    rhs = np.vstack((rhs, np.ones((2, 1))))
+    # ||a||_2 <= 1
+    P = linalg.block_diag(np.eye(n), np.zeros((1,1)))
+    r = 1.
 
-    # solve the linear program
-    f = np.vstack((point, np.zeros((1,1))))
-    sol = linear_program(-f, lhs, rhs)
-    a_star = sol.argmin[:n,:]
-    b_star = sol.argmin[n:,:] + a_star.T.dot(c)
+    # solve the qclp
+    f = np.vstack((c - point, np.zeros((1,1))))
+    ab_star, _ = quadratically_constrained_linear_program(f=f, A=A, b=b, P=P, r=r)
+    a_star = ab_star[:n,:]
+    a_star /= np.linalg.norm(a_star) 
+    b_star = ab_star[n:,:]/np.linalg.norm(a_star) 
 
-    return a_star, b_star
+    return a_star, b_star, c

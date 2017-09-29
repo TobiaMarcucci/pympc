@@ -4,6 +4,7 @@ from pympc.geometry.polytope import Polytope
 from pympc.geometry.chebyshev_center import chebyshev_center
 from pympc.geometry.convex_hull import plane_through_points
 from pympc.geometry.convex_hull import ConvexHull
+from pympc.geometry.inner_approximation_polytope_projection import InnerApproximationOfPolytopeProjection, point_in_convex_hull
 
 class TestGeometry(unittest.TestCase):
 
@@ -186,7 +187,6 @@ class TestGeometry(unittest.TestCase):
                 for v_ve in p_proj_ve.vertices:
                     self.assertTrue(any([np.allclose(v, v_ve) for v in p_proj.vertices]))
 
-
     def test_convex_hull(self):
 
         # first hull with 4 points
@@ -275,6 +275,23 @@ class TestGeometry(unittest.TestCase):
             self.assertTrue(any([np.allclose(ab_real, ab) for ab in Ab]))
         for ab in Ab:
             self.assertTrue(any([np.allclose(ab_real, ab) for ab_real in Ab_real]))
+
+    def test_point_in_convex_hull(self):
+        np.random.seed(1)
+
+        n_test = 100
+        n_var = 5
+        n_cons = 50
+        for i in range(100):
+            A = np.random.randn(n_cons, n_var)
+            b = np.random.rand(n_cons, 1)
+            p = Polytope(A, b)
+            p.assemble()
+            x = np.random.randn(n_var, 1)/50.
+            in_p = p.applies_to(x)
+            in_h = point_in_convex_hull(x, p.vertices)
+            print in_p
+            self.assertTrue(in_p == in_h)
 
 if __name__ == '__main__':
     unittest.main()
