@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import gurobipy as grb
 from contextlib import contextmanager
 from copy import copy
-
 from optimization.pnnls import linear_program
 from optimization.parametric_programs import ParametricLP, ParametricQP
 from optimization.mpqpsolver import MPQPSolver, CriticalRegion

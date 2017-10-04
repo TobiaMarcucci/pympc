@@ -68,9 +68,10 @@ class Trajectory:
 
 class BoxAtlas():
 
-    def __init__(self, limbs, nominal_mode):
+    def __init__(self, limbs, nominal_mode, forbidden_modes=[]):
         self.limbs = limbs
         self.nominal_mode = nominal_mode
+        self.forbidden_modes = forbidden_modes
         self.n_p = sum([len(limb.parameters) for limb in self.limbs['moving'].values()])
         self.x_eq = self._get_equilibrium_state()
         self.u_eq = self._get_equilibrium_input()
@@ -79,6 +80,7 @@ class BoxAtlas():
         self.x_diff = self._differentiable_state()
         self.u_diff = self._differentiable_input()
         self.contact_modes = self._get_contact_modes()
+        self.contact_modes = self._remove_forbidden_contact_modes()
         domains = self._get_domains()
         self.contact_modes, domains = self._remove_empty_domains(domains)
         affine_systems = self._get_affine_systems()
@@ -168,7 +170,7 @@ class BoxAtlas():
         contact_modes = [
         {'left_hand': 'not_in_contact', 'right_hand': 'not_in_contact'},
         {'left_hand': 'in_contact', 'right_hand': 'not_in_contact'},
-        {'left_hand': 'not_in_contact_side', 'right_hand': 'in_contact'}
+        {'left_hand': 'not_in_contact', 'right_hand': 'in_contact'}
         ]
         """
 
@@ -187,6 +189,15 @@ class BoxAtlas():
             contact_modes.append(mode)
 
         return contact_modes
+
+    def _remove_forbidden_contact_modes(self):
+        allowed_modes = copy(self.contact_modes)
+        for forbidden_mode in self.forbidden_modes:
+            for mode in self.contact_modes:
+                is_forbidden = all([mode[limb_key] == limb_value for limb_key, limb_value in forbidden_mode.items()])
+                if is_forbidden:
+                    allowed_modes.remove(mode)
+        return allowed_modes
 
     def _get_domains(self):
         """
@@ -659,6 +670,11 @@ class BoxAtlas():
         print '\nBox-atlas modes:'
         for i, mode in enumerate(self.contact_modes):
             print str(i) + ':', mode
+        return
+
+    def print_mode_sequence(self, mode_sequence):
+        for i, mode_index in enumerate(mode_sequence):
+            print str(i) + ':', self.contact_modes[mode_index]
         return
 
 def cross_product_2d(a, b):

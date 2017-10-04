@@ -1,6 +1,8 @@
 from scipy.optimize import nnls
 import numpy as np
 from collections import namedtuple
+import scipy.io
+import time
 
 LPSolution = namedtuple('LPSolution',  ['argmin', 'min', 'active_set', 'inequality_multipliers', 'equality_multipliers', 'primal_degenerate', 'dual_degenerate'])
 QPSolution = namedtuple('QPSolution',  ['argmin', 'min'])
@@ -139,9 +141,13 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, tol=1.e-7):
         L = np.linalg.cholesky(H)
         L = L.T
         M = A.dot(np.linalg.inv(L))
+        f = np.reshape(f, (n_x,1))
         d = b + A.dot(np.linalg.inv(H)).dot(f)
         gamma = 1
-        [y_star, rvalue_star] = nnls(np.vstack((-M.T,-d.T)),np.vstack((np.zeros((n_x,1)),gamma)).flatten())
+        lhs_nnls = np.vstack((-M.T,-d.T))
+        rhs_nnls = np.vstack((np.zeros((n_x,1)),gamma)).flatten()
+        # scipy.io.savemat('nnls_matrices_' + str(time.time()), {'A': lhs_nnls, 'b': rhs_nnls})
+        [y_star, rvalue_star] = nnls(lhs_nnls, rhs_nnls)
         y_star = np.reshape(y_star,(len(y_star),1))
         r_star = np.vstack((-M.T,-d.T)).dot(y_star)-np.vstack((np.zeros((n_x,1)),gamma))
         if (np.linalg.norm(r_star)<tol):
