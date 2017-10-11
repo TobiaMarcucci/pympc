@@ -3,6 +3,7 @@ from pympc.optimization.gurobi import linear_program, quadratically_constrained_
 from scipy.spatial import ConvexHull
 from pympc.algebra import rangespace_basis, nullspace_basis
 import scipy.linalg as linalg
+from pympc.geometry.polytope import Polytope
 
 
 # class InnerApproximationOfPolytopeProjection:
@@ -168,6 +169,16 @@ class InnerApproximationOfPolytopeProjection:
         Determines if the given point belongs to the polytope (returns True or False).
         """
         return point_in_convex_hull(point, self.vertices)
+
+    def compute_convex_hull(self):
+        points = np.hstack(self.vertices).T
+        hull = ConvexHull(points)
+        lhs = hull.equations[:,:-1]
+        rhs = - hull.equations[:,-1:]
+        self.halfspaces = Polytope(lhs, rhs)
+        self.halfspaces.assemble()
+        return
+
 
 def plane_through_points(points):
     """

@@ -90,7 +90,7 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
     #model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
     #model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
     model.optimize()
-    # print model.Runtime
+    # model.Runtime
     
     # populate output
     #print model.status

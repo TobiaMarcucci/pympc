@@ -2,6 +2,8 @@ import time
 import numpy as np
 from geometry.polytope import Polytope
 from pympc.geometry.inner_approximation_polytope_projection import InnerApproximationOfPolytopeProjection
+from collections import namedtuple
+
 
 class FeasibleSetLibrary:
     """
@@ -130,6 +132,12 @@ class FeasibleSetLibrary:
                     self.library[shifted_ss] = dict()
                     self.library[shifted_ss]['program'] = self.controller.condense_program(shifted_ss)
                     self.library[shifted_ss]['feasible_set'] = EmptyFeasibleSet()
+        return
+
+    def store_H_representations(self):
+        for ss in self.library.values():
+            ss['feasible_set'].compute_convex_hull()
+        return
 
     @staticmethod
     def shift_switching_sequence(ss, terminal_domain):
@@ -137,12 +145,12 @@ class FeasibleSetLibrary:
 
     def plot_partition(self):
         for ss_value in self.library.values():
-            color = np.random.rand(3,1)
+            color = np.random.rand(3,1).flatten()
             fs = ss_value['feasible_set']
-            if not fs.empty:
-                p = Polytope(fs.hull.A, fs.hull.b)
-                p.assemble()#redundant=False, vertices=fs.hull.points)
-                p.plot(facecolor=color, alpha=.5)
+            if not fs.halfspaces.empty:
+                # p = Polytope(fs.hull.A, fs.hull.b)
+                # p.assemble()#redundant=False, vertices=fs.hull.points)
+                fs.halfspaces.plot(facecolor=color, alpha=.5)
         return
 
     def save(self, name):
@@ -161,6 +169,12 @@ def load_library(name):
     return library
 
 class EmptyFeasibleSet:
+
+    def __init__(self):
+        self.halfspaces = EmptyPolytope()
+        return
+
+class EmptyPolytope:
 
     def __init__(self):
         self.empty = True
