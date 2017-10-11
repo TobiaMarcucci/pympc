@@ -25,6 +25,36 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
     x = model.addVars(n_x, lb=[- grb.GRB.INFINITY]*n_x, name='x')
     x_np = np.array([[x[i]] for i in range(n_x)])
 
+
+    # #################################
+
+    # # linear inequalities
+    # if A is not None and b is not None:
+    #     for i in range(A.shape[0]):
+    #         lhs = grb.LinExpr()
+    #         for j in range(n_x):
+    #             if np.abs(A[i,j]) > tol:
+    #                 lhs.add(A[i,j]*x[j])
+    #         model.addConstr(lhs <= b[i])
+
+    # # cost function
+    # f = np.reshape(f, (n_x, 1))
+    # cost = grb.LinExpr()
+    # for i in range(n_x):
+    #     if np.abs(f[i,0]) > tol:
+    #         cost.add(f[i,0]*x[i])
+    # model.setObjective(cost)
+
+    # # run the optimization
+    # model.setParam('OutputFlag', False)
+    # model.optimize()
+    # print model.Runtime
+    
+    # return
+
+    # #################################
+
+
     with suppress_stdout():
 
         # inequality constraints
@@ -57,11 +87,13 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
 
     # run the optimization
     model.setParam('OutputFlag', False)
-    model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
-    model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
+    #model.setParam(grb.GRB.Param.OptimalityTol, 1.e-9)
+    #model.setParam(grb.GRB.Param.FeasibilityTol, 1.e-9)
     model.optimize()
+    print model.Runtime
     
     # populate output
+    #print model.status
     if model.status == grb.GRB.Status.OPTIMAL:
         x_star = np.array([[model.getAttr('x', x)[i]] for i in range(n_x)])
         V_star = V.getValue()
