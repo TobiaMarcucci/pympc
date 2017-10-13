@@ -1,11 +1,11 @@
 import unittest
 import numpy as np
-from pympc.dynamical_systems import DTLinearSystem, DTPWASystem, DTAffineSystem, dare, moas_closed_loop_from_orthogonal_domains
+from pympc.dynamical_systems import LinearSystem, AffineSystem, PieceWiseAffineSystem, dare, moas_closed_loop_from_orthogonal_domains
 from pympc.geometry.polytope import Polytope
 
 class TestDynamicalSystems(unittest.TestCase):
 
-    def test_DTLinearSystem(self):
+    def test_LinearSystem(self):
 
         # constinuous time double integrator
         A = np.array([[0., 1.],[0., 0.]])
@@ -13,7 +13,7 @@ class TestDynamicalSystems(unittest.TestCase):
         t_s = 1.
 
         # discrete time from continuous
-        sys = DTLinearSystem.from_continuous(A, B, t_s, 'zoh')
+        sys = LinearSystem.from_continuous(A, B, t_s, 'zoh')
         A_discrete = np.eye(2) + A*t_s
         B_discrete = B*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(B)
         self.assertTrue(all(np.isclose(sys.A.flatten(), A_discrete.flatten())))
@@ -41,7 +41,7 @@ class TestDynamicalSystems(unittest.TestCase):
         U = Polytope.from_bounds(u_min, u_max)
         U.assemble()
         moas = moas_closed_loop_from_orthogonal_domains(A, B, K, X, U)
-        sys_cl = DTLinearSystem(A + B.dot(K), np.zeros((2,1)))
+        sys_cl = LinearSystem(A + B.dot(K), np.zeros((2,1)))
         v0_max = max([v[0] for v in moas.vertices])
         v1_max = max([v[1] for v in moas.vertices])
         v0_min = min([v[0] for v in moas.vertices])
@@ -58,7 +58,7 @@ class TestDynamicalSystems(unittest.TestCase):
 
 
 
-    def test_DTAffineSystem(self):
+    def test_AffineSystem(self):
 
         # constinuous time double integrator
         A = np.array([[0., 1.],[0., 0.]])
@@ -67,7 +67,7 @@ class TestDynamicalSystems(unittest.TestCase):
         t_s = 1.
 
         # discrete time from continuous
-        sys = DTAffineSystem.from_continuous(A, B, c, t_s, 'zoh')
+        sys = AffineSystem.from_continuous(A, B, c, t_s, 'zoh')
         A_discrete = np.eye(2) + A*t_s
         B_discrete = B*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(B)
         c_discrete = c*t_s + np.array([[0.,t_s**2/2.],[0.,0.]]).dot(c)
@@ -76,18 +76,18 @@ class TestDynamicalSystems(unittest.TestCase):
         self.assertTrue(all(np.isclose(sys.c.flatten(), c_discrete.flatten())))
         return
 
-    def test_DTPWASystem(self):
+    def test_PieceWiseAffineSystem(self):
 
         # PWA dynamics
         t_s = .1
         A_1 = np.array([[0., 1.],[10., 0.]])
         B_1 = np.array([[0.],[1.]])
         c_1 = np.array([[0.],[0.]])
-        sys_1 = DTAffineSystem.from_continuous(A_1, B_1, c_1, t_s, 'zoh')
+        sys_1 = AffineSystem.from_continuous(A_1, B_1, c_1, t_s, 'zoh')
         A_2 = np.array([[0., 1.],[-100., 0.]])
         B_2 = B_1
         c_2 = np.array([[0.],[10.]])
-        sys_2 = DTAffineSystem.from_continuous(A_2, B_2, c_2, t_s, 'zoh')
+        sys_2 = AffineSystem.from_continuous(A_2, B_2, c_2, t_s, 'zoh')
         sys = [sys_1, sys_2]
 
         # PWA state domains
@@ -108,7 +108,7 @@ class TestDynamicalSystems(unittest.TestCase):
         U_1.assemble()
         U_2 = U_1
         U = [U_1, U_2]
-        sys = DTPWASystem.from_orthogonal_domains(sys, X, U)
+        sys = PieceWiseAffineSystem.from_orthogonal_domains(sys, X, U)
 
         # simualate
         N = 10

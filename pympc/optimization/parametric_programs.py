@@ -112,6 +112,41 @@ class ParametricQP:
         self.W = self.C + self.C_u.dot(self.H_inv).dot(self.F_u)
         return
 
+    def save(self, group_name, super_group=None):
+
+        # open the file
+        if super_group is None:
+            group = h5py.File(group_name + '.hdf5', 'w')
+        else:
+            group = super_group.create_group(group_name)
+
+        # write matrices
+        F_uu = group.create_dataset('F_uu', self.F_uu.shape)
+        F_xu = group.create_dataset('F_xu', self.F_xu.shape)
+        F_xx = group.create_dataset('F_xx', self.F_xx.shape)
+        F_u = group.create_dataset('F_u', self.F_u.shape)
+        F_x = group.create_dataset('F_x', self.F_x.shape)
+        F = group.create_dataset('F', self.F.shape)
+        C_u = group.create_dataset('C_u', self.C_u.shape)
+        C_x = group.create_dataset('C_x', self.C_x.shape)
+        C = group.create_dataset('C', self.C.shape)
+        F_uu[...] = self.F_uu
+        F_xu[...] = self.F_xu
+        F_xx[...] = self.F_xx
+        F_u[...] = self.F_u
+        F_x[...] = self.F_x
+        F[...] = self.F
+        C_u[...] = self.C_u
+        C_x[...] = self.C_x
+        C[...] = self.C
+
+        # close the file and return
+        if super_group is None:
+            group.close()
+            return
+        else:
+            return super_group
+
     @property
     def feasible_set(self):
         if self._feasible_set is None:
@@ -180,3 +215,31 @@ class ParametricQP:
         u_star = z_star[0:self.F_uu.shape[0],:]
         x_star = z_star[self.F_uu.shape[0]:,:]
         return u_star, x_star, cost
+
+def upload_ParametricQP(group_name, super_group=None):
+    """
+    Reads the file group_name.hdf5 and generates a ParametricQP from the data therein.
+    If a super_group is provided, reads the sub group named group_name which belongs to the super_group.
+    """
+
+    # open the file
+    if super_group is None:
+        controller = h5py.File(group_name + '.hdf5', 'r')
+    else:
+        controller = super_group[group_name]
+
+    # read matrices
+    F_uu = np.array(controller['F_uu'])
+    F_xu = np.array(controller['F_xu'])
+    F_xx = np.array(controller['F_xx'])
+    F_u = np.array(controller['F_u'])
+    F_x = np.array(controller['F_x'])
+    F = np.array(controller['F'])
+    C_u = np.array(controller['C_u'])
+    C_x = np.array(controller['C_x'])
+    C = np.array(controller['C'])
+
+    # close the file and return
+    if super_group is None:
+        controller.close()
+    return ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C)

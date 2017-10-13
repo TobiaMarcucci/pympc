@@ -4,11 +4,12 @@ import matplotlib.pyplot as plt
 from optimization.gurobi import linear_program
 from geometry.polytope import Polytope
 from algebra import rangespace_basis, nullspace_basis
+import h5py
 
 
 ### CLASSES OF DYNAMICAL SYSTEMS
 
-class DTLinearSystem:
+class LinearSystem:
     """
     Discrete time linear systems in the form:
     x_{k+1} = A x_k + B u_k.
@@ -31,7 +32,7 @@ class DTLinearSystem:
         Generates a fake PWA system and calls condense_dynamical_system().
         """
         c = np.zeros((self.n_x, 1))
-        sys = DTAffineSystem(self.A, self.B, c)
+        sys = AffineSystem(self.A, self.B, c)
         affine_systems = [sys]
         switching_sequence = [0]*N
         return condense_dynamical_system(affine_systems, switching_sequence)[0:2]
@@ -49,11 +50,9 @@ class DTLinearSystem:
             A_d, B_d, _ = zero_order_hold(A, B, c, h)
         elif method == 'explicit_euler':
             A_d, B_d, _ = explicit_euler(A, B, c, h)
-        return DTLinearSystem(A_d, B_d)
+        return LinearSystem(A_d, B_d)
 
-
-
-class DTAffineSystem:
+class AffineSystem:
     """
     Discrete time affine systems in the form:
     x_{k+1} = A x_k + B u_k + c.
@@ -85,6 +84,33 @@ class DTAffineSystem:
         A_bar, B_bar, c_bar = self.condense(N)
         return simulate_affine_dynamics(A_bar, B_bar, c_bar, x0, u_list)
 
+    def save(self, group_name, super_group=None):
+        """
+        Saves the matrices A, B, c in the group_name.hdf5 file.
+        If a super group is provided, instead of saving the file, it adds the sub group gorup_name to the super group.
+        """
+
+        # open the file
+        if super_group is None:
+            group = h5py.File(group_name + '.hdf5', 'w')
+        else:
+            group = super_group.create_group(group_name)
+
+        # write the matrices
+        A = group.create_dataset('A', (self.n_x, self.n_x))
+        B = group.create_dataset('B', (self.n_x, self.n_u))
+        c = group.create_dataset('c', (self.n_x, 1))
+        A[...] = self.A
+        B[...] = self.B
+        c[...] = self.c
+
+        # close the file and return
+        if super_group is None:
+            group.close()
+            return
+        else:
+            return super_group
+
     @staticmethod
     def from_continuous(A, B, c, h, method='zoh'):
         if len(c.shape) == 1:
@@ -102,10 +128,31 @@ class DTAffineSystem:
             A_d, B_d, c_d = semi_implicit_euler(A_q, A_v, B_v, c_v, h)
         else:
             raise ValueError('Unknown discretization method.')
-        return DTAffineSystem(A_d, B_d, c_d)
+        return AffineSystem(A_d, B_d, c_d)
 
+def upload_AffineSystem(group_name, super_group=None):
+    """
+    Reads the file group_name.hdf5 and generates an affine system from the data therein.
+    If a super_group is provided, reads the sub group named group_name which belongs to the super_group.
+    """
 
-class DTPWASystem(object):
+    # open the file
+    if super_group is None:
+        affine_system = h5py.File(group_name + '.hdf5', 'r')
+    else:
+        affine_system = super_group[group_name]
+
+    # read the matrices
+    A = np.array(affine_system['A'])
+    B = np.array(affine_system['B'])
+    c = np.array(affine_system['c'])
+
+    # close the file and return    
+    if super_group is None:
+        affine_system.close()
+    return AffineSystem(A, B, c)
+
+class PieceWiseAffineSystem(object):
     """
     Discrete time piecewise affine systems in the form:
     x_{k+1} = A_i x_k + B_i u_k + c_i   if   (x_k, u_k) \in D_i
@@ -161,6 +208,39 @@ class DTPWASystem(object):
                 return i
         return None
 
+    def save(self, group_name, super_group=None):
+        """
+        Saves the lists affine_systems anf domains in the group_name.hdf5 file.
+        If a super group is provided, instead of saving the file, it adds the sub group gorup_name to the super group.
+        """
+
+        # open the file
+        if super_group is None:
+            group = h5py.File(group_name + '.hdf5', 'w')
+        else:
+            group = super_group.create_group(group_name)
+
+        # write affine systems
+        affine_systems = group.create_group('affine_systems')
+        for i, affine_system in enumerate(self.affine_systems):
+            affine_systems = affine_system.save(str(i), affine_systems)
+
+        # write domains # maybe do a save method in polytope?
+        domains = group.create_group('domains')
+        for i, D_i in enumerate(self.domains):
+            domain = domains.create_group(str(i))
+            A = domain.create_dataset('A', D_i.lhs_min.shape)
+            b = domain.create_dataset('b', D_i.rhs_min.shape)
+            A[...] = D_i.lhs_min
+            b[...] = D_i.rhs_min
+
+        # close the file and return
+        if super_group is None:
+            group.close()
+            return
+        else:
+            return super_group
+        
     @property
     def x_min(self):
         if self._x_min is None:
@@ -187,10 +267,38 @@ class DTPWASystem(object):
             domain_i = Polytope(A_i, b_i)
             domain_i.assemble()
             domains.append(domain_i)
-        return DTPWASystem(affine_systems, domains)
+        return PieceWiseAffineSystem(affine_systems, domains)
 
+def upload_PieceWiseAffineSystem(group_name, super_group=None):
+    """
+    Reads the file group_name.hdf5 and generates a piecewise affine system from the data therein.
+    If a super_group is provided, reads the sub group named group_name which belongs to the super_group.
+    """
 
+    # open the file
+    if super_group is None:
+        piecewise_affine_system = h5py.File(group_name + '.hdf5', 'r')
+    else:
+        piecewise_affine_system = super_group[group_name]
 
+    # read affine systems
+    n = len(piecewise_affine_system['affine_systems'])
+    affine_systems = []
+    for i in range(n):
+        affine_systems.append(upload_AffineSystem(str(i), piecewise_affine_system['affine_systems']))
+    
+    # read domains
+    domains = []
+    for i in range(n):
+        domain = piecewise_affine_system['domains'][str(i)]
+        p = Polytope(np.array(domain['A']), np.array(domain['b']))
+        p.assemble()
+        domains.append(p)
+
+    # close the file and return
+    if super_group is None:
+        piecewise_affine_system.close()
+    return PieceWiseAffineSystem(affine_systems, domains)
 
 
 ### AUXILIARY FUNCTIONS
@@ -279,15 +387,15 @@ def explicit_euler(A, B, c, h):
     c_d = c*h
     return A_d, B_d, c_d
 
-def semi_implicit_euler(A_q, A_v, B_v, c_v, h):
-    n = A_q.shape[0]
-    A_d = np.vstack((
-        np.hstack((np.eye(n) + (h**2)*A_q, h*np.eye(n) + (h**2)*A_v)),
-        np.hstack((h*A_q, np.eye(n) + h*A_v))
-            ))
-    B_d = np.vstack(((h**2)*B_v, h*B_v))
-    c_d = np.vstack(((h**2)*c_v, h*c_v))
-    return A_d, B_d, c_d
+# def semi_implicit_euler(A_q, A_v, B_v, c_v, h):
+#     n = A_q.shape[0]
+#     A_d = np.vstack((
+#         np.hstack((np.eye(n) + (h**2)*A_q, h*np.eye(n) + (h**2)*A_v)),
+#         np.hstack((h*A_q, np.eye(n) + h*A_v))
+#             ))
+#     B_d = np.vstack(((h**2)*B_v, h*B_v))
+#     c_d = np.vstack(((h**2)*c_v, h*c_v))
+#     return A_d, B_d, c_d
 
 def dare(A, B, Q, R):
     # cost to go

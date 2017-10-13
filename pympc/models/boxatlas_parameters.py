@@ -60,7 +60,7 @@ controller ={
                 'frh': 1.,
                 },
         'gurobi': {
-                'OutputFlag': False,
+                'OutputFlag': 0,
                 'TimeLimit': 600.,
                 'MIPFocus': 0,           # balanced: 0, feasibility: 1, optimality: 2, bounds: 3
                 'NumericFocus': 0,       # min:     0, def:     0, max:     3

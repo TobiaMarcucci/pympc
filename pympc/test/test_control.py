@@ -3,7 +3,7 @@ import numpy as np
 import pympc.dynamical_systems as ds
 from pympc.optimization.mpqpsolver import CriticalRegion
 from pympc.geometry.polytope import Polytope
-from pympc.control import MPCController, MPCHybridController
+from pympc.control import ModelPredictiveController, HybridModelPredictiveController
 
 
 class TestMPCTools(unittest.TestCase):
@@ -29,14 +29,14 @@ class TestMPCTools(unittest.TestCase):
         ]
         self.assertEqual(true_candidate_active_sets, candidate_active_sets)
 
-    def test_MPCController(self):
+    def test_ModelPredictiveController(self):
         np.random.seed(1)
 
         # double integrator
         A = np.array([[0., 1.],[0., 0.]])
         B = np.array([[0.],[1.]])
         t_s = 1.
-        sys = ds.DTLinearSystem.from_continuous(A, B, t_s)
+        sys = ds.LinearSystem.from_continuous(A, B, t_s)
 
         # mpc controller
         N = 5
@@ -53,7 +53,7 @@ class TestMPCTools(unittest.TestCase):
         X = Polytope.from_bounds(x_min, x_max)
         X.assemble()
         X_N = ds.moas_closed_loop_from_orthogonal_domains(sys.A, sys.B, K, X, U)
-        controller = MPCController(sys, N, objective_norm, Q, R, P, X, U, X_N)
+        controller = ModelPredictiveController(sys, N, objective_norm, Q, R, P, X, U, X_N)
 
         # explicit vs implicit solution
         controller.get_explicit_solution()
@@ -75,7 +75,7 @@ class TestMPCTools(unittest.TestCase):
                 self.assertTrue(np.isclose(V_explicit, V_implicit, rtol=1.e-4))
                 # self.assertTrue(controller.condensed_program.feasible_set.applies_to(x0))
 
-    def test_MPCHybridController(self):
+    def test_HybridModelPredictiveController(self):
         np.random.seed(1)
 
         # PWA dynamics
@@ -83,11 +83,11 @@ class TestMPCTools(unittest.TestCase):
         A_1 = np.array([[0., 1.],[1., 0.]])
         B_1 = np.array([[0.],[1.]])
         c_1 = np.array([[0.],[0.]])
-        sys_1 = ds.DTAffineSystem.from_continuous(A_1, B_1, c_1, t_s)
+        sys_1 = ds.AffineSystem.from_continuous(A_1, B_1, c_1, t_s)
         A_2 = np.array([[0., 1.],[-1., 0.]])
         B_2 = B_1
         c_2 = np.array([[0.],[1.]])
-        sys_2 = ds.DTAffineSystem.from_continuous(A_2, B_2, c_2, t_s)
+        sys_2 = ds.AffineSystem.from_continuous(A_2, B_2, c_2, t_s)
         sys = [sys_1, sys_2]
 
         # PWA state domains
@@ -110,7 +110,7 @@ class TestMPCTools(unittest.TestCase):
         U = [U_1, U_2]
 
         # PWA system
-        pwa_sys = ds.DTPWASystem.from_orthogonal_domains(sys, X, U)
+        pwa_sys = ds.PieceWiseAffineSystem.from_orthogonal_domains(sys, X, U)
 
         # hybrid controller
         N = 10
@@ -119,7 +119,7 @@ class TestMPCTools(unittest.TestCase):
         P = Q
         X_N = X_1
         for objective_norm in ['one', 'two']:
-            controller = MPCHybridController(pwa_sys, N, objective_norm, Q, R, P, X_N)
+            controller = HybridModelPredictiveController(pwa_sys, N, objective_norm, Q, R, P, X_N)
 
             # compare the cost of the MIP and the condensed program
             n_test = 100

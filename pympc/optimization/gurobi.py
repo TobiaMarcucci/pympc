@@ -234,6 +234,18 @@ def quadratically_constrained_linear_program(f, A=None, b=None, C=None, d=None, 
 
     return x_star, V_star
 
+def read_status(status):
+    status = str(status)
+    table = {
+        '2': 'OPTIMAL',
+        '3': 'INFEASIBLE',
+        '4': 'INFEASIBLE OR UNBOUNDED',
+        '9': 'TIME LIMIT',
+        '11': 'INTERRUPTED',
+        '13': 'SUBOPTIMAL',
+        }
+    return table[status]
+
 def real_variable(model, d_list, **kwargs):
     """
     Creates a Gurobi variable with dimension d_list (e.g., [3,4,5]) with minus infinity as lower bounds.

@@ -84,20 +84,33 @@ class Polytope:
         selection_matrix = np.eye(n_variables)
         return np.delete(selection_matrix, unbound_indices, 0)
 
-    def assemble(self, redundant=True, vertices=None):
+    def assemble(
+        self,
+        check_emptiness=True,
+        check_boundedness=True,
+        check_coincidences=True,
+        check_redundancy=True,
+        vertices=None
+        ):
         if self.assembled:
             raise ValueError('Polytope already assembled, cannot assemble again!')
         self.assembled = True
         [self.n_facets, self.n_variables] = self.A.shape
         self.normalize()
-        self.check_emptiness()
-        if self.empty:
-            return self
-        self.check_boundedness()
-        if not(self.bounded):
-            raise ValueError('Unbounded polyhedron: only polytopes allowed')
-        self.find_coincident_facets()
-        if redundant:
+        self.empty = None
+        if check_emptiness:
+            self.check_emptiness()
+            if self.empty:
+                return self
+        self.bounded = None
+        if check_boundedness:
+            self.check_boundedness()
+            if not(self.bounded):
+                raise ValueError('Unbounded polyhedron: only polytopes allowed')
+        self.coincident_facets = None
+        if check_coincidences:
+            self.find_coincident_facets()
+        if check_redundancy:
             self.find_minimal_facets()
         else:
             self.minimal_facets = range(self.n_facets)
@@ -136,12 +149,13 @@ class Polytope:
         """
         Checks if the polyhedron is bounded: a polyhedron is unbounded (i.e. a polytope) iff there exists an x != 0 in the recession cone (A*x <= 0). We also have that { exists x != 0 | A*x <= 0 } <=> { exists z < 0 | A^T*z = 0 }. The second condition is tested through a LP.
         """
+        if self.bounded is not None:
+            # if the Chebyshev radius is infinite
+            if np.isinf(self.radius):
+                print('Infinite Chebyshev center or radius!')
+                self.bounded = False
+                return
         self.bounded = True
-        # if the Chebyshev radius is infinite
-        if np.isinf(self.radius):
-            print('Infinite Chebyshev center or radius!')
-            self.bounded = False
-            return
         # if ker(A) != 0
         rank_A = np.linalg.matrix_rank(self.A, tol)
         dim_null_A = self.A.shape[1] - rank_A

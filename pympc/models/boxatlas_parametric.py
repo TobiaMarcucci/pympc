@@ -5,13 +5,13 @@ from copy import copy
 from ad import adnumber, jacobian
 from collections import OrderedDict
 from pympc.geometry.polytope import Polytope
-from pympc.dynamical_systems import DTAffineSystem, DTPWASystem
+from pympc.dynamical_systems import AffineSystem, PieceWiseAffineSystem
 from pympc.optimization.pnnls import linear_program
 from pympc.models.boxatlas_visualizer import BoxAtlasVisualizer
 from pympc.dynamical_systems import dare, moas_closed_loop
 from pympc.geometry.polytope import LowerDimensionalPolytope
 from pympc.control import reachability_standard_form
-from pympc.control import MPCHybridController
+from pympc.control import HybridModelPredictiveController
 import boxatlas_parameters as bap
 
 class MovingLimb():
@@ -84,7 +84,7 @@ class BoxAtlas():
         domains = self._get_domains()
         self.contact_modes, domains = self._remove_empty_domains(domains)
         affine_systems = self._get_affine_systems()
-        self.pwa_system = DTPWASystem(affine_systems, domains)
+        self.pwa_system = PieceWiseAffineSystem(affine_systems, domains)
         self.nominal_system, self.nominal_domain = self._extract_nominal_configuration()
         self._check_equilibrium_point()
         self.Q = self._state_cost_hessian()
@@ -330,7 +330,7 @@ class BoxAtlas():
         affine_systems = []
         for mode in self.contact_modes:
             A_dt, B_dt, c_dt = self._semi_implicit_euler(mode)
-            sys = DTAffineSystem(A_dt, B_dt, c_dt)
+            sys = AffineSystem(A_dt, B_dt, c_dt)
             affine_systems.append(sys)
         return affine_systems
 
@@ -618,7 +618,7 @@ class BoxAtlas():
         return np.where([mode == m for m in self.contact_modes])[0][0]
 
     def _synthesize_controller(self):
-        controller = MPCHybridController(
+        controller = HybridModelPredictiveController(
             self.pwa_system,
             bap.controller['horizon'],
             bap.controller['objective_norm'],

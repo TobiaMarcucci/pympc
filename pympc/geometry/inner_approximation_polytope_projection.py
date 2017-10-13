@@ -1,184 +1,190 @@
 import numpy as np
 from pympc.optimization.gurobi import linear_program, quadratically_constrained_linear_program
 from scipy.spatial import ConvexHull
-from pympc.algebra import rangespace_basis, nullspace_basis
 import scipy.linalg as linalg
-from pympc.geometry.polytope import Polytope
-
-
-# class InnerApproximationOfPolytopeProjection:
-
-#     def __init__(self, A, b, residual_dimensions):
-#         """
-#         It generates and expands an inner approximation for the orthogonal projection of the polytope
-#         P := {x | A x <= b}
-#         to the space of the x_i for i in residual_dimensions.
-#         """
-#         self.empty = False
-#         self.A = A
-#         self.b = b
-#         self.residual_dimensions = residual_dimensions
-#         self.hull = None
-#         # move the variables to drop at the end
-#         dropped_dimensions = [i for i in range(A.shape[1]) if i not in residual_dimensions]
-#         self.A_ordered = np.hstack((A[:, residual_dimensions], A[:, dropped_dimensions]))
-#         return
-
-#     def _initialize(self, point=None):
-#         simplex_vertices = self._first_two_points()
-#         simplex_vertices = self._inner_simplex(simplex_vertices, point)
-#         self.hull = ConvexHull(np.hstack(simplex_vertices).T, incremental=True)
-#         return
-
-#     def _first_two_points(self):
-#         simplex_vertices = []
-#         a = np.zeros((self.A.shape[1], 1))
-#         a[0,0] = 1.
-#         for a in [a, -a]:
-#             sol = linear_program(a, self.A_ordered, self.b)
-#             simplex_vertices.append(sol.argmin[:len(self.residual_dimensions),:])
-#         return simplex_vertices
-
-#     def _inner_simplex(self, simplex_vertices, point=None, tol=1.e-7):
-#         for i in range(2, len(self.residual_dimensions)+1):
-#             a, d = plane_through_points([v[:i,:] for v in simplex_vertices])
-#             sign = 1.
-#             if point is not None: # picks the right sign for a
-#                 sign = np.sign((a.T.dot(point[:i,:]) - d)[0,0])
-#             a = np.vstack((a, np.zeros((self.A.shape[1]-i, 1))))
-#             sol = linear_program(-sign*a, self.A_ordered, self.b)
-#             if -sol.min - sign*d[0,0] < tol:
-#                 if point is not None:
-#                     raise ValueError('The given point lies outside the projection.')
-#                 a = -a
-#                 sol = linear_program(-a, self.A_ordered, self.b)
-#             simplex_vertices.append(sol.argmin[:len(self.residual_dimensions),:])
-#         return simplex_vertices
-
-#     def include_point(self, point, tol=1e-7):
-#         if self.hull is None:
-#             self._initialize(point)
-#         residuals = self._hull_residuals(point)
-#         while max(residuals) > tol:
-#             index_facet_to_expand = residuals.index(max(residuals))
-#             facet_to_expand = self._hull_facet(index_facet_to_expand)
-#             a = np.zeros((self.A.shape[1], 1))
-#             a[:len(self.residual_dimensions),:] = facet_to_expand[0].T
-#             sol = linear_program(-a, self.A_ordered, self.b)
-#             if - sol.min - facet_to_expand[1] < tol:
-#                 raise ValueError('The given point lies outside the projection.')
-#             new_vertex = sol.argmin[:len(self.residual_dimensions),:].T
-#             # self.hull.add_points(new_vertex)
-#             self.hull = ConvexHull(np.vstack((self.hull.points, new_vertex)))
-#             residuals = self._hull_residuals(point)
-#         return
-
-#     def _hull_residuals(self, point):
-#         lhs = self.hull.equations[:,:-1]
-#         rhs = self.hull.equations[:,-1:]
-#         residuals = (lhs.dot(point) + rhs).flatten().tolist()
-#         return residuals
-
-#     def _hull_facet(self, index):
-#         lhs = self.hull.equations[index:index+1,:-1]
-#         rhs = - self.hull.equations[index,-1]
-#         return [lhs, rhs]
-
-#     def applies_to(self, point, tol=1.e-9):
-#         """
-#         Determines if the given point belongs to the polytope (returns True or False).
-#         """
-#         if self.hull is None:
-#             return False
-#         residuals = self._hull_residuals(point)
-#         is_inside = max(residuals) <= tol
-#         return is_inside
-
+import h5py
+# from pympc.geometry.polytope import Polytope
 
 class InnerApproximationOfPolytopeProjection:
 
-    def __init__(self, A, b, residual_dimensions):
+    def __init__(self, A_hd_unordered, b_hd, residual_dimensions, vertices_ld=None, A_ld=None, b_ld=None):
         """
-        It generates and expands an inner approximation for the orthogonal projection of the polytope
+        Generates and expands an inner approximation for the orthogonal projection of the polytope
         P := {x | A x <= b}
         to the space of the x_i for i in residual_dimensions.
         """
-        # store data
-        self.A = A
-        self.b = b
-        self.residual_dimensions = residual_dimensions
-        self.vertices = []
 
-        # move the variables to drop at the end of the lhs matrix
-        dropped_dimensions = [i for i in range(A.shape[1]) if i not in residual_dimensions]
-        self.A_ordered = np.hstack((A[:, residual_dimensions], A[:, dropped_dimensions]))
+        # higher dimensional polytope
+        self.A_hd_unordered = A_hd_unordered
+        self.A_hd = self._reorder_coordinates(A_hd_unordered, residual_dimensions)
+        self.b_hd = b_hd
+
+        # lower dimensional polytope
+        self.residual_dimensions = residual_dimensions
+        if vertices_ld is None:
+            self.vertices_ld = []
+        else:
+            self.vertices_ld = vertices_ld
+        self.A_ld = A_ld
+        self.b_ld = b_ld
+
+        # dimensions
+        self.n_hd = A_hd_unordered.shape[1]
+        self.n_ld = len(residual_dimensions)
 
         return
+
+    @staticmethod
+    def _reorder_coordinates(A_hd, residual_dimensions):
+        dropped_dimensions = [i for i in range(A_hd.shape[1]) if i not in residual_dimensions]
+        A_hd_ordered = np.hstack((A_hd[:, residual_dimensions], A_hd[:, dropped_dimensions]))
+        return A_hd_ordered
 
     def include_point(self, point, tol=1e-7):
 
         # if there are no points, initialize the hull
-        if not self.vertices:
+        if not self.vertices_ld:
             self._first_two_points()
             self._inner_simplex(point)
 
         # loop until the point is included
-        while not point_in_convex_hull(point, self.vertices):
+        while not point_in_convex_hull(point, self.vertices_ld):
 
             # find best direction of growth
-            n, _, _ = separating_hyperplane_of_maximum_alignment(point, self.vertices)
-            a = np.zeros((self.A.shape[1], 1))
-            a[:len(self.residual_dimensions),:] = n
+            n = separating_hyperplane_of_maximum_alignment(point, self.vertices_ld)[0]
+            a = np.zeros((self.n_hd, 1))
+            a[:self.n_ld,:] = n
 
             # get the new vetex
-            sol = linear_program(-a, self.A_ordered, self.b)
-            new_vertex = sol.argmin[:len(self.residual_dimensions),:]
-            for v in self.vertices:
-                if np.allclose(new_vertex, v):
-                    raise ValueError('The given point lies outside the projection.')
-            self.vertices.append(new_vertex)
+            sol = linear_program(-a, self.A_hd, self.b_hd)
+            new_vertex = sol.argmin[:self.n_ld,:]
+            if min([np.linalg.norm(new_vertex - v) for v in self.vertices_ld]) < tol:
+                raise ValueError('The point' + str(new_vertex.flatten()) + ' lies outside the projection.')
+            self.vertices_ld.append(new_vertex)
 
         return
 
     def _first_two_points(self):
-        a = np.zeros((self.A.shape[1], 1))
+        a = np.zeros((self.n_hd, 1))
         a[0,0] = 1.
         for a in [a, -a]:
-            sol = linear_program(a, self.A_ordered, self.b)
-            self.vertices.append(sol.argmin[:len(self.residual_dimensions),:])
+            sol = linear_program(a, self.A_hd, self.b_hd)
+            self.vertices_ld.append(sol.argmin[:self.n_ld,:])
         return
 
     def _inner_simplex(self, point, tol=1.e-7):
-        for i in range(2, len(self.residual_dimensions)+1):
-            a, d = plane_through_points([v[:i,:] for v in self.vertices])
+        for i in range(2, self.n_ld+1):
+            a, d = plane_through_points([v[:i,:] for v in self.vertices_ld])
             sign = 1.
             if point is not None: # picks the right sign for a
                 sign = np.sign((a.T.dot(point[:i,:]) - d)[0,0])
-            a = np.vstack((a, np.zeros((self.A.shape[1]-i, 1))))
-            sol = linear_program(-sign*a, self.A_ordered, self.b)
+            a = np.vstack((
+                a,
+                np.zeros((self.n_hd - i, 1))
+                ))
+            sol = linear_program(-sign*a, self.A_hd, self.b_hd)
             if -sol.min - sign*d[0,0] < tol:
                 if point is not None:
                     raise ValueError('The given point lies outside the projection.')
                 a = -a
-                sol = linear_program(-a, self.A_ordered, self.b)
-            self.vertices.append(sol.argmin[:len(self.residual_dimensions),:])
+                sol = linear_program(-a, self.A_hd, self.b_hd)
+            self.vertices_ld.append(sol.argmin[:self.n_ld,:])
         return
 
     def applies_to(self, point, tol=1.e-9):
         """
         Determines if the given point belongs to the polytope (returns True or False).
         """
-        return point_in_convex_hull(point, self.vertices)
+        return point_in_convex_hull(point, self.vertices_ld)
 
-    def compute_convex_hull(self):
-        points = np.hstack(self.vertices).T
+    def store_halfspaces(self):
+        points = np.hstack(self.vertices_ld).T
         hull = ConvexHull(points)
-        lhs = hull.equations[:,:-1]
-        rhs = - hull.equations[:,-1:]
-        self.halfspaces = Polytope(lhs, rhs)
-        self.halfspaces.assemble()
+        self.A_ld = hull.equations[:,:-1]
+        self.b_ld = - hull.equations[:,-1:]
         return
 
+    def save(self, group_name, super_group=None):
+
+        # open the file
+        if super_group is None:
+            group = h5py.File(group_name + '.hdf5', 'w')
+        else:
+            group = super_group.create_group(group_name)
+
+        # write higher dimensional polytope matrices
+        A_hd_unordered = group.create_dataset('A_hd_unordered', self.A_hd_unordered.shape)
+        b_hd = group.create_dataset('b_hd', self.b_hd.shape)
+        A_hd_unordered[...] = self.A_hd_unordered
+        b_hd[...] = self.b_hd
+
+        # write residual dimensions
+        residual_dimensions = group.create_dataset('residual_dimensions', (len(self.residual_dimensions),), np.int8)
+        residual_dimensions[...] = np.array(self.residual_dimensions)
+
+        # write lower dimensional polytope vertices
+        vertices_ld = group.create_group('vertices_ld')
+        for i, vertex in enumerate(self.vertices_ld):
+            dset = vertices_ld.create_dataset(str(i), vertex.shape)
+            dset[...] = vertex
+
+        # write lower dimensional polytope halfspaces
+        if self.A_ld is not None:
+            A_ld = group.create_dataset('A_ld', self.A_ld.shape)
+            A_ld[...] = self.A_ld
+        else:
+            A_ld = group.create_dataset('A_ld', data=h5py.Empty('f'))
+        if self.b_ld is not None:
+            b_ld = group.create_dataset('b_ld', self.b_ld.shape)
+            b_ld[...] = self.b_ld
+        else:
+            b_ld = group.create_dataset('b_ld', data=h5py.Empty('f'))
+
+        # close the file and return
+        if super_group is None:
+            group.close()
+            return
+        else:
+            return super_group
+
+def upload_InnerApproximationOfPolytopeProjection(group_name, super_group=None):
+    """
+    Reads the file group_name.hdf5 and generates a InnerApproximationOfPolytopeProjection from the data therein.
+    If a super_group is provided, reads the sub group named group_name which belongs to the super_group.
+    """
+
+    # open the file
+    if super_group is None:
+        polytope_approximation = h5py.File(group_name + '.hdf5', 'r')
+    else:
+        polytope_approximation = super_group[group_name]
+
+    # read higher dimensional polytope matrices
+    A_hd_unordered = np.array(polytope_approximation['A_hd_unordered'])
+    b_hd = np.array(polytope_approximation['b_hd'])
+
+    # read residual dimensions
+    residual_dimensions = list(polytope_approximation['residual_dimensions'])
+
+    # read lower dimensional polytope vertices
+    vertices_ld = []
+    for i in range(len(polytope_approximation['vertices_ld'])):
+        vertices_ld.append(np.array(polytope_approximation['vertices_ld'][str(i)]))
+
+    # read lower dimensional polytope halfspaces
+    if polytope_approximation['A_ld'].shape is None:
+        A_ld = None
+    else:
+        A_ld = np.array(polytope_approximation['A_ld'])
+    if polytope_approximation['b_ld'].shape is None:
+        b_ld = None
+    else:
+        b_ld = np.array(polytope_approximation['b_ld'])
+
+    # close the file and return
+    if super_group is None:
+        controller.close()
+    return InnerApproximationOfPolytopeProjection(A_hd_unordered, b_hd, residual_dimensions, vertices_ld, A_ld, b_ld)
 
 def plane_through_points(points):
     """
@@ -226,69 +232,19 @@ def point_in_convex_hull(point, hull_points):
 
     # solve the linear program
     sol = linear_program(-f, lhs_ineq, rhs_ineq, lhs_eq, rhs_eq)
-    if sol.min < 0:
-        return True
-    else:
-        return False
-
-# def separating_hyperplane_of_maximum_alignment(point, hull_points):
-#     """
-#     Given a set of points {v_1, ..., v_n} and a point p which lies outside their convex hull. It returns the separating hyperplane H := {x | a^T x = b} with the normal a as aligned as possible with the segment connecting p and the centroid c := 1/n * \sum_{i = 1}^n v_i.
-#     It solves the linear program
-#     max_{a, b} (p - c)^T a
-#     subject to
-#     abs(b) <= 1
-#     a^T p >= b
-#     a^T v_i <= b \forall i \in {1, ..., n}
-#     (The constraints on the norm of b makes the problem bounded. It is necessary to move the origin of the coordinate system in c, in order to be sure that b=0 is always unfeasible.)
-#     """
-
-#     # centroid of the set of points
-#     n = point.shape[0]
-#     n_h = len(hull_points)
-#     HP = np.hstack(hull_points)
-#     c = (np.sum(HP, axis=1)/n_h).reshape(n,1)
-
-#     # move the coordinates
-#     point = point - c
-#     HP = HP - np.hstack((c for i in range(n_h)))
-
-#     # given point on one side of the plane
-#     lhs = np.hstack((-point.T, np.ones((1,1))))
-#     rhs = np.zeros((1, 1))
-
-#     # hull points on the other side
-#     lhs = np.vstack((lhs, np.hstack((HP.T, -np.ones((n_h,1))))))
-#     rhs = np.vstack((rhs, np.zeros((n_h, 1))))
-
-#     # norm of b lower or equal to one
-#     lhs = np.vstack((lhs,
-#         np.hstack((
-#             np.zeros((2, n)),
-#             np.array([[1.], [-1.]])
-#             ))
-#         ))
-#     rhs = np.vstack((rhs, np.ones((2, 1))))
-
-#     # solve the linear program
-#     f = np.vstack((point, np.zeros((1,1))))
-#     sol = linear_program(-f, lhs, rhs)
-#     a_star = sol.argmin[:n,:]
-#     b_star = sol.argmin[n:,:] + a_star.T.dot(c)
-
-#     return a_star, b_star, c
+    return sol.min < 0.
 
 
 def separating_hyperplane_of_maximum_alignment(point, hull_points):
     """
     Given a set of points {v_1, ..., v_n} and a point p which lies outside their convex hull. It returns the separating hyperplane H := {x | a^T x = b} with the normal a as aligned as possible with the segment connecting p and the centroid c := 1/n * \sum_{i = 1}^n v_i.
-    It solves the linear program
+    It solves the quadratically-constrained linear program
     max_{a, b} (p - c)^T a
     subject to
-    abs(b) <= 1
     a^T p >= b
     a^T v_i <= b \forall i \in {1, ..., n}
-    (The constraints on the norm of b makes the problem bounded. It is necessary to move the origin of the coordinate system in c, in order to be sure that b=0 is always unfeasible.)
+    ||a||_2 <= 1
+    (The constraints on the norm of b makes the problem bounded.)
     """
 
     # centroid of the set of points

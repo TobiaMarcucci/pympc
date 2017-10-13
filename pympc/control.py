@@ -8,11 +8,12 @@ from copy import copy
 from optimization.pnnls import linear_program
 from optimization.parametric_programs import ParametricLP, ParametricQP
 from optimization.mpqpsolver import MPQPSolver, CriticalRegion
-from dynamical_systems import DTAffineSystem, DTPWASystem
+from dynamical_systems import AffineSystem, PieceWiseAffineSystem, upload_PieceWiseAffineSystem
 from algebra import clean_matrix, nullspace_basis, rangespace_basis
-from geometry.polytope import Polytope
+from geometry.polytope import Polytope, LowerDimensionalPolytope
+import h5py
 
-class MPCController:
+class ModelPredictiveController:
     """
     Model Predictive Controller.
 
@@ -50,12 +51,12 @@ class MPCController:
         Depending on the norm of the controller, creates a parametric LP or QP in the initial state of the system (see ParametricLP or ParametricQP classes).
         """
         c = np.zeros((self.sys.n_x, 1))
-        a_sys = DTAffineSystem(self.sys.A, self.sys.B, c)
+        a_sys = AffineSystem(self.sys.A, self.sys.B, c)
         sys_list = [a_sys]*self.N
         X_list = [self.X]*self.N
         U_list = [self.U]*self.N
         switching_sequence = [0]*self.N
-        pwa_sys = DTPWASystem.from_orthogonal_domains(sys_list, X_list, U_list)
+        pwa_sys = PieceWiseAffineSystem.from_orthogonal_domains(sys_list, X_list, U_list)
         self.condensed_program = OCP_condenser(pwa_sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
         self.remove_intial_state_contraints()
         return
@@ -155,7 +156,7 @@ class MPCController:
 
 
 
-class MPCHybridController:
+class HybridModelPredictiveController:
     """
     Hybrid Model Predictive Controller.
 
@@ -490,6 +491,99 @@ class MPCHybridController:
         prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
         # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
         return prog
+
+    def save(self, group_name, super_group=None):
+
+        # open the file
+        if super_group is None:
+            group = h5py.File(group_name + '.hdf5', 'w')
+        else:
+            group = super_group.create_group(group_name)
+
+        # write piecewise affine system
+        group = self.sys.save('piecewise_affine_system', group)
+        N = group.create_dataset('N', (1,), 'i8')
+        N[...] = np.array(self.N)
+        
+        # write cost function
+        group.attrs['objective_norm'] = np.void(self.objective_norm)
+        Q = group.create_dataset('Q', (self.sys.n_x, self.sys.n_x))
+        R = group.create_dataset('R', (self.sys.n_u, self.sys.n_u))
+        P = group.create_dataset('P', (self.sys.n_x, self.sys.n_x))
+        Q[...] = self.Q
+        R[...] = self.R
+        P[...] = self.P
+
+        # write terminal set
+        terminal_set = group.create_group('terminal_set')
+        A = terminal_set.create_dataset('A', self.X_N.lhs_min.shape)
+        b = terminal_set.create_dataset('b', self.X_N.rhs_min.shape)
+        A[...] = self.X_N.lhs_min
+        b[...] = self.X_N.rhs_min
+
+        # write gurobi parameters
+        gurobi_parameters = group.create_group('gurobi_parameters')
+        for parameter_key, parameter_value in self.gurobi_parameters.items():
+            if type(parameter_value) is int:
+                parameter_type = np.int8
+            elif type(parameter_value) is float:
+                parameter_type = np.float64
+            elif type(parameter_value) is bool:
+                parameter_type = np.bool
+            parameter = gurobi_parameters.create_dataset(parameter_key, (1,), parameter_type)
+            parameter[...] = np.array(parameter_value)
+
+        # close the file and return
+        if super_group is None:
+            group.close()
+            return
+        else:
+            return super_group
+
+def upload_HybridModelPredictiveController(group_name, super_group=None):
+    """
+    Reads the file group_name.hdf5 and generates a controller from the data therein.
+    If a super_group is provided, reads the sub group named group_name which belongs to the super_group.
+    """
+
+    # open the file
+    if super_group is None:
+        controller = h5py.File(group_name + '.hdf5', 'r')
+    else:
+        controller = super_group[group_name]
+
+    # read piecewise affine system
+    sys = upload_PieceWiseAffineSystem('piecewise_affine_system', controller)
+    N = int(controller['N'][0])
+
+    # read cost function
+    objective_norm = str(controller.attrs['objective_norm'])
+    Q = clip_eigenvalues(np.array(controller['Q']))
+    R = clip_eigenvalues(np.array(controller['R']))
+    P = clip_eigenvalues(np.array(controller['P']))
+
+    # read terminal set
+    A = np.array(controller['terminal_set']['A'])
+    b = np.array(controller['terminal_set']['b'])
+    X_N = Polytope(A, b)
+    X_N.assemble(check_emptiness=False)
+
+    # read gurobi parameters
+    gurobi_parameters = dict()
+    for parameter in controller['gurobi_parameters']:
+        gurobi_parameters[str(parameter)] = controller['gurobi_parameters'][str(parameter)][0].item()
+
+    # close the file and return
+    if super_group is None:
+        controller.close()
+    return HybridModelPredictiveController(sys, N, objective_norm, Q, R, P, X_N, gurobi_parameters)
+
+def clip_eigenvalues(M):
+    min_eig = min(np.linalg.eig(M)[0]).real
+    if min_eig < 0.:
+        print('Translating eigenvalues of cost matrix with identity scaled by '+str(-2*min_eig))
+        M = M - 2*min_eig*np.eye(M.shape[0])
+    return M
 
 def reachability_standard_form(A, B):
     """
