@@ -3,8 +3,8 @@ import numpy as np
 dynamics = {
         'mass': 1.,
         'moment_of_inertia': 1.,
-        'normal_stiffness': 100.,
-        'tangential_damping': 100.,
+        'normal_stiffness': 200.,
+        'tangential_damping': 200.,
         'friction': .5,
         'gravity': 10.,
         'sampling_time': .1,
@@ -60,7 +60,7 @@ controller ={
                 'frh': 1.,
                 },
         'gurobi': {
-                'OutputFlag': 0,
+                'OutputFlag': 1,
                 'TimeLimit': 600.,
                 'MIPFocus': 0,           # balanced: 0, feasibility: 1, optimality: 2, bounds: 3
                 'NumericFocus': 0,       # min:     0, def:     0, max:     3

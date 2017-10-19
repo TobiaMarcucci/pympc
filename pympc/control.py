@@ -490,6 +490,7 @@ class HybridModelPredictiveController:
             raise ValueError('Switching sequence not coherent with the controller horizon.')
         prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
         # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
+        # sparsity structure
         return prog
 
     def save(self, group_name, super_group=None):
@@ -653,12 +654,19 @@ def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
     Q_bar = linalg.block_diag(*[Q for i in range(N)] + [P])
     R_bar = linalg.block_diag(*[R for i in range(N)])
     G, W, E = constraint_condenser(sys, X_N, switching_sequence)
+
+    row_sparsity = [0]
+    for i, mode in enumerate(switching_sequence):
+        row_sparsity.append(row_sparsity[i] + sys.domains[mode].lhs_min.shape[0])
+    row_sparsity[-1] += X_N.lhs_min.shape[0]
+    column_sparsity = [i*sys.n_u for i in range(N+1)]
+
     if objective_norm == 'one':
         F_u, F_x, F = linear_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
         parametric_program = ParametricLP(F_u, F_x, F, G, E, W)
     elif objective_norm == 'two':
         F_uu, F_xu, F_xx, F_u, F_x, F = quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
-        parametric_program = ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W)
+        parametric_program = ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W, row_sparsity, column_sparsity)
     # print 'total condensing time is', str(time.time()-tic),'s.\n'
     return parametric_program
 

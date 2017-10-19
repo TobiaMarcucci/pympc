@@ -32,3 +32,35 @@ def clean_matrix(M, tol=1.e-9):
             if np.abs(M[i,j]) < tol:
                 M_clean[i,j] = 0.
     return M_clean
+
+def relaxation_method(A, b, x=None, l=1., tol=1.e-6):
+    
+    # check warm start
+    if x is None:
+        x = np.zeros((A.shape[1], 1))
+        
+    # initialize algorithm
+    residuals = A.dot(x) - b
+    i = np.argmax(residuals)
+    max_residual = residuals[i, 0]
+    
+    # start algorithm
+    while max_residual > tol:
+
+        # orthogonal projection
+        x = x - l * A[i:i+1,:].T * max_residual#/np.linalg.norm(a_i)**2
+        
+        # update residuals
+        residuals = A.dot(x) - b
+        i = np.argmax(residuals)
+        max_residual = residuals[i, 0]
+
+    return x
+
+def normalize_inequalities(A, b, tol=1e-7):
+        for i in range(A.shape[0]):
+            norm_factor = np.linalg.norm(A[i,:])
+            if norm_factor > tol:
+                A[i,:] = A[i,:]/norm_factor
+                b[i] = b[i]/norm_factor
+        return A, b

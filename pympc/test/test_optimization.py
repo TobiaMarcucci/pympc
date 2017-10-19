@@ -21,8 +21,8 @@ class TestMPCTools(unittest.TestCase):
             self.assertTrue(np.isclose(sol.min, -6.))
             self.assertEqual(sol.active_set, [1, 3])
             self.assertTrue(np.allclose(sol.inequality_multipliers, np.array([[0.],[1.],[0.],[1.]])))
-            self.assertFalse(sol.primal_degenerate)
-            self.assertFalse(sol.dual_degenerate)
+            # self.assertFalse(sol.primal_degenerate)
+            # self.assertFalse(sol.dual_degenerate)
 
             # unfeasible lp
             f = np.ones((2,1))
@@ -33,8 +33,8 @@ class TestMPCTools(unittest.TestCase):
             self.assertTrue(all(np.isnan(sol.argmin)))
             self.assertTrue(all(np.isnan(sol.inequality_multipliers)))
             self.assertTrue(sol.active_set is None)
-            self.assertTrue(sol.primal_degenerate is None)
-            self.assertTrue(sol.dual_degenerate is None)
+            # self.assertTrue(sol.primal_degenerate is None)
+            # self.assertTrue(sol.dual_degenerate is None)
 
             # unbounded lp
             f = np.ones((2,1))
@@ -45,8 +45,8 @@ class TestMPCTools(unittest.TestCase):
             self.assertTrue(all(np.isnan(sol.argmin)))
             self.assertTrue(all(np.isnan(sol.inequality_multipliers)))
             self.assertTrue(sol.active_set is None)
-            self.assertTrue(sol.primal_degenerate is None)
-            self.assertTrue(sol.dual_degenerate is None)
+            # self.assertTrue(sol.primal_degenerate is None)
+            # self.assertTrue(sol.dual_degenerate is None)
 
             # bounded lp with unbounded domain
             f = np.array([[0.],[1.]])
@@ -57,8 +57,8 @@ class TestMPCTools(unittest.TestCase):
             self.assertTrue(np.isclose(sol.min, 0.))
             self.assertEqual(sol.active_set, [0])
             self.assertTrue(np.allclose(sol.inequality_multipliers, np.array([[1.]])))
-            self.assertFalse(sol.primal_degenerate)
-            self.assertTrue(sol.dual_degenerate)
+            # self.assertFalse(sol.primal_degenerate)
+            # self.assertTrue(sol.dual_degenerate)
 
             # lp with equalities
             f = np.ones((2,1))
@@ -72,8 +72,8 @@ class TestMPCTools(unittest.TestCase):
             self.assertEqual(sol.active_set, [3])
             self.assertTrue(np.allclose(sol.inequality_multipliers, np.array([[0.],[0.],[0.],[1.]])))
             self.assertTrue(np.allclose(sol.equality_multipliers, np.array([[-1.]])))
-            self.assertFalse(sol.primal_degenerate)
-            self.assertFalse(sol.dual_degenerate)
+            # self.assertFalse(sol.primal_degenerate)
+            # self.assertFalse(sol.dual_degenerate)
 
             # 3d LPs
             A = np.array([
@@ -94,16 +94,16 @@ class TestMPCTools(unittest.TestCase):
             self.assertTrue(np.isclose(sol.min, -.5))
             self.assertTrue(8 in sol.active_set)
             self.assertTrue(np.allclose(sol.inequality_multipliers, np.vstack((np.zeros((8,1)), np.array([[1.]])))))
-            self.assertFalse(sol.primal_degenerate)
-            self.assertTrue(sol.dual_degenerate)
+            # self.assertFalse(sol.primal_degenerate)
+            # self.assertTrue(sol.dual_degenerate)
             f = np.array([[-1.],[-.1],[0.]])
             sol = linear_program(f, A, b)
             self.assertTrue(np.allclose(sol.argmin, np.array([[.5],[.5],[0.]])))
             self.assertTrue(np.isclose(sol.min, -.55))
             self.assertTrue(sol.active_set, [0,3,8])
             self.assertTrue(np.allclose(sol.inequality_multipliers, np.array([[.05],[0.],[0.],[.05],[0.],[0.],[0.],[0.],[.9]])))
-            self.assertFalse(sol.primal_degenerate)
-            self.assertFalse(sol.dual_degenerate)
+            # self.assertFalse(sol.primal_degenerate)
+            # self.assertFalse(sol.dual_degenerate)
             f = np.array([[1.],[1.],[0.]])
             sol = linear_program(f, A, b)
             self.assertTrue(np.isclose(sol.argmin[0,0] + sol.argmin[1,0], -1.))
@@ -112,7 +112,7 @@ class TestMPCTools(unittest.TestCase):
             self.assertTrue(7 in sol.active_set)
             self.assertTrue(np.isclose(sol.inequality_multipliers[4,0], .5))
             self.assertTrue(np.isclose(sol.inequality_multipliers[7,0], .5))
-            self.assertTrue(sol.dual_degenerate)
+            # self.assertTrue(sol.dual_degenerate)
 
         # random LPs
         for i in range(100):
@@ -136,18 +136,18 @@ class TestMPCTools(unittest.TestCase):
                 self.assertTrue(all(np.isnan(sol_gurobi.equality_multipliers)))
                 self.assertTrue(sol_pnnls.active_set is None)
                 self.assertTrue(sol_gurobi.active_set is None)
-                self.assertTrue(sol_pnnls.primal_degenerate is None)
-                self.assertTrue(sol_gurobi.primal_degenerate is None)
-                self.assertTrue(sol_pnnls.dual_degenerate is None)
-                self.assertTrue(sol_gurobi.dual_degenerate is None)
+                # self.assertTrue(sol_pnnls.primal_degenerate is None)
+                # self.assertTrue(sol_gurobi.primal_degenerate is None)
+                # self.assertTrue(sol_pnnls.dual_degenerate is None)
+                # self.assertTrue(sol_gurobi.dual_degenerate is None)
             else:
                 self.assertTrue(np.allclose(sol_pnnls.argmin, sol_gurobi.argmin))
                 self.assertTrue(np.isclose(sol_pnnls.min, sol_gurobi.min))
                 self.assertTrue(sol_pnnls.active_set, sol_gurobi.active_set)
                 self.assertTrue(np.allclose(sol_gurobi.inequality_multipliers, sol_gurobi.inequality_multipliers))
                 self.assertTrue(np.allclose(sol_gurobi.equality_multipliers, sol_gurobi.equality_multipliers))
-                self.assertTrue(sol_pnnls.primal_degenerate == sol_gurobi.primal_degenerate)
-                self.assertTrue(sol_pnnls.dual_degenerate == sol_gurobi.dual_degenerate)
+                # self.assertTrue(sol_pnnls.primal_degenerate == sol_gurobi.primal_degenerate)
+                # self.assertTrue(sol_pnnls.dual_degenerate == sol_gurobi.dual_degenerate)
 
     def test_quadratic_program(self):
         np.random.seed(1)

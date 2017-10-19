@@ -6,7 +6,7 @@ from pympc.geometry.polytope import Polytope
 
 class ParametricLP:
 
-    def __init__(self, F_u, F_x, F, C_u, C_x, C):
+    def __init__(self, F_u, F_x, F, C_u, C_x, C, row_sparsity=None, column_sparsity=None):
         """
         LP in the form:
         min  \sum_i | (F_u u + F_x x + F)_i |
@@ -18,6 +18,8 @@ class ParametricLP:
         self.C_u = C_u
         self.C_x = C_x
         self.C = C
+        self.row_sparsity = row_sparsity
+        self.column_sparsity = column_sparsity
         self.add_slack_variables()
         return
 
@@ -54,10 +56,9 @@ class ParametricLP:
             u_star = [u_star[i*u_length:(i+1)*u_length,:] for i in range(u_star.shape[0]/u_length)]
         return u_star, sol.min
 
-
 class ParametricQP:
 
-    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):
+    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C, row_sparsity=None, column_sparsity=None):
         """
         Multiparametric QP in the form:
         min  .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
@@ -72,6 +73,8 @@ class ParametricQP:
         self.C_u = C_u
         self.C_x = C_x
         self.C = C
+        self.row_sparsity = row_sparsity
+        self.column_sparsity = column_sparsity
         self.remove_linear_terms()
         self._feasible_set = None
         return
@@ -82,7 +85,9 @@ class ParametricQP:
         f = x0.T.dot(self.F_xu) + self.F_u.T
         A = self.C_u
         b = self.C + self.C_x.dot(x0)
-        u_star, cost = quadratic_program(H, f, A, b)
+        sol = quadratic_program(H, f, A, b)
+        u_star = sol.argmin
+        cost = sol.min
         cost += .5*x0.T.dot(self.F_xx).dot(x0) + self.F_x.T.dot(x0) + self.F
         if u_length is not None:
             if not float(u_star.shape[0]/u_length).is_integer():
@@ -159,6 +164,7 @@ class ParametricQP:
 
 
     def get_z_sensitivity(self, active_set):
+
         # clean active set
         G_A = self.G[active_set,:]
         if active_set and np.linalg.matrix_rank(G_A) < G_A.shape[0]:
