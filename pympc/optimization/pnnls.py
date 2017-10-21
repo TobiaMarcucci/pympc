@@ -66,9 +66,18 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
 
     # matrices for the pnnls solver
     A_pnnls = np.vstack((
-        np.hstack((                                     b.T,   np.zeros((1, n_ineq+2*n_eq)))),
-        np.hstack((np.zeros((n_ineq+2*n_eq, n_ineq+2*n_eq)),          np.eye(n_ineq+2*n_eq))),
-        np.hstack((                                     A.T, np.zeros((n_x, n_ineq+2*n_eq))))
+        np.hstack((
+            b.T,
+            np.zeros((1, n_ineq+2*n_eq))
+            )),
+        np.hstack((
+            np.zeros((n_ineq+2*n_eq, n_ineq+2*n_eq)),
+            np.eye(n_ineq+2*n_eq)
+            )),
+        np.hstack((
+            A.T,
+            np.zeros((n_x, n_ineq+2*n_eq))
+            ))
         ))
     B_pnnls = np.vstack((f.T, A, np.zeros((n_x, n_x))))
     f = np.reshape(f, (n_x,1))
