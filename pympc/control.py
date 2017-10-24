@@ -55,9 +55,9 @@ class ModelPredictiveController:
         sys_list = [a_sys]*self.N
         X_list = [self.X]*self.N
         U_list = [self.U]*self.N
-        switching_sequence = [0]*self.N
+        mode_sequence = [0]*self.N
         pwa_sys = PieceWiseAffineSystem.from_orthogonal_domains(sys_list, X_list, U_list)
-        self.condensed_program = OCP_condenser(pwa_sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
+        self.condensed_program = OCP_condenser(pwa_sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, mode_sequence)
         self.remove_intial_state_contraints()
         return
 
@@ -465,13 +465,13 @@ class HybridModelPredictiveController:
             u_feedforward = [np.array([[self._u[k,i].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
             x_trajectory = [np.array([[self._x[k,i].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
             d_star = [np.array([[self._d[k,i].x] for i in range(self.sys.n_sys)]) for k in range(self.N)]
-            switching_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
+            mode_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
         else:
             u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
             x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
             cost = np.nan
-            switching_sequence = [np.nan]*self.N
-        return u_feedforward, x_trajectory, tuple(switching_sequence), cost
+            mode_sequence = [np.nan]*self.N
+        return u_feedforward, x_trajectory, tuple(mode_sequence), cost
 
 
     def feedback(self, x0):
@@ -480,15 +480,15 @@ class HybridModelPredictiveController:
         """
         return self.feedforward(x0)[0][0]
 
-    def condense_program(self, switching_sequence):
+    def condense_program(self, mode_sequence):
         """
         Given a mode sequence, returns the condensed LP or QP (see ParametricLP or ParametricQP classes).
         """
         # tic = time.time()
-        # print('\nCondensing the OCP for the switching sequence ' + str(switching_sequence) + ' ...')
-        if len(switching_sequence) != self.N:
+        # print('\nCondensing the OCP for the switching sequence ' + str(mode_sequence) + ' ...')
+        if len(mode_sequence) != self.N:
             raise ValueError('Switching sequence not coherent with the controller horizon.')
-        prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, switching_sequence)
+        prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, mode_sequence)
         # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
         # sparsity structure
         return prog
@@ -648,36 +648,36 @@ def suppress_stdout():
         finally:
             sys.stdout = old_stdout
 
-def OCP_condenser(sys, objective_norm, Q, R, P, X_N, switching_sequence):
+def OCP_condenser(sys, objective_norm, Q, R, P, X_N, mode_sequence):
     tic = time.time()
-    N = len(switching_sequence)
+    N = len(mode_sequence)
     Q_bar = linalg.block_diag(*[Q for i in range(N)] + [P])
     R_bar = linalg.block_diag(*[R for i in range(N)])
-    G, W, E = constraint_condenser(sys, X_N, switching_sequence)
+    G, W, E = constraint_condenser(sys, X_N, mode_sequence)
 
     row_sparsity = [0]
-    for i, mode in enumerate(switching_sequence):
+    for i, mode in enumerate(mode_sequence):
         row_sparsity.append(row_sparsity[i] + sys.domains[mode].lhs_min.shape[0])
     row_sparsity[-1] += X_N.lhs_min.shape[0]
     column_sparsity = [i*sys.n_u for i in range(N+1)]
 
     if objective_norm == 'one':
-        F_u, F_x, F = linear_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
+        F_u, F_x, F = linear_objective_condenser(sys, Q_bar, R_bar, mode_sequence)
         parametric_program = ParametricLP(F_u, F_x, F, G, E, W)
     elif objective_norm == 'two':
-        F_uu, F_xu, F_xx, F_u, F_x, F = quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence)
+        F_uu, F_xu, F_xx, F_u, F_x, F = quadratic_objective_condenser(sys, Q_bar, R_bar, mode_sequence)
         parametric_program = ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W, row_sparsity, column_sparsity)
     # print 'total condensing time is', str(time.time()-tic),'s.\n'
     return parametric_program
 
-def constraint_condenser(sys, X_N, switching_sequence):
-    N = len(switching_sequence)
-    D_sequence = [sys.domains[switching_sequence[i]] for i in range(N)]
+def constraint_condenser(sys, X_N, mode_sequence):
+    N = len(mode_sequence)
+    D_sequence = [sys.domains[mode_sequence[i]] for i in range(N)]
     lhs_x = linalg.block_diag(*[D.lhs_min[:,:sys.n_x] for D in D_sequence] + [X_N.lhs_min])
     lhs_u = linalg.block_diag(*[D.lhs_min[:,sys.n_x:] for D in D_sequence])
     lhs_u = np.vstack((lhs_u, np.zeros((X_N.lhs_min.shape[0], lhs_u.shape[1]))))
     rhs = np.vstack([D.rhs_min for D in D_sequence] + [X_N.rhs_min])
-    A_bar, B_bar, c_bar = sys.condense(switching_sequence)
+    A_bar, B_bar, c_bar = sys.condense(mode_sequence)
     G = (lhs_x.dot(B_bar) + lhs_u)
     W = rhs - lhs_x.dot(c_bar)
     E = - lhs_x.dot(A_bar)
@@ -698,21 +698,21 @@ def constraint_condenser(sys, X_N, switching_sequence):
     # print '\n' + str(n_ineq_before - n_ineq_after) + 'on' + str(n_ineq_before) + 'redundant inequalities removed in', str(time.time()-tic),'s,',
     return G, W, E
 
-def linear_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
+def linear_objective_condenser(sys, Q_bar, R_bar, mode_sequence):
     """
     \sum_i | (F_u u + F_x x + F)_i |
     """
-    A_bar, B_bar, c_bar = sys.condense(switching_sequence)
+    A_bar, B_bar, c_bar = sys.condense(mode_sequence)
     F_u = np.vstack((Q_bar.dot(B_bar), R_bar))
     F_x = np.vstack((Q_bar.dot(A_bar), np.zeros((R_bar.shape[0], A_bar.shape[1]))))
     F = np.vstack((Q_bar.dot(c_bar), np.zeros((R_bar.shape[0], 1))))
     return F_u, F_x, F
 
-def quadratic_objective_condenser(sys, Q_bar, R_bar, switching_sequence):
+def quadratic_objective_condenser(sys, Q_bar, R_bar, mode_sequence):
     """
     .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
     """
-    A_bar, B_bar, c_bar = sys.condense(switching_sequence)
+    A_bar, B_bar, c_bar = sys.condense(mode_sequence)
     F_uu = 2*(R_bar + B_bar.T.dot(Q_bar).dot(B_bar))
     F_xu = 2*A_bar.T.dot(Q_bar).dot(B_bar)
     F_xx = 2.*A_bar.T.dot(Q_bar).dot(A_bar)

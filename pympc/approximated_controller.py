@@ -231,7 +231,9 @@ class ApproximatedHybridModelPredictiveController:
         return input_sequence[0], mode_sequence
 
 def shift_mode_sequence(mode_sequence, terminal_mode):
-    return [mode_sequence[i:] + (terminal_mode,)*i for i in range(1,len(mode_sequence))]
+    shifted_sequences = [mode_sequence[i:] + (terminal_mode,)*i for i in range(1,len(mode_sequence))]
+    shifted_sequences = list(set(shifted_sequences))
+    return shifted_sequences
 
 def load_library(name):
     library = np.load(name + '.npy').item()
