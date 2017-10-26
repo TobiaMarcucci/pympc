@@ -79,16 +79,26 @@ class ParametricQP:
         self._feasible_set = None
         return
 
-    def solve(self, x0, u_length=None):
-        x0 = np.reshape(x0, (x0.shape[0], 1))
-        H = self.F_uu
-        f = x0.T.dot(self.F_xu) + self.F_u.T
+    def is_feasible(self, x):
+        x = np.reshape(x, (x.shape[0], 1))
+        f = np.zeros((self.C_u.shape[1], 1))
         A = self.C_u
-        b = self.C + self.C_x.dot(x0)
+        b = self.C + self.C_x.dot(x)
+        sol = linear_program(f, A, b)
+        if np.isnan(sol.min):
+            return False
+        return True
+
+    def solve(self, x, u_length=None):
+        x = np.reshape(x, (x.shape[0], 1))
+        H = self.F_uu
+        f = x.T.dot(self.F_xu) + self.F_u.T
+        A = self.C_u
+        b = self.C + self.C_x.dot(x)
         sol = quadratic_program(H, f, A, b)
         u_star = sol.argmin
         cost = sol.min
-        cost += .5*x0.T.dot(self.F_xx).dot(x0) + self.F_x.T.dot(x0) + self.F
+        cost += .5*x.T.dot(self.F_xx).dot(x) + self.F_x.T.dot(x) + self.F
         if u_length is not None:
             if not float(u_star.shape[0]/u_length).is_integer():
                 raise ValueError('Uncoherent dimension of the input u_length.')
@@ -221,6 +231,7 @@ class ParametricQP:
         u_star = z_star[0:self.F_uu.shape[0],:]
         x_star = z_star[self.F_uu.shape[0]:,:]
         return u_star, x_star, cost
+
 
 def upload_ParametricQP(group_name, super_group=None):
     """

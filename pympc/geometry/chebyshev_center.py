@@ -1,6 +1,6 @@
 import numpy as np
 from pympc.algebra import nullspace_basis
-from pympc.optimization.pnnls import linear_program
+from pympc.optimization.gurobi import linear_program
 
 def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     """
