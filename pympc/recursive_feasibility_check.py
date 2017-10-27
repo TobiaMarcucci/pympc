@@ -82,6 +82,7 @@ def recursive_feasibility_check(A_2, b_2, A_1=None, b_1=None, basis_1=None, tol=
     
     # run the optimization
     model.setParam('OutputFlag', 0)
+    #model.setParam('Method', -1)
     model.optimize()
     
     # retrieve solution
