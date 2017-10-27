@@ -155,6 +155,12 @@ class ParametricQP:
         C_x[...] = self.C_x
         C[...] = self.C
 
+        # sparsity of the Jacobian
+        row_sparsity = group.create_dataset('row_sparsity', (len(self.row_sparsity),))
+        column_sparsity = group.create_dataset('column_sparsity', (len(self.column_sparsity),))
+        row_sparsity[...] = np.array(self.row_sparsity)
+        column_sparsity[...] = np.array(self.column_sparsity)
+
         # close the file and return
         if super_group is None:
             group.close()
@@ -241,22 +247,26 @@ def upload_ParametricQP(group_name, super_group=None):
 
     # open the file
     if super_group is None:
-        controller = h5py.File(group_name + '.hdf5', 'r')
+        qp = h5py.File(group_name + '.hdf5', 'r')
     else:
-        controller = super_group[group_name]
+        qp = super_group[group_name]
 
     # read matrices
-    F_uu = np.array(controller['F_uu'])
-    F_xu = np.array(controller['F_xu'])
-    F_xx = np.array(controller['F_xx'])
-    F_u = np.array(controller['F_u'])
-    F_x = np.array(controller['F_x'])
-    F = np.array(controller['F'])
-    C_u = np.array(controller['C_u'])
-    C_x = np.array(controller['C_x'])
-    C = np.array(controller['C'])
+    F_uu = np.array(qp['F_uu'])
+    F_xu = np.array(qp['F_xu'])
+    F_xx = np.array(qp['F_xx'])
+    F_u = np.array(qp['F_u'])
+    F_x = np.array(qp['F_x'])
+    F = np.array(qp['F'])
+    C_u = np.array(qp['C_u'])
+    C_x = np.array(qp['C_x'])
+    C = np.array(qp['C'])
+
+    # read sparsity pattern Jacobian
+    row_sparsity = [int(i) for i in qp['row_sparsity']]
+    column_sparsity = [int(i) for i in qp['column_sparsity']]
 
     # close the file and return
     if super_group is None:
-        controller.close()
-    return ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C)
+        qp.close()
+    return ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C, row_sparsity, column_sparsity)
