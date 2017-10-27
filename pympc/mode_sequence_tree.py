@@ -42,7 +42,8 @@ class ModeSequenceTree:
                     break
             child_tree = ModeSequenceTree(child, qp_blocks)
             child_tree.expand(qp_library)
-            self.children[child[-1]] = child_tree
+            self.children[child[len(self.mode_sequence_fragment)]] = child_tree
+
 
     def check_feasibility(self, x, basis_parent):
         A_1 = self.qp_blocks.C_u_parent
