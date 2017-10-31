@@ -6,6 +6,7 @@ import gurobipy as grb
 from contextlib import contextmanager
 from copy import copy
 from optimization.pnnls import linear_program
+from optimization.gurobi import read_status
 from optimization.parametric_programs import ParametricLP, ParametricQP
 from optimization.mpqpsolver import MPQPSolver, CriticalRegion
 from dynamical_systems import AffineSystem, PieceWiseAffineSystem, upload_PieceWiseAffineSystem
@@ -460,12 +461,20 @@ class HybridModelPredictiveController:
         return
 
     def _return_solution(self):
-        if self._model.status in [grb.GRB.Status.OPTIMAL, grb.GRB.Status.INTERRUPTED, grb.GRB.Status.TIME_LIMIT, grb.GRB.Status.SUBOPTIMAL]:
-            cost = self._model.objVal
-            u_feedforward = [np.array([[self._u[k,i].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
-            x_trajectory = [np.array([[self._x[k,i].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
-            d_star = [np.array([[self._d[k,i].x] for i in range(self.sys.n_sys)]) for k in range(self.N)]
-            mode_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
+        status = read_status(str(self._model.status))
+        if status in ['OPTIMAL', 'TIME LIMIT', 'INTERRUPTED', 'SUBOPTIMAL']:
+            try:
+                cost = self._model.objVal
+                u_feedforward = [np.array([[self._u[k,i].x] for i in range(self.sys.n_u)]) for k in range(self.N)]
+                x_trajectory = [np.array([[self._x[k,i].x] for i in range(self.sys.n_x)]) for k in range(self.N+1)]
+                d_star = [np.array([[self._d[k,i].x] for i in range(self.sys.n_sys)]) for k in range(self.N)]
+                mode_sequence = [np.where(np.isclose(d, 1.))[0][0] for d in d_star]
+            except AttributeError:
+                print '\nAttributeError with model status ' + status
+                u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
+                x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]
+                cost = np.nan
+                mode_sequence = [np.nan]*self.N
         else:
             u_feedforward = [np.full((self.sys.n_u,1), np.nan) for k in range(self.N)]
             x_trajectory = [np.full((self.sys.n_x,1), np.nan) for k in range(self.N+1)]

@@ -45,19 +45,18 @@ class PolicySampler:
                 print('time spent: ' + str(time.time()-tic) + ' s, model status: ' + solver_status + '.')
 
                 # discard sample if unfeasible
-                if not solver_status in ['OPTIMAL', 'TIME LIMIT', 'SUBOPTIMAL']:
+                if any(np.isnan(mode_sequence)):
                     n_unfeasible += 1
+                    print('problem unfeasible.')
 
                 # add sample to the library
                 else:
 
                     # condense qp
-                    print('condensing QP... '),
-                    tic = time.time()
                     prog = self.controller.condense_program(mode_sequence)
-                    print('QP condensed in ' + str(time.time()-tic) + ' s.')
                     self.qp_library[mode_sequence] = prog
                     n_new_sequences += 1
+                    print('QP condensed.')
                         
         # report results of the sampling
         print('\nTotal number of samples: ' + str(n_samples) + ', switching sequences found: ' + str(n_new_sequences) + ', rejected samples: ' + str(n_rejected) + ', unfeasible samples: ' + str(n_unfeasible) + '.')

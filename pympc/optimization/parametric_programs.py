@@ -1,6 +1,5 @@
 import numpy as np
-from pympc.optimization.pnnls import linear_program
-from pympc.optimization.gurobi import quadratic_program
+from pympc.optimization.gurobi import linear_program, quadratic_program
 from pympc.geometry.polytope import Polytope
 
 
