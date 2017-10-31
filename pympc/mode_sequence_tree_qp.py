@@ -142,22 +142,3 @@ def get_children_list(mode_sequence_fragment, mode_sequences):
             if ms[:len(mode_sequence_fragment)] == mode_sequence_fragment:
                 children.append(ms[:len(mode_sequence_fragment)+1])
     return list(set(children))
-
-def generate_subprogram(mode_sequence_fragment, qp_library):
-    n = len(mode_sequence_fragment)
-    for mode_sequence, qp in qp_library.items():
-        if mode_sequence[:n] == mode_sequence_fragment:
-            break
-    n_c = qp.row_sparsity[n]
-    n_u = qp.column_sparsity[n]
-    F_uu = qp.F_uu[:n_u, :n_u]
-    F_xu = qp.F_xu[:, :n_u]
-    F_xx = qp.F_xx
-    F_u = qp.F_u[:n_u, :]
-    F_x = qp.F_x
-    F = qp.F
-    C_u = qp.C_u[:n_c, :n_u]
-    C_x = qp.C_x[:n_c, :]
-    C = qp.C[:n_c, :]
-    parametric_program = ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C)
-    return parametric_program

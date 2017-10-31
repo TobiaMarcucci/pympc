@@ -20,7 +20,7 @@ class PolicySampler:
             self.qp_library = qp_library
         return
 
-    def sample_policy(self, n_samples, check_sample_function=None):
+    def sample_policy(self, n_samples, check_sample_function=None, sample_origin=False):
 
         # initialize count
         n_rejected = 0
@@ -30,7 +30,10 @@ class PolicySampler:
         # build library
         for i in range(n_samples):
             print('Sample ' + str(i) + ': ')
-            x = self._random_sample(check_sample_function)
+            if i == 0 and sample_origin:
+                x = np.zeros((self.controller.sys.n_x, 1))
+            else:
+                x = self._random_sample(check_sample_function)
 
             # reject sample if already covered
             if self._sampling_rejection(x):
