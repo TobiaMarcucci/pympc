@@ -52,7 +52,6 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None):
     # run the optimization
     model.setParam('OutputFlag', False)
     model.optimize()
-    #print model.Runtime
 
     # return result
     argmin, cost, ineq_mult, eq_mult = reorganize_solution(model, A, C)
