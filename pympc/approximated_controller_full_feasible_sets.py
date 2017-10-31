@@ -8,6 +8,7 @@ from optimization.gurobi import read_status
 from optimization.parametric_programs import upload_ParametricQP
 import h5py
 import ast
+from pympc.mode_sequence_tree_qp import ModeSequenceTree, Solution
 
 class PolicySampler:
     
@@ -150,10 +151,62 @@ def upload_PolicySampler(group_name, super_group=None):
 
 
 
+# class ApproximatedHybridModelPredictiveController:
+
+#     def __init__(self, sampler, terminal_mode):
+#         self.sampler = sampler
+#         self.shifted_qps = self._programs_shifted_mode_sequences(terminal_mode)
+#         return
+
+#     def _programs_shifted_mode_sequences(self, terminal_mode):
+#         shifted_qps = dict()
+#         for mode_sequence in self.sampler.qp_library.keys():
+#             for shifted_mode_sequence in shift_mode_sequence(mode_sequence, terminal_mode):
+#                 if not shifted_qps.has_key(shifted_mode_sequence):
+#                     shifted_qps[shifted_mode_sequence] = self.sampler.controller.condense_program(shifted_mode_sequence)
+#         return shifted_qps
+
+#     def feedforward(self, x, previous_mode_sequence=None, max_programs=None):
+
+#         # initilize output
+#         n_u = self.sampler.controller.sys.n_u
+#         N = self.sampler.controller.N
+#         if previous_mode_sequence is not None:
+#             input_sequence, cost = self.shifted_qps[previous_mode_sequence].solve(x)
+#             input_sequence = [input_sequence[i*n_u:(i+1)*n_u,:] for i in range(N)]
+#             mode_sequence = previous_mode_sequence
+#         else:
+#             cost = np.nan
+#             mode_sequence = [np.nan] * N
+#             input_sequence = [np.full((n_u, 1), np.nan)] * N
+
+#         # get and cut feasible qps
+#         feasible_mode_sequences = self.sampler.get_feasible_mode_sequences(x)
+#         if max_programs is not None:
+#             feasible_mode_sequences = feasible_mode_sequences[:max_programs-1]
+
+#         # solve qps
+#         for mode_sequence in feasible_mode_sequences:
+#             new_input_sequence, new_cost = self.sampler.qp_library[mode_sequence].solve(x)
+#             if new_cost < cost or np.isnan(cost):
+#                 cost = new_cost
+#                 input_sequence = [new_input_sequence[i*n_u:(i+1)*n_u,:] for i in range(N)]
+#                 mode_sequence = mode_sequence
+
+#         return input_sequence, cost, mode_sequence
+
+#     def feedback(self, x, first_mode_sequence=None, max_programs=None):
+#         input_sequence, cost, mode_sequence = self.feedforward(x, first_mode_sequence, max_programs)
+#         return input_sequence[0], mode_sequence
+
+
+
 class ApproximatedHybridModelPredictiveController:
 
     def __init__(self, sampler, terminal_mode):
         self.sampler = sampler
+        self.tree = ModeSequenceTree()
+        self.tree.expand(sampler.controller, sampler.qp_library)
         self.shifted_qps = self._programs_shifted_mode_sequences(terminal_mode)
         return
 
@@ -165,37 +218,31 @@ class ApproximatedHybridModelPredictiveController:
                     shifted_qps[shifted_mode_sequence] = self.sampler.controller.condense_program(shifted_mode_sequence)
         return shifted_qps
 
-    def feedforward(self, x, previous_mode_sequence=None, max_programs=None):
-
-        # initilize output
+    def feedforward(self, x, previous_mode_sequence=None):
         n_u = self.sampler.controller.sys.n_u
         N = self.sampler.controller.N
         if previous_mode_sequence is not None:
-            input_sequence, cost = self.shifted_qps[previous_mode_sequence].solve(x)
-            input_sequence = [input_sequence[i*n_u:(i+1)*n_u,:] for i in range(N)]
-            mode_sequence = previous_mode_sequence
+            argmin, cost = self.shifted_qps[previous_mode_sequence].solve(x)
+            candidate_solution = Solution(
+                min = cost,
+                argmin = argmin,
+                mode_sequence = previous_mode_sequence
+                )
         else:
+            candidate_solution = None
+        solution = self.tree.solve(x, candidate_solution)
+        if solution is None:
             cost = np.nan
-            mode_sequence = [np.nan] * N
-            input_sequence = [np.full((n_u, 1), np.nan)] * N
-
-        # get and cut feasible qps
-        feasible_mode_sequences = self.sampler.get_feasible_mode_sequences(x)
-        if max_programs is not None:
-            feasible_mode_sequences = feasible_mode_sequences[:max_programs-1]
-
-        # solve qps
-        for mode_sequence in feasible_mode_sequences:
-            new_input_sequence, new_cost = self.sampler.qp_library[mode_sequence].solve(x)
-            if new_cost < cost or np.isnan(cost):
-                cost = new_cost
-                input_sequence = [new_input_sequence[i*n_u:(i+1)*n_u,:] for i in range(N)]
-                mode_sequence = mode_sequence
-
+            input_sequence = np.full((n_u * N, 1), np.nan)
+            mode_sequence = (np.nan,) * N
+        else:
+            input_sequence = [solution.argmin[i*n_u:(i+1)*n_u,:] for i in range(N)]
+            cost = solution.min
+            mode_sequence = solution.mode_sequence
         return input_sequence, cost, mode_sequence
 
-    def feedback(self, x, first_mode_sequence=None, max_programs=None):
-        input_sequence, cost, mode_sequence = self.feedforward(x, first_mode_sequence, max_programs)
+    def feedback(self, x, previous_mode_sequence=None):
+        input_sequence, _, mode_sequence = self.feedforward(x, previous_mode_sequence)
         return input_sequence[0], mode_sequence
 
 def shift_mode_sequence(mode_sequence, terminal_mode):

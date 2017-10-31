@@ -6,7 +6,7 @@ from pympc.geometry.polytope import Polytope
 
 class ParametricLP:
 
-    def __init__(self, F_u, F_x, F, C_u, C_x, C, row_sparsity=None, column_sparsity=None):
+    def __init__(self, F_u, F_x, F, C_u, C_x, C):#, row_sparsity=None, column_sparsity=None):
         """
         LP in the form:
         min  \sum_i | (F_u u + F_x x + F)_i |
@@ -18,8 +18,8 @@ class ParametricLP:
         self.C_u = C_u
         self.C_x = C_x
         self.C = C
-        self.row_sparsity = row_sparsity
-        self.column_sparsity = column_sparsity
+        # self.row_sparsity = row_sparsity
+        # self.column_sparsity = column_sparsity
         self.add_slack_variables()
         return
 
@@ -58,7 +58,7 @@ class ParametricLP:
 
 class ParametricQP:
 
-    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C, row_sparsity=None, column_sparsity=None):
+    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):#, row_sparsity=None, column_sparsity=None):
         """
         Multiparametric QP in the form:
         min  .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
@@ -73,8 +73,8 @@ class ParametricQP:
         self.C_u = C_u
         self.C_x = C_x
         self.C = C
-        self.row_sparsity = row_sparsity
-        self.column_sparsity = column_sparsity
+        # self.row_sparsity = row_sparsity
+        # self.column_sparsity = column_sparsity
         self.remove_linear_terms()
         self._feasible_set = None
         return
@@ -155,11 +155,11 @@ class ParametricQP:
         C_x[...] = self.C_x
         C[...] = self.C
 
-        # sparsity of the Jacobian
-        row_sparsity = group.create_dataset('row_sparsity', (len(self.row_sparsity),))
-        column_sparsity = group.create_dataset('column_sparsity', (len(self.column_sparsity),))
-        row_sparsity[...] = np.array(self.row_sparsity)
-        column_sparsity[...] = np.array(self.column_sparsity)
+        # # sparsity of the Jacobian
+        # row_sparsity = group.create_dataset('row_sparsity', (len(self.row_sparsity),))
+        # column_sparsity = group.create_dataset('column_sparsity', (len(self.column_sparsity),))
+        # row_sparsity[...] = np.array(self.row_sparsity)
+        # column_sparsity[...] = np.array(self.column_sparsity)
 
         # close the file and return
         if super_group is None:
@@ -262,11 +262,11 @@ def upload_ParametricQP(group_name, super_group=None):
     C_x = np.array(qp['C_x'])
     C = np.array(qp['C'])
 
-    # read sparsity pattern Jacobian
-    row_sparsity = [int(i) for i in qp['row_sparsity']]
-    column_sparsity = [int(i) for i in qp['column_sparsity']]
+    # # read sparsity pattern Jacobian
+    # row_sparsity = [int(i) for i in qp['row_sparsity']]
+    # column_sparsity = [int(i) for i in qp['column_sparsity']]
 
     # close the file and return
     if super_group is None:
         qp.close()
-    return ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C, row_sparsity, column_sparsity)
+    return ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C)#, row_sparsity, column_sparsity)

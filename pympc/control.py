@@ -57,7 +57,7 @@ class ModelPredictiveController:
         U_list = [self.U]*self.N
         mode_sequence = [0]*self.N
         pwa_sys = PieceWiseAffineSystem.from_orthogonal_domains(sys_list, X_list, U_list)
-        self.condensed_program = OCP_condenser(pwa_sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, mode_sequence)
+        self.condensed_program = OCP_condenser(pwa_sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, self.N, mode_sequence)
         self.remove_intial_state_contraints()
         return
 
@@ -484,13 +484,7 @@ class HybridModelPredictiveController:
         """
         Given a mode sequence, returns the condensed LP or QP (see ParametricLP or ParametricQP classes).
         """
-        # tic = time.time()
-        # print('\nCondensing the OCP for the switching sequence ' + str(mode_sequence) + ' ...')
-        if len(mode_sequence) != self.N:
-            raise ValueError('Switching sequence not coherent with the controller horizon.')
-        prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, mode_sequence)
-        # print('... OCP condensed in ' + str(time.time() -tic ) + ' seconds.\n')
-        # sparsity structure
+        prog = OCP_condenser(self.sys, self.objective_norm, self.Q, self.R, self.P, self.X_N, self.N, mode_sequence)
         return prog
 
     def save(self, group_name, super_group=None):
@@ -648,36 +642,46 @@ def suppress_stdout():
         finally:
             sys.stdout = old_stdout
 
-def OCP_condenser(sys, objective_norm, Q, R, P, X_N, mode_sequence):
-    tic = time.time()
-    N = len(mode_sequence)
-    Q_bar = linalg.block_diag(*[Q for i in range(N)] + [P])
-    R_bar = linalg.block_diag(*[R for i in range(N)])
-    G, W, E = constraint_condenser(sys, X_N, mode_sequence)
+def OCP_condenser(sys, objective_norm, Q, R, P, X_N, N, mode_sequence):
+    n = len(mode_sequence)
+    Q_bar = linalg.block_diag(*[Q for i in range(n)])
+    R_bar = linalg.block_diag(*[R for i in range(n)])
+    if n < N:
+        Q_bar = linalg.block_diag(Q_bar, Q)
+    else:
+        Q_bar = linalg.block_diag(Q_bar, P)
+    G, W, E = constraint_condenser(sys, X_N, N, mode_sequence)
 
-    row_sparsity = [0]
-    for i, mode in enumerate(mode_sequence):
-        row_sparsity.append(row_sparsity[i] + sys.domains[mode].lhs_min.shape[0])
-    row_sparsity[-1] += X_N.lhs_min.shape[0]
-    column_sparsity = [i*sys.n_u for i in range(N+1)]
+    # row_sparsity = [0]
+    # for i, mode in enumerate(mode_sequence):
+    #     row_sparsity.append(row_sparsity[i] + sys.domains[mode].lhs_min.shape[0])
+    # row_sparsity[-1] += X_N.lhs_min.shape[0]
+    # column_sparsity = [i*sys.n_u for i in range(N+1)]
 
     if objective_norm == 'one':
         F_u, F_x, F = linear_objective_condenser(sys, Q_bar, R_bar, mode_sequence)
         parametric_program = ParametricLP(F_u, F_x, F, G, E, W)
     elif objective_norm == 'two':
         F_uu, F_xu, F_xx, F_u, F_x, F = quadratic_objective_condenser(sys, Q_bar, R_bar, mode_sequence)
-        parametric_program = ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W, row_sparsity, column_sparsity)
+        parametric_program = ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, G, E, W)#, row_sparsity, column_sparsity)
     # print 'total condensing time is', str(time.time()-tic),'s.\n'
     return parametric_program
 
-def constraint_condenser(sys, X_N, mode_sequence):
-    N = len(mode_sequence)
-    D_sequence = [sys.domains[mode_sequence[i]] for i in range(N)]
-    lhs_x = linalg.block_diag(*[D.lhs_min[:,:sys.n_x] for D in D_sequence] + [X_N.lhs_min])
+def constraint_condenser(sys, X_N, N, mode_sequence):
+    n = len(mode_sequence)
+    D_sequence = [sys.domains[mode_sequence[i]] for i in range(n)]
+    lhs_x = linalg.block_diag(*[D.lhs_min[:,:sys.n_x] for D in D_sequence])
     lhs_u = linalg.block_diag(*[D.lhs_min[:,sys.n_x:] for D in D_sequence])
-    lhs_u = np.vstack((lhs_u, np.zeros((X_N.lhs_min.shape[0], lhs_u.shape[1]))))
-    rhs = np.vstack([D.rhs_min for D in D_sequence] + [X_N.rhs_min])
+    rhs = np.vstack([D.rhs_min for D in D_sequence])
     A_bar, B_bar, c_bar = sys.condense(mode_sequence)
+    if n < N:
+        A_bar = A_bar[:-sys.n_x,:]
+        B_bar = B_bar[:-sys.n_x,:]
+        c_bar = c_bar[:-sys.n_x,:]
+    else:
+        lhs_x = linalg.block_diag(lhs_x, X_N.lhs_min)
+        lhs_u = np.vstack((lhs_u, np.zeros((X_N.lhs_min.shape[0], lhs_u.shape[1]))))
+        rhs = np.vstack((rhs, X_N.rhs_min))
     G = (lhs_x.dot(B_bar) + lhs_u)
     W = rhs - lhs_x.dot(c_bar)
     E = - lhs_x.dot(A_bar)
