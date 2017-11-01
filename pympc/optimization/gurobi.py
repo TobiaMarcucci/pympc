@@ -14,7 +14,7 @@ def linear_program(f, A=None, b=None, C=None, d=None, active_set=None):
     """
 
     # get model
-    model, x = build_model(f=f, A=A, b=b, C=C, d=d)
+    model = build_model(f=f, A=A, b=b, C=C, d=d)
 
     # warm start
     if active_set is not None:
@@ -47,7 +47,7 @@ def quadratic_program(H, f=None, A=None, b=None, C=None, d=None):
     """
     
     # get model
-    model, x = build_model(H=H, f=f, A=A, b=b, C=C, d=d)
+    model = build_model(H=H, f=f, A=A, b=b, C=C, d=d)
 
     # run the optimization
     model.setParam('OutputFlag', False)
@@ -98,7 +98,7 @@ def build_model(H=None, f=None, A=None, b=None, C=None, d=None):
         cost.add(expr[0])
     model.setObjective(cost)
 
-    return model, x
+    return model
 
 def warm_start(model, active_set, A, C):
 

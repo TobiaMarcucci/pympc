@@ -1,8 +1,6 @@
 import numpy as np
-from pympc.optimization.gurobi import linear_program, quadratic_program, linear_expression, quadratic_expression
+from pympc.optimization.gurobi import linear_program, quadratic_program
 from pympc.geometry.polytope import Polytope
-import gurobipy as grb
-
 
 
 class ParametricLP:
@@ -59,14 +57,12 @@ class ParametricLP:
 
 class ParametricQP:
 
-    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):
+    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):#, row_sparsity=None, column_sparsity=None):
         """
         Multiparametric QP in the form:
         min  .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
         s.t. C_u u <= C_x x + C
         """
-        # self.cost_blocks = {'F_uu': F_uu, 'F_xx': F_xx, 'F_xu': F_xu, 'F_u': F_u, 'F_x': F_x, 'F': F}
-        # self.constraint_blocks = {'C_u': C_u, 'C_x': C_x, 'C': C}
         self.F_uu = F_uu
         self.F_xx = F_xx
         self.F_xu = F_xu
@@ -76,73 +72,37 @@ class ParametricQP:
         self.C_u = C_u
         self.C_x = C_x
         self.C = C
-        self.model, self.quadratic_cost = self.build_model()
+        # self.row_sparsity = row_sparsity
+        # self.column_sparsity = column_sparsity
         self.remove_linear_terms()
         self._feasible_set = None
         return
 
-    def build_model(self):
-
-        H = np.vstack((
-            np.hstack((self.F_uu, self.F_xu.T)),
-            np.hstack((self.F_xu, self.F_xx)),
-            ))
-        f = np.hstack((self.F_u.T, self.F_x.T))
-        A = np.hstack((self.C_u, -self.C_x))
-        b = self.C
-
-        # initialize model
-        model = grb.Model()
-        n = H.shape[0]
-        ux = model.addVars(n, lb=[- grb.GRB.INFINITY]*n)
-
-        # linear inequalities
-        for i, expr in enumerate(linear_expression(A, b, ux)):
-            model.addConstr(expr <= 0., name='ineq_'+str(i))
-
-        # cost function
-        quadratic_cost = grb.QuadExpr()
-        expr = quadratic_expression(H, ux)
-        quadratic_cost.add(.5*expr)
-        expr = linear_expression(f, np.zeros((1,1)), ux)
-        quadratic_cost.add(expr[0])
-
-        model.setParam('OutputFlag', 0)
-        model.update()
-
-        return model, quadratic_cost
-
     def is_feasible(self, x):
-        self.set_initial_state(x)
-        self.model.setObjective(0.)
-        self.model.optimize()
-        if self.model.status == grb.GRB.Status.OPTIMAL:
-            return True
-        return False
+        x = np.reshape(x, (x.shape[0], 1))
+        f = np.zeros((self.C_u.shape[1], 1))
+        A = self.C_u
+        b = self.C + self.C_x.dot(x)
+        sol = linear_program(f, A, b)
+        if np.isnan(sol.min):
+            return False
+        return True
 
-    def solve(self, x):
-        n_u = self.F_uu.shape[0]
-        self.set_initial_state(x)
-        self.model.setObjective(self.quadratic_cost)
-        self.model.optimize()
-        if self.model.status == grb.GRB.Status.OPTIMAL:
-            x = self.model.getVars()
-            cost = self.model.objVal + self.F[0,0]
-            argmin = np.array(self.model.getAttr('x')[:n_u]).reshape(n_u, 1)
-        else:
-            cost = np.nan
-            argmin = np.full((n_u,1), np.nan)
-        return argmin, cost
-
-    def set_initial_state(self, x):
-        n_u = self.F_uu.shape[0]
-        n_x = self.F_xx.shape[0]
-        ux = self.model.getVars()
-        for i in range(n_x):
-            if self.model.getConstrByName('intial_condition_' + str(i)) is not None:
-                self.model.remove(self.model.getConstrByName('intial_condition_' + str(i)))
-            self.model.addConstr(ux[n_u+i] == x[i,0], name='intial_condition_' + str(i))
-        return
+    def solve(self, x, u_length=None):
+        x = np.reshape(x, (x.shape[0], 1))
+        H = self.F_uu
+        f = x.T.dot(self.F_xu) + self.F_u.T
+        A = self.C_u
+        b = self.C + self.C_x.dot(x)
+        sol = quadratic_program(H, f, A, b)
+        u_star = sol.argmin
+        cost = sol.min
+        cost += .5*x.T.dot(self.F_xx).dot(x) + self.F_x.T.dot(x) + self.F
+        if u_length is not None:
+            if not float(u_star.shape[0]/u_length).is_integer():
+                raise ValueError('Uncoherent dimension of the input u_length.')
+            u_star = [u_star[i*u_length:(i+1)*u_length,:] for i in range(u_star.shape[0]/u_length)]
+        return u_star, cost[0,0]
 
     def get_active_set(self, x, u, tol=1.e-6):
         u = np.vstack(u)
