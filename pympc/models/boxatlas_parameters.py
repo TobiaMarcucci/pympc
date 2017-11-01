@@ -61,7 +61,7 @@ controller ={
                 },
         'gurobi': {
                 'OutputFlag': 0,
-                'TimeLimit': 600.,
+                'TimeLimit': 1800.,
                 'MIPFocus': 0,           # balanced: 0, feasibility: 1, optimality: 2, bounds: 3
                 'NumericFocus': 0,       # min:     0, def:     0, max:     3
                 'OptimalityTol': 1.e-6,  # min: 1.e-9, def: 1.e-6, max: 1.e-2 
