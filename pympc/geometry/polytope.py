@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pyhull.halfspace import Halfspace, HalfspaceIntersection
 import cdd
-from pympc.optimization.gurobi import linear_program
+from pympc.optimization.pnnls import linear_program
 from pympc.geometry.chebyshev_center import chebyshev_center
 from pympc.geometry.convex_hull import orthogonal_projection_CHM
 from pympc.algebra import rangespace_basis, nullspace_basis
@@ -259,7 +259,7 @@ class Polytope:
         if method == 'convex_hull':
             A_proj, b_proj, v_proj = orthogonal_projection_CHM(self.lhs_min, self.rhs_min, residual_variables)
             p_proj = Polytope(A_proj, b_proj)
-            p_proj.assemble(redundant=False, vertices=v_proj)
+            p_proj.assemble(check_redundancy=False, vertices=v_proj)
 
         # elif method == 'block_elimination':
         #     drop_variables = [i+1 for i in range(self.n_variables) if i not in residual_variables]
