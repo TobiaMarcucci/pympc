@@ -173,14 +173,15 @@ def state_space_trajectory(x_trajectory, state_components=[0,1], **kwargs):
 
 
 from pympc.geometry.polytope import Polytope
-def state_partition(critical_regions, feasible_set, active_set=False, facet_index=False, **kwargs):
+def state_partition(critical_regions, feasible_set=None, active_set=False, facet_index=False, **kwargs):
     if critical_regions is None:
         raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
 
     fig, ax = plt.subplots()
     for cr in critical_regions:
         p = Polytope(cr.polytope.lhs_min, cr.polytope.rhs_min)
-        p.add_facets(feasible_set.lhs_min, feasible_set.rhs_min)
+        if feasible_set is not None:
+            p.add_facets(feasible_set.lhs_min, feasible_set.rhs_min)
         p.assemble()
         try:
             pass
