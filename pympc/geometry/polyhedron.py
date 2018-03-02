@@ -2,6 +2,7 @@
 import numpy as np
 
 # pympc imports
+from pympc.optimization.linear_program import LinearProgram
 from pympc.algebra import nullspace_basis
 
 class Polyhedron:
@@ -196,6 +197,44 @@ class Polyhedron:
                 self.C[i,:] = self.C[i,:]/r
                 self.d[i,:] = self.d[i,:]/r
 
+    def remove_redundant_inequalities(self, tol=1.e-7):
+    	"""
+        Derives a minimal representation of the polyhedron solving an LP for each facet. (See "Fukuda - Frequently asked questions in polyhedral computation" Sec.2.21.) In case of equalities, first the problem is projected in the nullspace of the equalities.
+        """
+
+        # if there are equalities, project
+        if self.C.shape[0] != 0:
+        	E, f, _, _ = self._remove_equalities()
+        else:
+        	E = self.A # check that this does not modify A and b!!!
+        	f = self.b
+
+        # initialize list of non-redundant facets
+        minimal_facets = range(E.shape[0])
+
+        # check each facet
+        for i in range(E.shape[0]):
+
+        	# remove redundant facets and relax ith inequality
+            E_minimal = E[minimal_facets,:]
+            f_relaxation = np.zeros(np.shape(f))
+            f_relaxation[i] += 1.
+            f_relaxed = (f + f_relaxation)[minimal_facets];
+
+            # solve linear program
+            constraint = Polyhedron(E_minimal, f_relaxed)
+            lp = LinearProgram(-E[i,:].T, constraint)
+            sol = lp.solve()
+            cost_i = - sol.min
+
+            # remove redundant facets from the list
+            if cost_i - f[i] < tol or np.isnan(cost_i):
+                minimal_facets.remove(i)
+
+        # remove redundant facets
+        self.A = self.A[minimal_facets,:]
+        self.b = self.b[minimal_facets]
+
     def _remove_equalities(self):
     	"""
     	Given the polyhedron in the form P := {x | A x <= b, C x = d}, returns the change of variables x = [Y Z] [y' z']' such that P can be expressed only with inequalities, i.e. := {z | E z <= f}.
@@ -218,4 +257,28 @@ class Polyhedron:
 
         return E, f, Y, Z
 
+    def is_empty(self):
+    	pass
 
+    def is_bounded(self):
+    	pass
+
+    def is_included_in(self, p):
+    	pass
+
+    def contains(self, x):
+    	pass
+
+    @property # needed to call the method without () ?
+    def vertices(self):
+    	pass
+
+    def project_to(self, dimensions):
+    	pass
+
+    def intersect_with(self, p):
+    	pass
+
+    def plot(self):
+    	# if more than 2d raise value error
+    	pass

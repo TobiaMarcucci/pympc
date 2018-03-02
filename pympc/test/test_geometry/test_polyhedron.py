@@ -163,16 +163,67 @@ class TestPolyhedron(unittest.TestCase):
         
     def test_remove_equalities(self):
 
-        # cosntruct polyhedron
+        # contruct polyhedron
         x_min = - np.ones((2, 1))
         x_max = - x_min
         p = Polyhedron.from_bounds(x_min, x_max)
         C = np.ones((1, 2))
         d = np.ones((1, 1))
         p.add_equality(C, d)
-        print p._remove_equalities()
+        E, f, Y, Z = p._remove_equalities()
 
+        # check result
+        self.assertAlmostEqual(Z[0,0]/Z[1,0], -1)
+        self.assertAlmostEqual(Y[0,0]/Y[1,0], 1)
+        intersections = [
+            np.sqrt(2.)/2,
+            3.*np.sqrt(2.)/2,
+            - np.sqrt(2.)/2,
+            - 3.*np.sqrt(2.)/2
+            ]
+        for z in intersections:
+            r = E.dot(np.array([[z]])) - f
+            self.assertAlmostEqual(np.min(np.abs(r)), 0.)
 
+    def test_remove_redundant_inequalities(self):
+
+        # only inequalities
+        A = np.array([[1., 1.], [-1., 1.], [0., -1.], [0., 1.], [0., 1.], [2., 2.]])
+        b = np.array([[1.], [1.], [1.], [1.], [2.], [2.]])
+        p = Polyhedron(A,b)
+        p.remove_redundant_inequalities()
+        A_min = np.array([[-1., 1.], [0., -1.], [2., 2.]])
+        b_min = np.array([[1.], [1.], [2.]])
+        np.testing.assert_array_almost_equal(p.A, A_min)
+        np.testing.assert_array_almost_equal(p.b, b_min)
+
+        # both inequalities and equalities
+        x_min = - np.ones((2, 1))
+        x_max = - x_min
+        p = Polyhedron.from_bounds(x_min, x_max)
+        C = np.ones((1, 2))
+        d = np.ones((1, 1))
+        p.add_equality(C, d)
+        p.remove_redundant_inequalities()
+        A_min = np.array([[1., 0.], [0., 1.]])
+        b_min = np.array([[1.], [1.]])
+        np.testing.assert_array_almost_equal(p.A, A_min)
+        np.testing.assert_array_almost_equal(p.b, b_min)
+
+        # add (redundant) inequality coincident with the equality
+        p.add_inequality(C, d)
+        p.remove_redundant_inequalities()
+        np.testing.assert_array_almost_equal(p.A, A_min)
+        np.testing.assert_array_almost_equal(p.b, b_min)
+
+        # add (redundant) inequality
+        p.add_inequality(
+            np.array([[-1., 1.]]),
+            np.array([[1.1]])
+            )
+        p.remove_redundant_inequalities()
+        np.testing.assert_array_almost_equal(p.A, A_min)
+        np.testing.assert_array_almost_equal(p.b, b_min)
 
 if __name__ == '__main__':
     unittest.main()
