@@ -191,6 +191,10 @@ class TestPolyhedron(unittest.TestCase):
         A = np.array([[1., 1.], [-1., 1.], [0., -1.], [0., 1.], [0., 1.], [2., 2.]])
         b = np.array([[1.], [1.], [1.], [1.], [2.], [2.]])
         p = Polyhedron(A,b)
+        self.assertEqual(
+            [1, 2, 5],
+            sorted(p.get_minimal_facets())
+            )
         p.remove_redundant_inequalities()
         A_min = np.array([[-1., 1.], [0., -1.], [2., 2.]])
         b_min = np.array([[1.], [1.], [2.]])
@@ -204,6 +208,10 @@ class TestPolyhedron(unittest.TestCase):
         C = np.ones((1, 2))
         d = np.ones((1, 1))
         p.add_equality(C, d)
+        self.assertEqual(
+            [2, 3],
+            sorted(p.get_minimal_facets())
+            )
         p.remove_redundant_inequalities()
         A_min = np.array([[1., 0.], [0., 1.]])
         b_min = np.array([[1.], [1.]])

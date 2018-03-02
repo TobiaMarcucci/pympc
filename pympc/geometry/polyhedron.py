@@ -197,16 +197,16 @@ class Polyhedron:
                 self.C[i,:] = self.C[i,:]/r
                 self.d[i,:] = self.d[i,:]/r
 
-    def remove_redundant_inequalities(self, tol=1.e-7):
+    def get_minimal_facets(self, tol=1.e-7):
     	"""
-        Derives a minimal representation of the polyhedron solving an LP for each facet. (See "Fukuda - Frequently asked questions in polyhedral computation" Sec.2.21.) In case of equalities, first the problem is projected in the nullspace of the equalities.
+        Computrs the indices of the facets that generate a minimal representation of the polyhedron solving an LP for each facet of the redundant representation. (See "Fukuda - Frequently asked questions in polyhedral computation" Sec.2.21.) In case of equalities, first the problem is projected in the nullspace of the equalities.
         """
 
         # if there are equalities, project
         if self.C.shape[0] != 0:
         	E, f, _, _ = self._remove_equalities()
         else:
-        	E = self.A # check that this does not modify A and b!!!
+        	E = self.A
         	f = self.b
 
         # initialize list of non-redundant facets
@@ -231,7 +231,14 @@ class Polyhedron:
             if cost_i - f[i] < tol or np.isnan(cost_i):
                 minimal_facets.remove(i)
 
-        # remove redundant facets
+        return minimal_facets
+
+    def remove_redundant_inequalities(self):
+    	"""
+        Removes the redundant facets of the polyhedron, it modifies the attributes A and b.
+        """
+
+        minimal_facets = self.get_minimal_facets()
         self.A = self.A[minimal_facets,:]
         self.b = self.b[minimal_facets]
 
