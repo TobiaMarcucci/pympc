@@ -50,7 +50,8 @@ class Polyhedron:
 
     def add_lower_bound(self, x_min, indices=None):
     	"""
-    	Adds the inequality x[indices] >= x_min to the existing polyhedron. If indices is None, the inequality is applied to all the elements of x.
+    	Adds the inequality x[indices] >= x_min to the existing polyhedron.
+    	If indices is None, the inequality is applied to all the elements of x.
     	"""
 
     	# if x_min is a float make it a 2d array
@@ -63,7 +64,8 @@ class Polyhedron:
 
     def add_upper_bound(self, x_max, indices=None):
     	"""
-    	Adds the inequality x[indices] <= x_max to the existing polyhedron. If indices is None, the inequality is applied to all the elements of x.
+    	Adds the inequality x[indices] <= x_max to the existing polyhedron.
+    	If indices is None, the inequality is applied to all the elements of x.
     	"""
 
     	# if x_max is a float make it a 2d array
@@ -76,7 +78,8 @@ class Polyhedron:
 
     def add_bounds(self, x_min, x_max, indices=None):
     	"""
-    	Adds the inequalities x_min <= x[indices] <= x_max to the existing polyhedron. If indices is None, the inequality is applied to all the elements of x.
+    	Adds the inequalities x_min <= x[indices] <= x_max to the existing polyhedron.
+    	If indices is None, the inequality is applied to all the elements of x.
     	"""
 
         self.add_lower_bound(x_min, indices)
@@ -101,7 +104,9 @@ class Polyhedron:
     @staticmethod
     def from_lower_bound(x_min, indices=None, n=None):
     	"""
-    	Instantiate a Polyhedron in the form {x | x[indices] >= x_min}. If indices is None, the inequality is applied to all the elements of x. If indices is not None, n must be provided to determine the length of x.
+    	Instantiate a Polyhedron in the form {x | x[indices] >= x_min}.
+    	If indices is None, the inequality is applied to all the elements of x.
+    	If indices is not None, n must be provided to determine the length of x.
     	"""
 
     	# check if n is provided
@@ -121,7 +126,9 @@ class Polyhedron:
     @staticmethod
     def from_upper_bound(x_max, indices=None, n=None):
     	"""
-    	Instantiate a Polyhedron in the form {x | x[indices] <= x_max}. If indices is None, the inequality is applied to all the elements of x. If indices is not None, n must be provided to determine the length of x.
+    	Instantiate a Polyhedron in the form {x | x[indices] <= x_max}.
+    	If indices is None, the inequality is applied to all the elements of x.
+    	If indices is not None, n must be provided to determine the length of x.
     	"""
 
     	# check if n is provided
@@ -141,7 +148,9 @@ class Polyhedron:
     @staticmethod
     def from_bounds(x_min, x_max, indices=None, n=None):
     	"""
-    	Instantiate a Polyhedron in the form {x | x_min <= x[indices] <= x_max}. If indices is None, the inequality is applied to all the elements of x. If indices is not None, n must be provided to determine the length of x.
+    	Instantiate a Polyhedron in the form {x | x_min <= x[indices] <= x_max}.
+    	If indices is None, the inequality is applied to all the elements of x.
+    	If indices is not None, n must be provided to determine the length of x.
     	"""
 
     	# check if n is provided
@@ -199,7 +208,9 @@ class Polyhedron:
 
     def get_minimal_facets(self, tol=1.e-7):
     	"""
-        Computrs the indices of the facets that generate a minimal representation of the polyhedron solving an LP for each facet of the redundant representation. (See "Fukuda - Frequently asked questions in polyhedral computation" Sec.2.21.) In case of equalities, first the problem is projected in the nullspace of the equalities.
+        Computrs the indices of the facets that generate a minimal representation of the polyhedron solving an LP for each facet of the redundant representation.
+        (See "Fukuda - Frequently asked questions in polyhedral computation" Sec.2.21.)
+        In case of equalities, first the problem is projected in the nullspace of the equalities.
         """
 
         # if there are equalities, project
@@ -244,10 +255,12 @@ class Polyhedron:
 
     def _remove_equalities(self):
     	"""
-    	Given the polyhedron in the form P := {x | A x <= b, C x = d}, returns the change of variables x = [Y Z] [y' z']' such that P can be expressed only with inequalities, i.e. := {z | E z <= f}.
+    	For the polyhedron P := {x | A x <= b, C x = d}, returns the change of variables x = [Y Z] [y' z']' such that P can be expressed only by inequalities, i.e. := {z | E z <= f}.
 
     	Math:
-    	We consider the change of variables x = [Y Z] [y' z']', with Z = null(C) and Y = null(Z'). Substituting x in the equalities C x = C Y y = d, we get y = (C Y)^-1 d. Then, substituting x and y in the inequalities, we get P := {z | E z <= f}, where E := A Z and f := b - A Y (C Y)^-1 d.
+    	We consider the change of variables x = [Y Z] [y' z']', with Z = null(C) and Y = null(Z').
+    	Substituting x in the equalities C x = C Y y = d, we get y = (C Y)^-1 d.
+    	Then, substituting x and y in the inequalities, we get P := {z | E z <= f}, where E := A Z and f := b - A Y (C Y)^-1 d.
     	"""
 
     	# change of variables
@@ -280,7 +293,13 @@ class Polyhedron:
 
     	Math:
     	Consider the non-empty polyhedron P := {x | A x <= b}.
-    	We have that necessary and sufficient condition for P to be unbounded is the existence of a nonzero x | A x <= 0. (Proof: given x_1 that verifies the latter condition and x_2 in P, consider x_3 := a x_1 + x_2, with a in R. We have x_3 in P for all a >= 0, in fact A x_3 = a A x_1 + A x_2 <= b. Considering a -> inf the unboundedness of P follows.) It follows that sufficient condition for P to be unbounded is that ker(A) is not empty; hence in the following we consider only the case ker(A) = 0. Stiemke's Theorem of alternatives (see, e.g., Mangasarian, Nonlinear Programming, pag. 32) states that either there exists an x | A x <= 0, A x != 0, or there exists a y > 0 | A' y = 0. Note that: i) being ker(A) = 0, the condition A x != 0 is equivalent to x != 0; ii) in this case, y > 0 is equilvaent e.g. to y >= 1. In conclusion we have that: under the assumptions non-empty P and ker(A) = 0, necessary and sufficient conditions for the boundedness of P is the existence of y >= 1 | A' y = 0. Here we search for the y with minimum norm 1 that satisfies the latter condition (note that y >= 1 implies ||y||_1 = 1' y).
+    	We have that necessary and sufficient condition for P to be unbounded is the existence of a nonzero x | A x <= 0.
+    	(Proof: Given x_1 that verifies the latter condition and x_2 in P, consider x_3 := a x_1 + x_2, with a in R. We have x_3 in P for all a >= 0, in fact A x_3 = a A x_1 + A x_2 <= b. Considering a -> inf the unboundedness of P follows.)
+    	It follows that sufficient condition for P to be unbounded is that ker(A) is not empty; hence in the following we consider only the case ker(A) = 0.
+    	Stiemke's Theorem of alternatives (see, e.g., Mangasarian, Nonlinear Programming, pag. 32) states that either there exists an x | A x <= 0, A x != 0, or there exists a y > 0 | A' y = 0.
+    	Note that: i) being ker(A) = 0, the condition A x != 0 is equivalent to x != 0; ii) in this case, y > 0 is equilvaent e.g. to y >= 1.
+    	In conclusion we have that: under the assumptions non-empty P and ker(A) = 0, necessary and sufficient conditions for the boundedness of P is the existence of y >= 1 | A' y = 0.
+    	Here we search for the y with minimum norm 1 that satisfies the latter condition (note that y >= 1 implies ||y||_1 = 1' y).
     	"""
 
     	# check emptyness
@@ -322,7 +341,9 @@ class Polyhedron:
 
     def is_included_in(self, P2, tol=1.e-7):
         """
-        Checks if the polyhedron P is a subset of the polyhedron P2 (returns True or False). For each halfspace H descibed a facet of P2, it solves an LP to check if the intersection of H with P1 is euqual to P1; if this is the case for all H, then P1 is in P2. 
+        Checks if the polyhedron P is a subset of the polyhedron P2 (returns True or False).
+        For each halfspace H descibed a facet of P2, it solves an LP to check if the intersection of H with P1 is euqual to P1.
+        If this is the case for all H, then P1 is in P2. 
         """
 
         # augment inequalities with equalities
@@ -350,6 +371,12 @@ class Polyhedron:
     	pass
 
     def project_to(self, dimensions):
+    	pass
+
+    def chebyshev(self):
+    	"""
+    	Returns the Chebyshev center and radius of the polyhedron.
+    	"""
     	pass
 
     def plot(self):
