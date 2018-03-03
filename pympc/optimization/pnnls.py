@@ -4,8 +4,25 @@ from collections import namedtuple
 import scipy.io
 import time
 
-LPSolution = namedtuple('LPSolution',  ['argmin', 'min', 'active_set', 'inequality_multipliers', 'equality_multipliers', 'primal_degenerate', 'dual_degenerate'])
+#LPSolution = namedtuple('LPSolution',  ['argmin', 'min', 'active_set', 'inequality_multipliers', 'equality_multipliers', 'primal_degenerate', 'dual_degenerate'])
 QPSolution = namedtuple('QPSolution',  ['argmin', 'min'])
+
+class LPSolution(object):
+    
+    def __init__(
+        self,
+        minimum,
+        argmin,
+        inequality_multipliers,
+        equality_multipliers,
+        active_set
+        ):
+
+        self.min = minimum
+        self.argmin = argmin
+        self.inequality_multipliers = inequality_multipliers
+        self.equality_multipliers = equality_multipliers
+        self.active_set = active_set
 
 
 def pnnls(A, B, c):
@@ -86,7 +103,7 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
     # initialize output
     argmin = np.full((n_x,1), np.nan)
     V_star = np.nan
-    active_set = None
+    active_set = [None]*n_ineq
     mult_ineq = np.full((n_ineq,1), np.nan)
     mult_eq = np.full((n_eq,1), np.nan)
     primal_degenerate = None
@@ -113,14 +130,16 @@ def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
             if C is not None and d is not None:
                 mult_eq = ys_star[n_ineq:n_ineq+n_eq,:] - ys_star[n_ineq+n_eq:n_ineq+2*n_eq,:]
 
-        sol = LPSolution(
-            argmin = argmin,
-            min = V_star,
-            active_set = active_set,
-            inequality_multipliers = mult_ineq,
-            equality_multipliers = mult_eq,
-            primal_degenerate = primal_degenerate,
-            dual_degenerate = dual_degenerate)
+        # sol = LPSolution(
+        #     argmin = argmin,
+        #     min = V_star,
+        #     active_set = active_set,
+        #     inequality_multipliers = mult_ineq,
+        #     equality_multipliers = mult_eq,
+        #     primal_degenerate = primal_degenerate,
+        #     dual_degenerate = dual_degenerate)
+
+        sol = LPSolution(V_star, argmin, mult_ineq, mult_eq, active_set)
 
     # sometimes the nnls algorithms excedes the maximum number of iterations...
     except RuntimeError:

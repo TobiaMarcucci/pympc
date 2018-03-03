@@ -1,5 +1,8 @@
+# external imports
 import unittest
 import numpy as np
+
+# internal inputs
 from pympc.geometry.polyhedron import Polyhedron
 
 class TestPolyhedron(unittest.TestCase):
@@ -232,6 +235,144 @@ class TestPolyhedron(unittest.TestCase):
         p.remove_redundant_inequalities()
         np.testing.assert_array_almost_equal(p.A, A_min)
         np.testing.assert_array_almost_equal(p.b, b_min)
+
+    def test_is_empty(self):
+
+        # full dimensional
+        x_min = 1.*np.ones((2,1))
+        x_max = 2.*np.ones((2,1))
+        p = Polyhedron.from_bounds(x_min, x_max)
+        self.assertFalse(p.is_empty())
+
+        # lower dimensional, but not empy
+        C = np.ones((1, 2))
+        d = np.array([[3.]])
+        p.add_equality(C, d)
+        self.assertFalse(p.is_empty())
+
+        # lower dimensional and empty
+        x_0_max = np.array([[.5]])
+        p.add_upper_bound(x_0_max, [0])
+        self.assertTrue(p.is_empty())
+
+    def test_is_bounded(self):
+
+        # bounded (empty), easy (ker(A) empty)
+        x_min = np.ones((2, 1))
+        x_max = - np.ones((2, 1))
+        p = Polyhedron.from_bounds(x_min, x_max)
+        self.assertTrue(p.is_bounded())
+
+        # bounded (empty), tricky (ker(A) not empty)
+        x0_min = np.array([[1.]])
+        x0_max = np.array([[-1.]])
+        p = Polyhedron.from_bounds(x0_min, x0_max, [0], 2)
+        self.assertTrue(p.is_bounded())
+
+        # bounded easy
+        x_min = 1.*np.ones((2,1))
+        x_max = 2.*np.ones((2,1))
+        p = Polyhedron.from_bounds(x_min, x_max)
+        self.assertTrue(p.is_bounded())
+
+        # unbounded, halfspace
+        x0_min = np.array([[0.]])
+        p = Polyhedron.from_lower_bound(x0_min, [0], 2)
+        self.assertFalse(p.is_bounded())
+
+        # unbounded, positive orthant
+        x1_min = x0_min
+        p.add_lower_bound(x1_min, [1])
+        self.assertFalse(p.is_bounded())
+
+        # unbounded: parallel inequalities, slice of positive orthant
+        x0_max = np.array([[1.]])
+        p.add_upper_bound(x0_max, [0])
+        self.assertFalse(p.is_bounded())
+
+        # unbounded lower dimensional, line in the positive orthant
+        x0_min = x0_max
+        p.add_lower_bound(x0_min, [0])
+        self.assertFalse(p.is_bounded())
+
+        # bounded lower dimensional, segment in the positive orthant
+        x1_max = np.array([[1000.]])
+        p.add_upper_bound(x1_max, [1])
+        self.assertTrue(p.is_bounded())
+
+    def test_contains(self):
+
+        # some points
+        x1 = 2.*np.ones((2,1))
+        x2 = 2.5*np.ones((2,1))
+        x3 = 3.5*np.ones((2,1))
+
+        # full dimensional
+        x_min = 1.*np.ones((2,1))
+        x_max = 3.*np.ones((2,1))
+        p = Polyhedron.from_bounds(x_min, x_max)
+        self.assertTrue(p.contains(x1))
+        self.assertTrue(p.contains(x2))
+        self.assertFalse(p.contains(x3))
+
+        # lower dimensional, but not empty
+        C = np.ones((1, 2))
+        d = np.array([[4.]])
+        p.add_equality(C, d)
+        self.assertTrue(p.contains(x1))
+        self.assertFalse(p.contains(x2))
+        self.assertFalse(p.contains(x3))
+
+    def test_is_included_in(self):
+
+        # inner polyhdron
+        x_min = 1.*np.ones((2,1))
+        x_max = 2.*np.ones((2,1))
+        p1 = Polyhedron.from_bounds(x_min, x_max)
+
+        # outer polyhdron
+        x_min = .5*np.ones((2,1))
+        x_max = 2.5*np.ones((2,1))
+        p2 = Polyhedron.from_bounds(x_min, x_max)
+
+        # check inclusions
+        self.assertTrue(p1.is_included_in(p1))
+        self.assertTrue(p1.is_included_in(p2))
+        self.assertFalse(p2.is_included_in(p1))
+
+        # polytope that intesects p1
+        x_min = .5*np.ones((2,1))
+        x_max = 1.5*np.ones((2,1))
+        p2 = Polyhedron.from_bounds(x_min, x_max)
+        self.assertFalse(p1.is_included_in(p2))
+        self.assertFalse(p2.is_included_in(p1))
+
+        # polytope that includes p1, with two equal facets
+        x_min = .5*np.ones((2,1))
+        x_max = 2.*np.ones((2,1))
+        p2 = Polyhedron.from_bounds(x_min, x_max)
+        self.assertTrue(p1.is_included_in(p2))
+        self.assertFalse(p2.is_included_in(p1))
+
+        # polytope that does not include p1, with two equal facets
+        x_min = 1.5*np.ones((2,1))
+        p2.add_lower_bound(x_min)
+        self.assertFalse(p1.is_included_in(p2))
+        self.assertTrue(p2.is_included_in(p1))
+
+        # with equalities
+        C = np.ones((1, 2))
+        d = np.array([[3.5]])
+        p1.add_equality(C, d)
+        self.assertTrue(p1.is_included_in(p2))
+        self.assertFalse(p2.is_included_in(p1))
+        p2.add_equality(C, d)
+        self.assertTrue(p1.is_included_in(p2))
+        self.assertTrue(p2.is_included_in(p1))
+        x1_max = np.array([[1.75]])
+        p2.add_upper_bound(x1_max, [1])
+        self.assertFalse(p1.is_included_in(p2))
+        self.assertTrue(p2.is_included_in(p1))
 
 if __name__ == '__main__':
     unittest.main()
