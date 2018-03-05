@@ -173,20 +173,20 @@ class TestPolyhedron(unittest.TestCase):
         C = np.ones((1, 2))
         d = np.ones((1, 1))
         p.add_equality(C, d)
-        E, f, Y, Z = p._remove_equalities()
+        E, f, N, R = p._remove_equalities()
 
         # check result
-        self.assertAlmostEqual(Z[0,0]/Z[1,0], -1)
-        self.assertAlmostEqual(Y[0,0]/Y[1,0], 1)
+        self.assertAlmostEqual(N[0,0]/N[1,0], -1)
+        self.assertAlmostEqual(R[0,0]/R[1,0], 1)
         intersections = [
             np.sqrt(2.)/2,
             3.*np.sqrt(2.)/2,
             - np.sqrt(2.)/2,
             - 3.*np.sqrt(2.)/2
             ]
-        for z in intersections:
-            r = E.dot(np.array([[z]])) - f
-            self.assertAlmostEqual(np.min(np.abs(r)), 0.)
+        for n in intersections:
+            residual = E.dot(np.array([[n]])) - f
+            self.assertAlmostEqual(np.min(np.abs(residual)), 0.)
 
     def test_remove_redundant_inequalities(self):
 

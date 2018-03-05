@@ -8,6 +8,10 @@ setup(name='pympc',
       author_email='tobiam@mit.edu',
       license='MIT',
       packages=['pympc'],
+      keywords=[
+          'model predictive control',
+          'computational geometry'
+          ],
       install_requires=[
           'numpy',
       ],

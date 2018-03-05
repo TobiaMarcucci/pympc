@@ -1,156 +1,194 @@
-
 # external imports
 import numpy as np
 from copy import copy
 
 # internal inputs
-from pympc.optimization.pnnls import linear_program as lp_pnnls
+from pympc.optimization.pnnls import linear_program
 
 class LinearProgram():
+    """
+    Defines a linear program in the form min_{x in X} f' x.
+    """
 
-    def __init__(self, constraint, cost=None):
+    def __init__(self, X, f=None):
         """
-        Defines a linear program in the form min_{x \in constraint} cost' x, where constraint is an instance of the Polyhedron class.
+        Instantiates the linear program.
+
+        Arguments
+        ----------
+        X : instance of Polyhderon
+            Constraint set of the linear program.
+        f : numpy.ndarray
+            Gradient of the cost function.
         """
 
         # make the cost vector a 2d matrix
-        if cost is not None and len(cost.shape) == 1:
-            cost = np.reshape(cost, (cost.shape[0], 1))
+        if f is not None and len(f.shape) == 1:
+            f = np.reshape(f, (f.shape[0], 1))
 
         # store inputs
-        self.constraint = constraint
-        self.cost = cost
+        self.X = X
+        self.f = f
 
-        # keep track of slack variables
-        self._constraint_with_slack = copy(constraint)
-        self._cost_with_slack = copy(cost)
-
-
-    def set_cost(self, cost):
-
-        # restore the LP removing all the slacks etc.
-        if self._cost_with_slack is not None:
-            self._restore()
-
-        # store inputs
-        self.cost = cost
-
-        # keep track of slack variables
-        self._cost_with_slack = copy(cost)
-
-
-    def set_norm_one_cost(self, W=None):
+    def solve(self):
         """
-        Sets the cost function to be the weighted norm one ||W x||_1. Adds a number of slack variables s equal to the size of x. The new optimization vector is [x' s']'.
+        Returns the solution of the linear program.
+
+        Returns
+        ----------
+        sol : dict
+            Dictionary with the solution of the LP (see the documentation of pympc.optimization.pnnls.linear_program for the details of the fields of sol).
         """
 
-        ## restore the LP removing all the slacks etc.
-        if self._cost_with_slack is not None:
-            self._restore()
+        # check that a cost function has been set
+        if self.f is None:
+            raise ValueError('set a cost before solving the linear program.')
+
+        # solve the LP
+        sol = linear_program(
+            self.f,
+            self.X.A,
+            self.X.b,
+            self.X.C,
+            self.X.d
+            )
+
+        return sol
+
+    def solve_min_norm_one(self, W=None):
+        """
+        Sets the cost function to be the weighted norm one ||W x||_1 and solves the LP.
+        Adds a number of slack variables s equal to the size of x
+        The new optimization vector is [x' s']'.
+
+        Arguments
+        ----------
+        W : numpy.ndarray
+            Weight matrix of the cost function (if None it is set to the identity matrix).
+
+        Returns
+        ----------
+        sol : dict
+            Dictionary with the solution of the LP (see the documentation of pympc.optimization.pnnls.linear_program for the details of the fields of sol).
+            Slack variables are removed from the solution.
+        """
+
+        # problem size
+        n_ineq, n_x = self.X.A.shape
+        n_eq = self.X.C.shape[0]
 
         # set W to identity if W is not passed
-        n_ineq, n_x = self.constraint.A.shape
-        n_eq, _ = self.constraint.C.shape
         if W is None:
             W = np.eye(n_x)
 
         # new inequalities
-        self._constraint_with_slack.A = np.vstack((
-            np.hstack((self.constraint.A, np.zeros((n_ineq, n_x)))),
+        A = np.vstack((
+            np.hstack((self.X.A, np.zeros((n_ineq, n_x)))),
             np.hstack((W, -np.eye(n_x))),
             np.hstack((-W, -np.eye(n_x)))
             ))
-        self._constraint_with_slack.b = np.vstack((
-            self.constraint.b,
+        b = np.vstack((
+            self.X.b,
             np.zeros((n_x, 1)),
             np.zeros((n_x, 1))
             ))
 
         # new equalities
-        self._constraint_with_slack.C = np.hstack((self.constraint.C, np.zeros((n_eq, n_x))))
-        self._constraint_with_slack.d = self.constraint.d
+        C = np.hstack((
+            self.X.C,
+            np.zeros((n_eq, n_x))
+            ))
+        d = self.X.d
 
-        # new cost
-        self._cost_with_slack = np.vstack((
+        # new f
+        f = np.vstack((
             np.zeros((n_x, 1)),
             np.ones((n_x, 1))
             ))
 
-    def set_norm_inf_cost(self, W=None):
+        # solve linear program and remove slacks
+        sol = linear_program(f, A, b, C, d)
+        sol = self._remove_slacks(sol)
+
+        return sol
+
+    def solve_min_norm_inf(self, W=None):
         """
-        Sets the cost function to be the weighted infinity norm ||W x||_inf. Adds one slack variable. The new optimization vector is [x' s]'.
+        Sets the cost function to be the weighted infinity norm ||W x||_inf and solves the LP. Adds one slack variable. The new optimization vector is [x' s]'.
+
+        Arguments
+        ----------
+        W : numpy.ndarray
+            Weight matrix of the cost function (if None it is set to the identity matrix).
+
+        Returns
+        ----------
+        sol : dict
+            Dictionary with the solution of the LP (see the documentation of pympc.optimization.pnnls.linear_program for the details of the fields of sol).
+            Slack variables are removed from the solution.
         """
 
-        # restore the LP removing all the slacks etc.
-        if self._cost_with_slack is not None:
-            self._restore()
+        # problem size
+        n_ineq, n_x = self.X.A.shape
+        n_eq = self.X.C.shape[0]
 
         # set W to identity if W is not passed
-        n_ineq, n_x = self.constraint.A.shape
-        n_eq = self.constraint.C.shape[0]
         if W is None:
             W = np.eye(n_x)
 
         # new inequalities
-        self._constraint_with_slack.A = np.vstack((
-            np.hstack((self.constraint.A, np.zeros((n_ineq, 1)))),
+        A = np.vstack((
+            np.hstack((self.X.A, np.zeros((n_ineq, 1)))),
             np.hstack((W, -np.ones((n_x, 1)))),
             np.hstack((-W, -np.ones((n_x, 1))))
             ))
-        self._constraint_with_slack.b = np.vstack((
-            self.constraint.b,
+        b = np.vstack((
+            self.X.b,
             np.zeros((n_x, 1)),
             np.zeros((n_x, 1))
             ))
 
         # new equalities
-        self._constraint_with_slack.C = np.hstack((self.constraint.C, np.zeros((n_eq, 1))))
-        self._constraint_with_slack.d = self.constraint.d
+        C = np.hstack((self.X.C, np.zeros((n_eq, 1))))
+        d = self.X.d
 
-        # new cost
-        self._cost_with_slack = np.vstack((
+        # new f
+        f = np.vstack((
             np.zeros((n_x, 1)),
             np.ones((1, 1))
             ))
 
-    def _restore(self):
+        # solve linear program and remove slacks
+        sol = linear_program(f, A, b, C, d)
+        sol = self._remove_slacks(sol)
 
-        # keep track of slack variables
-        self.cost = None
-        self._cost_with_slack = None
-        self._constraint_with_slack = copy(self.constraint)
+        return sol
 
-    def solve(self, solver='pnnls'):
+    def _remove_slacks(self, sol):
         """
-        Solves the linear program using the specified solver.
+        Removes the slack variables from the solution of the linear program.
+
+        Arguments
+        ----------
+        sol : dict
+            Dictionary with the solution of the LP with slack variables.
+
+        Returns
+        ----------
+        sol : dict
+            Dictionary with the solution of the LP without slack variables.
         """
 
-        # solve with the home-mad partially-non-negative-least-squares solver
-        if solver == 'pnnls':
-            sol = lp_pnnls(
-                self._cost_with_slack,
-                self._constraint_with_slack.A,
-                self._constraint_with_slack.b,
-                self._constraint_with_slack.C,
-                self._constraint_with_slack.d
-                )
-
-        # solve with gurobi
-        elif solver == 'gurobi':
-            sol = lp_gurobi(
-                self._cost_with_slack,
-                self._constraint_with_slack.A,
-                self._constraint_with_slack.b,
-                self._constraint_with_slack.C,
-                self._constraint_with_slack.d
-                )
+        # problem size
+        n_ineq, n_x = self.X.A.shape
+        n_eq = self.X.C.shape[0]
 
         # remove slack variables
-        n_ineq, n_x = self.constraint.A.shape
-        n_eq = self.constraint.C.shape[0]
-        sol.argmin = sol.argmin[:n_x, :]
-        sol.inequality_multipliers = sol.inequality_multipliers[:n_ineq, :]
-        sol.equality_multipliers = sol.equality_multipliers[:n_eq, :]
-        sol.active_set = sol.active_set[:n_ineq]
+        if sol['min'] is not None:
+            sol['argmin'] = sol['argmin'][:n_x, :]
+            sol['active_set'] = [i for i in sol['active_set'] if i < n_ineq]
+            sol['multiplier_inequality'] = sol['multiplier_inequality'][:n_ineq, :]
+            if n_eq > 0:
+                sol['multiplier_equality'] = sol['multiplier_equality'][:n_eq, :]
 
         return sol

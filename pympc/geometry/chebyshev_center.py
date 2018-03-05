@@ -4,20 +4,28 @@ from pympc.optimization.gurobi import linear_program
 
 def chebyshev_center(A, b, C=None, d=None, tol=1.e-10):
     """
-    Finds the Chebyshev center of the polytope P := {x | A x <= b, C x = d} solving the linear program
-    min  e
-    s.t. F z <= g + F_{row_norm} e
-    where if an equality is not provided F=A, z=x, g=b; whereas if equalities are present F=AZ, g=b-AYy, with: Z basis of the nullspace of C, Y orthogonal complement to Z, y=(CY)^-1d and x is retrived as x=Zz+Yy. Here F_{row_norm} dentes the vector whose ith entry is the 2-norm of the ith row of F.
+    Finds the Chebyshev center of the polytope P := {x | A x <= b, C x = d} solving the LP: min_{z, e}  e s.t. F z <= g + F_{row_norm} e.
+    If no equalities are provided, we have F = A, z = x, g = b.
+    If equalities are present F = A Z, g = b - A Y y, with: Z basis of the nullspace of C, Y orthogonal complement to Z, y = (C Y)^-1 d and x is retrived as x = Z z + Y y.
+    Here F_{row_norm} dentes the vector whose ith entry is the 2-norm of the ith row of F.
 
-    INPUTS:
-        A: left-hand side of the inequalities
-        b: right-hand side of the inequalities
-        C: left-hand side of the equalities
-        d: right-hand side of the equalities
+    Arguments
+    ----------
+    A : numpy.ndarray
+        Left-hand side of the inequalities.
+    b : numpy.ndarray
+        Right-hand side of the inequalities.
+    C : numpy.ndarray
+        Left-hand side of the equalities.
+    d : numpy.ndarray
+        Right-hand side of the equalities.
 
-    OUTPUTS:
-        center: Chebyshev center of the polytope (nan if the P is empty, inf if P is unbounded and the center is at infinity)
-        radius: Chebyshev radius of the polytope (nan if the P is empty, inf if it is infinite)
+    Returns
+    ----------
+    center : numpy.ndarray
+        Chebyshev center of the polytope (nan if the P is empty, inf if P is unbounded and the center is at infinity).
+    radius : float
+        Chebyshev radius of the polytope (nan if the P is empty, inf if it is infinite).
     """
     A_projected = A
     b_projected = b

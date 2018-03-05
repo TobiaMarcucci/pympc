@@ -1,27 +1,8 @@
 import gurobipy as grb
 import numpy as np
-# from collections import namedtuple
+from collections import namedtuple
 
-# Solution = namedtuple('Solution',  ['min', 'argmin','inequality_multipliers', 'equality_multipliers',  'active_set'])
-
-class Solution(object):
-
-    def __init__(
-        self,
-        minimum,
-        argmin,
-        inequality_multipliers,
-        equality_multipliers,
-        active_set,
-        ):
-
-        self.min = minimum
-        self.argmin = argmin
-        self.inequality_multipliers = inequality_multipliers
-        self.equality_multipliers = equality_multipliers
-        self.active_set = active_set
-
-
+Solution = namedtuple('Solution',  ['min', 'argmin','inequality_multipliers', 'equality_multipliers',  'active_set'])
 
 def linear_program(f, A=None, b=None, C=None, d=None, active_set=None):
     """
@@ -48,16 +29,13 @@ def linear_program(f, A=None, b=None, C=None, d=None, active_set=None):
     argmin, cost, ineq_mult, eq_mult = reorganize_solution(model, A, C)
     active_set = get_active_set_lp(model, A)
 
-    # return Solution(
-    #     argmin = argmin,
-    #     min = cost,
-    #     inequality_multipliers = ineq_mult,
-    #     equality_multipliers = eq_mult,
-    #     active_set = active_set
-    #     )
-
-    sol = LPSolution(cost, argmin, ineq_mult, eq_mult, active_set)
-
+    return Solution(
+        argmin = argmin,
+        min = cost,
+        inequality_multipliers = ineq_mult,
+        equality_multipliers = eq_mult,
+        active_set = active_set
+        )
 
 def quadratic_program(H, f=None, A=None, b=None, C=None, d=None):
     """

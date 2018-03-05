@@ -1,196 +1,155 @@
+# external imports
 from scipy.optimize import nnls
 import numpy as np
-from collections import namedtuple
-import scipy.io
-import time
-
-#LPSolution = namedtuple('LPSolution',  ['argmin', 'min', 'active_set', 'inequality_multipliers', 'equality_multipliers', 'primal_degenerate', 'dual_degenerate'])
-QPSolution = namedtuple('QPSolution',  ['argmin', 'min'])
-
-class LPSolution(object):
-    
-    def __init__(
-        self,
-        minimum,
-        argmin,
-        inequality_multipliers,
-        equality_multipliers,
-        active_set
-        ):
-
-        self.min = minimum
-        self.argmin = argmin
-        self.inequality_multipliers = inequality_multipliers
-        self.equality_multipliers = equality_multipliers
-        self.active_set = active_set
-
 
 def pnnls(A, B, c):
     """
-    Solves the Partial Non-Negative Least Squares problem
-    min  ||A v + B u - c||_2^2
-    s.t. v >= 0
-    ("Bemporad - A Multiparametric Quadratic Programming Algorithm With Polyhedral Computations Based on Nonnegative Least Squares", Lemma 1.)
+    Solves the Partial Non-Negative Least Squares problem min_{u, v} ||A v + B u - c||_2^2 s.t. v >= 0.
+    (See "Bemporad - A Multiparametric Quadratic Programming Algorithm With Polyhedral Computations Based on Nonnegative Least Squares", Lemma 1.)
 
-    OUTPUTS:
-        v_star: optimal value of v
-        u_star: optimal value of u
-        r_star: residual of the least squares problem
+    Arguments
+    ----------
+    A : numpy.ndarray
+        Coefficient matrix of nonnegative variables.
+    B : numpy.ndarray
+        Coefficient matrix of remaining variables.
+    c : numpy.ndarray
+        Offset term.
+
+    Returns
+    ----------
+    v : numpy.ndarray
+        Optimal value of v.
+    u : numpy.ndarray
+        Optimal value of u.
+    r : numpy.ndarray
+        Residuals of the least squares problem.
     """
-
-    # problem dimensions
-    [n_ineq, n_v] = A.shape
-    n_u = B.shape[1]
 
     # matrices for nnls solver
     B_pinv = np.linalg.pinv(B)
-    B_bar = np.eye(n_ineq) - B.dot(B_pinv)
+    B_bar = np.eye(A.shape[0]) - B.dot(B_pinv)
     A_bar = B_bar.dot(A)
     b_bar = B_bar.dot(c)
 
     # solve nnls
-    [v_star, r_star] = nnls(A_bar, b_bar.flatten())
-    v_star = np.reshape(v_star, (n_v,1))
-    u_star = - B_pinv.dot(A.dot(v_star) - c)
+    v, r = nnls(A_bar, b_bar.flatten())
+    v = np.reshape(v, (A.shape[1],1))
+    u = - B_pinv.dot(A.dot(v) - c)
 
-    return v_star, u_star, r_star
+    return v, u, r
 
-def linear_program(f, A=None, b=None, C=None, d=None, tol=1.e-7):
+def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
     """
-    Solves the linear program
-    min  f^T x
-    s.t. A x <= b
-         C x  = d
+    Solves the linear program min_x f^T x s.t. A x <= b, C x = d.
+    Finds a partially nonnegative least squares solution to the KKT conditions of the LP.
 
-    OUTPUTS:
-        x_star: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
-        V_star: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
+    Math
+    ----------
+    For the LP min_x f^T x s.t. A x <= b, we can substitute the complementarity condition with the condition of zero duality gap, to get the linear system:
+    b' y + f' x = 0,         zero duality gap,
+    A x + b = - s,   s >= 0, primal feasibility,
+    A' y = f,        y >= 0, dual feasibility,
+    where y are the Lagrange multipliers and s are slack variables for the residual of primal feasibility.
+    (Each equality constraint is reformulated as two inequalities.)
+    
+    Arguments
+    ----------
+    f : numpy.ndarray
+        Gradient of the cost function.
+    A : numpy.ndarray
+        Left-hand side of the inequality constraints.
+    b : numpy.ndarray
+        Right-hand side of the inequality constraints.
+    C : numpy.ndarray
+        Left-hand side of the equality constraints.
+    d : numpy.ndarray
+        Right-hand side of the equality constraints.
+    tol : float
+        Maximum value for: the residual of the pnnls to consider the problem feasible, for the residual of the inequalities to be considered active.
+
+    Returns
+    ----------
+    sol : dict
+        Dictionary with the solution of the LP.
+
+        Fields
+        ----------
+        min : float
+            Minimum of the LP (None if the problem is unfeasible or unbounded).
+        argmin : numpy.ndarray
+            Argument that minimized the LP (None if the problem is unfeasible or unbounded).
+        active_set : list of int
+            Indices of the active inequallities {i | A_i argmin = b} (None if the problem is unfeasible or unbounded).
+        multiplier_inequality : numpy.ndarray
+            Lagrange multipliers for the inequality constraints (None if the problem is unfeasible or unbounded).
+        multiplier_equality : numpy.ndarray
+            Lagrange multipliers for the equality constraints (None if the problem is unfeasible or unbounded or without equality constraints).
     """
 
-    # empty inequalities if not provided
-    n_x = f.shape[0]
-    if A is None or b is None:
-        A = np.zeros((0, n_x))
-        b = np.zeros((0, 1))
-    n_ineq = A.shape[0]
+    # check equalities
+    if (C is None) != (d is None):
+        raise ValueError("missing C or d.")
+
+    # problem size
+    n_ineq, n_x = A.shape
+    if C is not None:
+        n_eq = C.shape[0]
+    else:
+        n_eq = 0
+    if len(f.shape) == 1:
+        f = np.reshape(f, (f.shape[0], 1))
+    if len(b.shape) == 1:
+        b = np.reshape(b, (b.shape[0], 1))
+    if n_eq > 0 and len(d.shape) == 1:
+        d = np.reshape(d, (d.shape[0], 1))
 
     # state equalities as inequalities
-    n_eq = 0
-    if C is not None and d is not None:
-        n_eq = C.shape[0]
-        A = np.vstack((A, C, -C))
-        b = np.vstack((b, d, -d))
+    if n_eq > 0:
+        AC = np.vstack((A, C, -C))
+        bd = np.vstack((b, d, -d))
+    else:
+        AC = A
+        bd = b
 
-    # matrices for the pnnls solver
+    # build and solve pnnls problem
     A_pnnls = np.vstack((
         np.hstack((
-            b.T,
-            np.zeros((1, n_ineq+2*n_eq))
+            bd.T,
+            np.zeros((1, n_ineq + 2*n_eq))
             )),
         np.hstack((
-            np.zeros((n_ineq+2*n_eq, n_ineq+2*n_eq)),
-            np.eye(n_ineq+2*n_eq)
+            np.zeros((n_ineq + 2*n_eq, n_ineq + 2*n_eq)),
+            np.eye(n_ineq + 2*n_eq)
             )),
         np.hstack((
-            A.T,
-            np.zeros((n_x, n_ineq+2*n_eq))
+            AC.T,
+            np.zeros((n_x, n_ineq + 2*n_eq))
             ))
         ))
-    B_pnnls = np.vstack((f.T, A, np.zeros((n_x, n_x))))
-    f = np.reshape(f, (n_x,1))
-    c_pnnls = np.vstack((0., b, -f))
+    B_pnnls = np.vstack((f.T, AC, np.zeros((n_x, n_x))))
+    c_pnnls = np.vstack((0., bd, -f))
+    ys, x, r = pnnls(A_pnnls, B_pnnls, c_pnnls)
 
     # initialize output
-    argmin = np.full((n_x,1), np.nan)
-    V_star = np.nan
-    active_set = [None]*n_ineq
-    mult_ineq = np.full((n_ineq,1), np.nan)
-    mult_eq = np.full((n_eq,1), np.nan)
-    primal_degenerate = None
-    dual_degenerate = None
+    sol = {
+        'min': None,
+        'argmin': None,
+        'active_set': None,
+        'multiplier_inequality': None,
+        'multiplier_equality': None
+    }
 
-    # solve pnnls
-    try:
-        ys_star, x_star, r_star = pnnls(A_pnnls, B_pnnls, c_pnnls)
-
-        # populate output
-        if r_star < tol:
-            argmin = x_star
-            V_star = (f.T.dot(x_star))[0,0]
-
-            # inequality constraints
-            if A is not None and b is not None:
-                mult_ineq = ys_star[:n_ineq,:]
-                residuals_ineq = ys_star[n_ineq+2*n_eq:2*n_ineq+2*n_eq,:]
-                active_set = sorted(list(np.where(residuals_ineq < tol)[0]))
-                primal_degenerate = len(active_set) > n_x - n_eq
-                dual_degenerate = len(list(np.where(mult_ineq < tol)[0])) > n_ineq - n_x + n_eq
-
-            # equality constraints
-            if C is not None and d is not None:
-                mult_eq = ys_star[n_ineq:n_ineq+n_eq,:] - ys_star[n_ineq+n_eq:n_ineq+2*n_eq,:]
-
-        # sol = LPSolution(
-        #     argmin = argmin,
-        #     min = V_star,
-        #     active_set = active_set,
-        #     inequality_multipliers = mult_ineq,
-        #     equality_multipliers = mult_eq,
-        #     primal_degenerate = primal_degenerate,
-        #     dual_degenerate = dual_degenerate)
-
-        sol = LPSolution(V_star, argmin, mult_ineq, mult_eq, active_set)
-
-    # sometimes the nnls algorithms excedes the maximum number of iterations...
-    except RuntimeError:
-        # print('Too many iterations in PNNLS LP solver, switched to gurobi.')
-        from gurobi import linear_program as lp_gurobi
-        sol = lp_gurobi(f, A, b, C, d)
-
-    return sol
-
-def quadratic_program(H, f=None, A=None, b=None, C=None, d=None, tol=1.e-7):
-    """
-    Solves the strictly convex (H > 0) quadratic program
-    min  .5 x^T H x + f^T x
-    s.t. A x <= b
-         C x  = d
-
-    OUTPUTS:
-        x_star: argument which minimizes the cost (=nan if the LP is unfeasible or unbounded)
-        V_star: minimum of the cost function (=nan if the LP is unfeasible or unbounded)
-    """
-
-    try:
-        if((C is not None) and (d is not None)):
-            A = np.vstack((A,C,-C))
-            b = np.vstack((b,d,-d))
-        n_x = H.shape[1]
-        L = np.linalg.cholesky(H)
-        L = L.T
-        M = A.dot(np.linalg.inv(L))
-        f = np.reshape(f, (n_x,1))
-        d = b + A.dot(np.linalg.inv(H)).dot(f)
-        gamma = 1
-        lhs_nnls = np.vstack((-M.T,-d.T))
-        rhs_nnls = np.vstack((np.zeros((n_x,1)),gamma)).flatten()
-        # scipy.io.savemat('nnls_matrices_' + str(time.time()), {'A': lhs_nnls, 'b': rhs_nnls})
-        [y_star, rvalue_star] = nnls(lhs_nnls, rhs_nnls)
-        y_star = np.reshape(y_star,(len(y_star),1))
-        r_star = np.vstack((-M.T,-d.T)).dot(y_star)-np.vstack((np.zeros((n_x,1)),gamma))
-        if (np.linalg.norm(r_star)<tol):
-            x_star = np.full((n_x,1), np.nan)
-            V_star = np.nan
-        else:
-            x_star = -np.linalg.inv(H).dot(f+A.T.dot(y_star)/(gamma+d.T.dot(y_star)))
-            V_star = (0.5 * x_star.T.dot(H).dot(x_star) + f.T.dot(x_star))[0,0]
-        sol = QPSolution(
-            argmin = x_star,
-            min = V_star)
-
-    except RuntimeError:
-        # print('Too many iterations in PNNLS LP solver, switched to gurobi.')
-        from gurobi import quadratic_program as qp_gurobi
-        sol = qp_gurobi(H, f, A, b, C, d)
+    # fill solution if residual is almost zero
+    if r < tol:
+        r_ineq = ys[n_ineq+2*n_eq:2*n_ineq+2*n_eq,:]
+        sol['min'] = f.T.dot(x)[0,0]
+        sol['argmin'] = x
+        sol['active_set'] = sorted(list(np.where(r_ineq < tol)[0]))
+        sol['multiplier_inequality'] = ys[:n_ineq,:]
+        if n_eq > 0:
+            mul_eq_pos = ys[n_ineq:n_ineq+n_eq, :]
+            mul_eq_neg = - ys[n_ineq+n_eq:n_ineq+2*n_eq, :]
+            sol['multiplier_equality'] = mul_eq_pos + mul_eq_neg
 
     return sol
