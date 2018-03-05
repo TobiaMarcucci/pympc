@@ -143,8 +143,10 @@ def _reorganize_solution(model, A, C):
         'multiplier_equality': None
     }
 
-    # primal solution
+    # if feasible
     if model.status == grb.GRB.Status.OPTIMAL:
+
+        # primal solution
         x = model.getVars()
         sol['min'] = model.objVal
         sol['argmin'] = np.array(model.getAttr('x')).reshape(len(x), 1)
@@ -167,6 +169,9 @@ def _reorganize_solution(model, A, C):
     return sol
 
 def _get_active_set_lp(model, A):
+    """
+    Retrieves the active set through gurobi.
+    """
     active_set = None
     if model.status == grb.GRB.Status.OPTIMAL:
         active_set = []
@@ -177,6 +182,9 @@ def _get_active_set_lp(model, A):
     return active_set
 
 def _get_active_set_qp(model, ineq_mult, tol=1.e-6):
+    """
+    Checks the multipliers t find active inequalities.
+    """
     active_set = None
     if ineq_mult is not None:
         active_set = []

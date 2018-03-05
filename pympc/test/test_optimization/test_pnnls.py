@@ -4,7 +4,6 @@ import numpy as np
 
 # internal inputs
 from pympc.optimization.pnnls import linear_program, quadratic_program
-from pympc.optimization.gurobi import quadratic_program as qp
 
 class TestPnnls(unittest.TestCase):
 
