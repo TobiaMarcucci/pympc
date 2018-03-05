@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 
 # internal inputs
-from pympc.optimization.pnnls import linear_program
-from pympc.optimization.gurobi import linear_program as lp
+from pympc.optimization.pnnls import linear_program, quadratic_program
+from pympc.optimization.gurobi import quadratic_program as qp
 
 class TestPnnls(unittest.TestCase):
 
@@ -228,6 +228,68 @@ class TestPnnls(unittest.TestCase):
         self.assertTrue(
             sol['multiplier_equality'] is None
             )
+
+    def test_quadratic_program(self):
+
+        # trivial qp with only inequalities
+        H = np.eye(2)
+        f = np.ones((2, 1))
+        A = -np.eye(2)
+        b = -np.ones((2, 1))
+        sol = quadratic_program(H, f, A, b)
+        self.assertAlmostEqual(
+            sol['min'],
+            3.
+            )
+        np.testing.assert_array_almost_equal(
+            sol['argmin'],
+            np.array([[1.],[1.]])
+            )
+        self.assertEqual(
+            sol['active_set'],
+            [0,1]
+            )
+        np.testing.assert_array_almost_equal(
+            sol['multiplier_inequality'],
+            np.array([[2.],[2.]])
+            )
+        self.assertTrue(
+            sol['multiplier_equality'] is None
+            )
+
+        # add equality constraints
+        C = np.array([[0., 1.]])
+        d = np.array([[2.]])
+        sol = quadratic_program(H, f, A, b, C, d)
+        self.assertAlmostEqual(
+            sol['min'],
+            5.5
+            )
+        np.testing.assert_array_almost_equal(
+            sol['argmin'],
+            np.array([[1.],[2.]])
+            )
+        self.assertEqual(
+            sol['active_set'],
+            [0]
+            )
+        np.testing.assert_array_almost_equal(
+            sol['multiplier_inequality'],
+            np.array([[2.],[0.]])
+            )
+        np.testing.assert_array_almost_equal(
+            sol['multiplier_equality'],
+            np.array([[-3.]])
+            )
+
+        # unfeasible
+        sol = quadratic_program(H, f, A, b, C, -d)
+        for value in sol.values():
+            self.assertTrue(value is None)
+
+        # non positive Hessian
+        H = np.zeros((2, 2))
+        self.assertRaises(np.linalg.LinAlgError, quadratic_program, H, f, A, b)
 
 if __name__ == '__main__':
     unittest.main()

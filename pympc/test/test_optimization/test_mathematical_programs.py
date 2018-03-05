@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 # internal inputs
-from pympc.optimization.linear_program import LinearProgram
+from pympc.optimization.mathematical_programs import LinearProgram, QuadraticProgram
 from pympc.geometry.polyhedron import Polyhedron
 
 class TestLinearProgram(unittest.TestCase):
@@ -164,6 +164,64 @@ class TestLinearProgram(unittest.TestCase):
         np.testing.assert_array_almost_equal(
             sol_inf['multiplier_equality'],
             np.array([[11./21.]])
+            )
+
+class TestQuadraticProgram(unittest.TestCase):
+
+    def test_solve(self):
+
+        # trivial LP with only inequalities
+        H = np.eye(2)
+        f = np.ones((2, 1))
+        A = -np.eye(2)
+        b = -np.ones((2, 1))
+        X = Polyhedron(A, b)
+        qp = QuadraticProgram(X, H, f)
+        sol = qp.solve()
+        self.assertAlmostEqual(
+            sol['min'],
+            3.
+            )
+        np.testing.assert_array_almost_equal(
+            sol['argmin'],
+            np.array([[1.],[1.]])
+            )
+        self.assertEqual(
+            sol['active_set'],
+            [0,1]
+            )
+        np.testing.assert_array_almost_equal(
+            sol['multiplier_inequality'],
+            np.array([[2.],[2.]])
+            )
+        self.assertTrue(
+            sol['multiplier_equality'] is None
+            )
+
+        # add equality constraints
+        C = np.array([[0., 1.]])
+        d = np.array([[2.]])
+        qp.X.add_equality(C, d)
+        sol = qp.solve()
+        self.assertAlmostEqual(
+            sol['min'],
+            5.5
+            )
+        np.testing.assert_array_almost_equal(
+            sol['argmin'],
+            np.array([[1.],[2.]])
+            )
+        self.assertEqual(
+            sol['active_set'],
+            [0]
+            )
+        np.testing.assert_array_almost_equal(
+            sol['multiplier_inequality'],
+            np.array([[2.],[0.]])
+            )
+        np.testing.assert_array_almost_equal(
+            sol['multiplier_equality'],
+            np.array([[-3.]])
             )
 
 if __name__ == '__main__':

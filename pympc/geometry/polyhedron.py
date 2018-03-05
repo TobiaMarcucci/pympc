@@ -2,7 +2,7 @@
 import numpy as np
 
 # pympc imports
-from pympc.optimization.linear_program import LinearProgram
+from pympc.optimization.mathematical_programs import LinearProgram
 from pympc.algebra import nullspace_basis
 
 class Polyhedron:
