@@ -534,17 +534,51 @@ class Polyhedron:
 
     def chebyshev(self):
         """
-        Returns the Chebyshev center and radius of the polyhedron.
-        This should return inf in case of infinite radius (to check the unboundedness of the primal it should verify unfeasibility of the dual.)
+        Returns the Chebyshev radius and center of the polyhedron P := {x | A x <= b, C x = d} solving the LP: min_{z, e}  e s.t. F z <= g + F_{row_norm} e.
+        If no equalities are provided, F = A, z = x, g = b.
+        In case of equality constraints, F = A N, g = b - A R r, with: N basis of the nullspace of C, R orthogonal complement to N, r = (C R)^-1 d and x is retrived as x = N n + R r.
+        (For the details of this operation see the method _remove_equalities().)
+        Here F_{row_norm} dentes the vector whose ith entry is the 2-norm of the ith row of F.
+
+        Returns
+        ----------
+        radius : float
+            Chebyshev radius of the polytope (negative if the polyhedron is empty, None if it is unbounded).
+        center : numpy.ndarray
+            Chebyshev center of the polytope (None if the polyhedron is unbounded).
         """
 
+        # project in case of equalities
         if self.C.shape[0] > 0:
-            A, B, N, R = self._remove_equalities()
+            A, b, N, R = self._remove_equalities()
         else:
             A = self.A
             b = self.b
 
-        pass
+        # assemble linear program
+        f_lp = np.vstack((
+            np.zeros((A.shape[1], 1)),
+            np.ones((1, 1))
+            ))
+        A_row_norm = np.reshape(np.linalg.norm(A, axis=1), (A.shape[0], 1))
+        A_lp = np.hstack((A, -A_row_norm))
+        X = Polyhedron(A_lp, b)
+        lp = LinearProgram(X, f_lp)
+
+        # solve and reshape result
+        sol = lp.solve()
+        radius = sol['min']
+        center = sol['argmin']
+        if radius is not None:
+            radius = -radius
+            center = center[:-1]
+
+        # go back to the original coordinates in case of equalities
+        if self.C.shape[0] > 0:
+            r = np.linalg.inv(self.C.dot(R)).dot(self.d)
+            center = np.hstack((N, R)).dot(np.vstack((center, r)))
+
+        return radius, center
 
     #@property # needed to call the method without () ?
     def vertices(self):

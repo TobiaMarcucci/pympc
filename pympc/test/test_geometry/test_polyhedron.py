@@ -374,5 +374,63 @@ class TestPolyhedron(unittest.TestCase):
         self.assertFalse(p1.is_included_in(p2))
         self.assertTrue(p2.is_included_in(p1))
 
+    def test_chebyshev(self):
+
+        # simple 2d problem
+        x_min = np.zeros((2,1))
+        x_max = 2. * np.ones((2,1))
+        p = Polyhedron.from_bounds(x_min, x_max)
+        r, c = p.chebyshev()
+        self.assertAlmostEqual(r, 1.)
+        np.testing.assert_array_almost_equal(c, np.ones((2, 1)))
+
+        # add nasty inequality
+        A = np.zeros((1,2))
+        b = np.ones((1,1))
+        p.add_inequality(A,b)
+        r, c = p.chebyshev()
+        self.assertAlmostEqual(r, 1.)
+        np.testing.assert_array_almost_equal(c, np.ones((2, 1)))
+
+        # add equality
+        C = np.ones((1,2))
+        d = np.array([[3.]])
+        p.add_equality(C,d)
+        r, c = p.chebyshev()
+        self.assertAlmostEqual(r, np.sqrt(2.)/2.)
+        np.testing.assert_array_almost_equal(c, 1.5*np.ones((2, 1)))
+
+        # negative radius
+        x_min = np.ones((2,1))
+        x_max = - np.ones((2,1))
+        p = Polyhedron.from_bounds(x_min, x_max)
+        r, c = p.chebyshev()
+        self.assertAlmostEqual(r, -1.)
+        np.testing.assert_array_almost_equal(c, np.zeros((2, 1)))
+
+        # unbounded
+        p = Polyhedron.from_lower_bound(x_min)
+        r, c = p.chebyshev()
+        self.assertTrue(r is None)
+        self.assertTrue(c is None)
+
+        # bounded very difficult
+        x0_max = np.array([[2.]])
+        p.add_upper_bound(x0_max, [1])
+        r, c = p.chebyshev()
+        self.assertAlmostEqual(r, .5)
+        self.assertAlmostEqual(c[0,0], 1.5)
+
+        # 3d case
+        x_min = - np.ones((2,1))
+        x_max = np.ones((2,1))
+        p = Polyhedron.from_bounds(x_min, x_max, [0,2], 3)
+        C = np.array([[1., 0., -1.]])
+        d = np.zeros((1,1))
+        p.add_equality(C, d)
+        r, c = p.chebyshev()
+        self.assertAlmostEqual(r, np.sqrt(2.))
+        np.testing.assert_array_almost_equal(c, np.zeros((3, 1)))
+
 if __name__ == '__main__':
     unittest.main()
