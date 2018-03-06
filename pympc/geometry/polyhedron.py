@@ -1,5 +1,9 @@
 # external imports
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.path import Path
+import matplotlib.patches as patches
+from scipy.spatial import HalfspaceIntersection, ConvexHull
 
 # pympc imports
 from pympc.optimization.mathematical_programs import LinearProgram
@@ -165,7 +169,7 @@ class Polyhedron:
     @staticmethod
     def from_lower_bound(x_min, indices=None, n=None):
         """
-        Instantiate a Polyhedron in the form {x | x[indices] >= x_min}.
+        Instantiates a Polyhedron in the form {x | x[indices] >= x_min}.
         If indices is None, the inequality is applied to all the elements of x.
         If indices is not None, n must be provided to determine the length of x.
 
@@ -196,7 +200,7 @@ class Polyhedron:
     @staticmethod
     def from_upper_bound(x_max, indices=None, n=None):
         """
-        Instantiate a Polyhedron in the form {x | x[indices] <= x_max}.
+        Instantiates a Polyhedron in the form {x | x[indices] <= x_max}.
         If indices is None, the inequality is applied to all the elements of x.
         If indices is not None, n must be provided to determine the length of x.
 
@@ -227,7 +231,7 @@ class Polyhedron:
     @staticmethod
     def from_bounds(x_min, x_max, indices=None, n=None):
         """
-        Instantiate a Polyhedron in the form {x | x_min <= x[indices] <= x_max}.
+        Instantiates a Polyhedron in the form {x | x_min <= x[indices] <= x_max}.
         If indices is None, the inequality is applied to all the elements of x.
         If indices is not None, n must be provided to determine the length of x.
 
@@ -457,7 +461,7 @@ class Polyhedron:
         # check Stiemke's theorem of alternatives
         n, m = A.shape
         constraint = Polyhedron.from_lower_bound(np.ones((n, 1)))
-        constraint.add_equality(self.A.T, np.zeros((m, 1)))
+        constraint.add_equality(A.T, np.zeros((m, 1)))
         cost = np.ones((n, 1))
         lp = LinearProgram(constraint, cost)
         sol = lp.solve()
@@ -580,21 +584,122 @@ class Polyhedron:
 
         return radius, center
 
-    #@property # needed to call the method without () ?
-    def vertices(self):
-        # need to check what qhull says in case of unbounded polyhedron...
-        pass
+    def get_vertices(self, tol=1.e-6):
+    	"""
+    	Returns the set of vertices of the polyhdron.
+    	It assumes the polyhedron to be bounded (i.e. to be a polytope) and not empty (but it can be lower dimensional, equality constraints are allowed).
 
-    def project_to(self, dimensions):
-        pass
+    	Arguments
+        ----------
+        tol : float
+            Minimum Chebyshev radius for the polyhedron to be considered not empty.
+
+    	Returns
+        ----------
+        vertices : list of numpy.ndarray
+            List of the vertices of the bounded polyhedron (None if the polyhedron is unbounded or empty).
+        """
+
+    	# check full dimensionality
+    	radius, center = self.chebyshev()
+    	if radius < tol:
+            return None
+
+        # check boundedness
+        if not self.is_bounded():
+            return None
+
+        # handle equalities
+        if self.C.shape[0] > 0:
+            A, b, N, R = self._remove_equalities()
+            T = np.hstack((N, R))
+            center = np.linalg.inv(T).dot(center)
+            center = center[:N.shape[1], :]
+        else:
+            A = self.A
+            b = self.b
+
+        # handle 1d cases
+        if A.shape[1] == 1:
+            vertices = [np.array([[b[i,0]/A[i,0]]]) for i in [0,1]]
+
+        # call qhull thorugh scipy
+        else:
+	    	halfspaces = np.hstack((A, -b))
+	    	polyhedron = HalfspaceIntersection(halfspaces, center.flatten())
+	    	vertices = polyhedron.intersections
+	    	vertices = [vertices[i:i+1,:].T for i in range(vertices.shape[0])]
+
+	    # go back to the original coordinates in case of equalities
+        if self.C.shape[0] > 0:
+            r = np.linalg.inv(self.C.dot(R)).dot(self.d)
+            vertices = [T.dot(np.vstack((v, r))) for v in vertices]
+
+    	return vertices
 
     @staticmethod
-    def from_vertices(self, v_list):
+    def from_convex_hull(points):
         """
-        This would assume the polyhedron to be bounded...
-        """
-        pass
+    	Instantiates the polyhderon given from the conve hull of the given set of points.
+    	It assumes the polyhedron to be bounded.
 
-    def plot(self):
-        # if more than 2d raise value error
+    	Arguments
+        ----------
+        points : list of numpy.ndarray
+            List of points.
+        """
+
+        # call qhull thorugh scipy for the convex hull
+        hull = ConvexHull(np.hstack(points).T)
+
+        # create polyhedron
+        A = hull.equations[:, :-1]
+        b = -hull.equations[:, -1:]
+        p = Polyhedron(A, b)
+
+        return p
+
+
+    def plot(self, residual_dimensions=[0,1], **kwargs):
+        """
+        Plots the 2d projection of the polyhedron in the given dimension.
+        It assumes the polyhedron to be bounded and not empty.
+
+        Arguments
+        ----------
+        residual_dimensions : list of int
+            Dimensions in which to project the polyhedron.
+        """
+
+        # check dimensions
+        if len(residual_dimensions) != 2:
+            raise ValueError('wrong number of residual dimensions.')
+
+        # extract vertices components
+        vertices = self.get_vertices()
+        if vertices is None:
+        	print('Cannot plot unbounded or empty polyhedra.')
+        	return
+
+        # call qhull thorugh scipy for the convex hull (needed to order the vertices in counterclockwise order)
+        vertices = np.hstack(vertices).T[:,residual_dimensions]
+        hull = ConvexHull(vertices)
+        vertices = [hull.points[i].tolist() for i in hull.vertices]
+        vertices += [vertices[0]]
+
+        # create path
+        codes = [Path.MOVETO] + [Path.LINETO]*(len(vertices)-2) + [Path.CLOSEPOLY]
+        path = Path(vertices, codes)
+
+        # set up plot
+        ax = plt.gca()
+        patch = patches.PathPatch(path, **kwargs)
+        ax.add_patch(patch)
+        plt.xlabel(r'$x_' + str(residual_dimensions[0]+1) + '$')
+        plt.ylabel(r'$x_' + str(residual_dimensions[1]+1) + '$')
+        ax.autoscale_view()
+
+        return
+        
+    def project_to(self, dimensions):
         pass
