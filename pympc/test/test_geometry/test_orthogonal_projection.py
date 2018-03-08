@@ -6,7 +6,7 @@ from itertools import product
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
 from pympc.geometry.orthogonal_projection import convex_hull_method
-from pympc.test.test_geometry.utils import same_rows, same_vectors
+from pympc.geometry.utils import same_rows, same_vectors
 
 class TestOrthogonalProjection(unittest.TestCase):
 

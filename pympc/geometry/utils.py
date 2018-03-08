@@ -24,7 +24,7 @@ def nullspace_basis(A):
     rank = np.linalg.matrix_rank(A)
     Z = V[:,rank:]
 
-    return clean_matrix(Z)
+    return Z
 
 def linearly_independent_rows(A, tol=1.e-6):
     """
@@ -52,34 +52,6 @@ def linearly_independent_rows(A, tol=1.e-6):
 
     return sorted(independent_rows)
 
-def clean_matrix(M, tol=1.e-9):
-    """
-    Cuts the absolute value of each element of an array to the tolerance value.
-
-    Arguments
-    ----------
-    A : numpy.ndarray
-        Matrix to be cleaned
-    tol : float
-        Minimum value for the absolute value of an element.
-
-    Returns
-    ----------
-    M_clean : numpy.ndarray
-        Cleaned matrix.
-    """
-
-    # copy to not modify M itself
-    M_clean = copy(M)
-
-    # cut values
-    for i in range(M.shape[0]):
-        for j in range(M.shape[1]):
-            if np.abs(M[i,j]) < tol:
-                M_clean[i,j] = 0.
-
-    return M_clean
-    
 def plane_through_points(points):
     """
     Returns the plane a' x = b passing through the points.
