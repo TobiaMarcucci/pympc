@@ -7,7 +7,8 @@ from scipy.spatial import HalfspaceIntersection, ConvexHull
 
 # pympc imports
 from pympc.optimization.mathematical_programs import LinearProgram
-from pympc.algebra import nullspace_basis
+from pympc.geometry.utils import nullspace_basis
+from pympc.geometry.orthogonal_projection import convex_hull_method
 
 class Polyhedron:
     """
@@ -42,6 +43,13 @@ class Polyhedron:
         else:
             self.C, self.d = self._check_input_matices(C, d)
 
+        # initializes the attributes to None
+        self._empty = None
+        self._bounded = None
+        self._radius = None
+        self._center = None
+        self._vertices = None
+
     def add_inequality(self, A, b):
         """
         Adds the inequality A x <= b to the existing polyhedron.
@@ -56,6 +64,9 @@ class Polyhedron:
 
         # check inequalities
         A, b = self._check_input_matices(A, b)
+
+        # reset attributes to None
+        self._delete_attributes()
 
         # add inequalities
         self.A = np.vstack((self.A, A))
@@ -75,6 +86,9 @@ class Polyhedron:
 
         # check equalities
         C, d = self._check_input_matices(C, d)
+
+        # reset attributes to None
+        self._delete_attributes()
 
         # add equalities
         self.C = np.vstack((self.C, C))
@@ -139,6 +153,18 @@ class Polyhedron:
 
         self.add_lower_bound(x_min, indices)
         self.add_upper_bound(x_max, indices)
+
+    def _delete_attributes(self):
+        """
+        Resets al the attibutes of the class to None.
+        """
+
+        # reser the attributes to None
+        self._empty = None
+        self._bounded = None
+        self._radius = None
+        self._center = None
+        self._vertices = None
 
     def _selection_matrix(self, indices):
         """
@@ -409,7 +435,8 @@ class Polyhedron:
 
         return E, f, N, R
 
-    def is_empty(self):
+    @property
+    def empty(self):
         """
         Checks if the polyhedron P is empty solving an LP for the x with minimum infinity norm contained in P.
 
@@ -419,14 +446,19 @@ class Polyhedron:
             True if the polyhedron is empty, False otherwise.
         """
 
+        # check if it has been already checked
+        if self._empty is not None:
+            return self._empty
+
         # if a sultion is found, return False
         lp = LinearProgram(self)
         sol = lp.solve_min_norm_inf()
-        empty = sol['min'] is None
+        self._empty = sol['min'] is None
 
-        return empty
+        return self._empty
 
-    def is_bounded(self):
+    @property
+    def bounded(self):
         """
         Checks if the polyhedron is bounded (returns True or False).
 
@@ -447,8 +479,12 @@ class Polyhedron:
             True if the polyhedron is bounded, False otherwise.
         """
 
+        # check if it has been already checked
+        if self._bounded is not None:
+            return self._bounded
+
         # check emptyness
-        if self.is_empty():
+        if self.empty:
             return True
 
         # include equalities
@@ -465,9 +501,9 @@ class Polyhedron:
         cost = np.ones((n, 1))
         lp = LinearProgram(constraint, cost)
         sol = lp.solve()
-        bounded = sol['min'] is not None
+        self._bounded = sol['min'] is not None
 
-        return bounded
+        return self._bounded
 
     def contains(self, x, tol=1.e-7):
         """
@@ -536,7 +572,47 @@ class Polyhedron:
 
         return included
 
-    def chebyshev(self):
+    @property
+    def radius(self):
+        """
+        Returns the Chebyshev radius of the polyhedron (see self._chebyshev()).
+
+        Returns
+        ----------
+        radius : float
+            Chebyshev radius of the polytope (negative if the polyhedron is empty, None if it is unbounded).
+        """
+
+        # check if it has been already checked
+        if self._radius is not None:
+            return self._radius
+
+        # compute Chebyshev radius and center
+        self._radius, self._center = self._chebyshev()
+
+        return self._radius
+
+    @property
+    def center(self):
+        """
+        Returns the Chebyshev center of the polyhedron (see self._chebyshev()).
+
+        Returns
+        ----------
+        center : numpy.ndarray
+            Chebyshev center of the polytope (None if the polyhedron is unbounded).
+        """
+
+        # check if it has been already checked
+        if self._center is not None:
+            return self._center
+
+        # compute Chebyshev radius and center
+        self._radius, self._center = self._chebyshev()
+
+        return self._center
+
+    def _chebyshev(self):
         """
         Returns the Chebyshev radius and center of the polyhedron P := {x | A x <= b, C x = d} solving the LP: min_{z, e}  e s.t. F z <= g + F_{row_norm} e.
         If no equalities are provided, F = A, z = x, g = b.
@@ -584,15 +660,11 @@ class Polyhedron:
 
         return radius, center
 
-    def get_vertices(self, tol=1.e-6):
+    @property
+    def vertices(self):
     	"""
     	Returns the set of vertices of the polyhdron.
-    	It assumes the polyhedron to be bounded (i.e. to be a polytope) and not empty (but it can be lower dimensional, equality constraints are allowed).
-
-    	Arguments
-        ----------
-        tol : float
-            Minimum Chebyshev radius for the polyhedron to be considered not empty.
+    	It assumes the polyhedron to be bounded (i.e. to be a polytope) and full dimensional (equality constraints are allowed but inequalities cannot make the polytope lower dimensional).
 
     	Returns
         ----------
@@ -600,42 +672,78 @@ class Polyhedron:
             List of the vertices of the bounded polyhedron (None if the polyhedron is unbounded or empty).
         """
 
+        # check if it has been already checked
+        if self._vertices is not None:
+            return self._vertices
+
     	# check full dimensionality
-    	radius, center = self.chebyshev()
-    	if radius < tol:
+        tol = 1.e-7
+    	if self.radius < tol:
             return None
 
         # check boundedness
-        if not self.is_bounded():
+        if not self.bounded:
             return None
 
         # handle equalities
         if self.C.shape[0] > 0:
             A, b, N, R = self._remove_equalities()
             T = np.hstack((N, R))
-            center = np.linalg.inv(T).dot(center)
-            center = center[:N.shape[1], :]
+            self.center = np.linalg.inv(T).dot(self.center)
+            self.center = self.center[:N.shape[1], :]
         else:
             A = self.A
             b = self.b
 
         # handle 1d cases
         if A.shape[1] == 1:
-            vertices = [np.array([[b[i,0]/A[i,0]]]) for i in [0,1]]
+            p = Polyhedron(A, b)
+            p.remove_redundant_inequalities()
+            self._vertices = [np.array([[p.b[i,0]/p.A[i,0]]]) for i in [0,1]]
 
-        # call qhull thorugh scipy
+        # call qhull through scipy
         else:
 	    	halfspaces = np.hstack((A, -b))
-	    	polyhedron = HalfspaceIntersection(halfspaces, center.flatten())
-	    	vertices = polyhedron.intersections
-	    	vertices = [vertices[i:i+1,:].T for i in range(vertices.shape[0])]
+	    	polyhedron = HalfspaceIntersection(halfspaces, self.center.flatten())
+	    	V = polyhedron.intersections
+	    	self._vertices = [V[i:i+1,:].T for i in range(V.shape[0])]
 
 	    # go back to the original coordinates in case of equalities
         if self.C.shape[0] > 0:
             r = np.linalg.inv(self.C.dot(R)).dot(self.d)
-            vertices = [T.dot(np.vstack((v, r))) for v in vertices]
+            self._vertices = [T.dot(np.vstack((v, r))) for v in self._vertices]
 
-    	return vertices
+    	return self._vertices
+
+    def project_to(self, residual_dimensions):
+        """
+        Returns the orthogonal projection of the polytope.
+
+        Arguments
+        ----------
+        residual_dimensions : list of int
+            List of indices of the residual dimensions after the projection.
+
+        Returns
+        ----------
+        proj : instance of Polyhedron
+            Orthogonal projection of this instance of Polyhedron onto the residual dimensions.
+        """
+
+        # check emptyness, boundedness, and full-dimensionality
+        if self.empty:
+            raise ValueError('cannot project empty polyhedra.')
+        if not self.bounded:
+            raise ValueError('cannot project unbounded polyhedra.')
+        if self.C.shape[0] > 0:
+            raise ValueError('cannot project lower-dimensional polyhedra.')
+
+        # call convex-hull method for orthogonal projections
+        A, b, vertices = convex_hull_method(self.A, self.b, residual_dimensions)
+        proj = Polyhedron(A, b)
+        proj._vertices = vertices
+        
+        return proj
 
     @staticmethod
     def from_convex_hull(points):
@@ -654,7 +762,7 @@ class Polyhedron:
 
         # create polyhedron
         A = hull.equations[:, :-1]
-        b = -hull.equations[:, -1:]
+        b = - hull.equations[:, -1:]
         p = Polyhedron(A, b)
 
         return p
@@ -700,6 +808,3 @@ class Polyhedron:
         ax.autoscale_view()
 
         return
-        
-    def project_to(self, dimensions):
-        pass

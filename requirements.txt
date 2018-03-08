@@ -1,5 +1,3 @@
-pyhull
 scipy
 numpy
 matplotlib
-git+https://github.com/rdeits/pycddlib@4df43450

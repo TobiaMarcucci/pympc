@@ -1,9 +1,11 @@
 # external imports
 import unittest
 import numpy as np
+from itertools import product
 
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
+from pympc.geometry.utils import same_rows, same_vectors
 
 class TestPolyhedron(unittest.TestCase):
 
@@ -37,19 +39,19 @@ class TestPolyhedron(unittest.TestCase):
         p.add_inequality(A, b)
         A = np.array([[1., 0.], [0., 1.], [1., 1.]])
         b = np.ones((3, 1))
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b))
-            )
+            ))
         c = np.ones(2)
         self.assertRaises(ValueError, p.add_inequality, A, c)
 
     	# add equalities
         p.add_equality(A, b)
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.C, p.d))
-            )
+            ))
         b = np.ones(2)
         self.assertRaises(ValueError, p.add_equality, A, b)
 
@@ -65,10 +67,10 @@ class TestPolyhedron(unittest.TestCase):
         p.add_bounds(-6*np.ones((1,1)), 6*np.ones((1,1)), [1])
         A =np.array([[-1., 0.], [0., -1.], [1., 0.], [0., 1.], [-1., 0.], [0., -1.], [1., 0.], [0., 1.], [-1., 0.], [1., 0.], [0., -1.], [0., 1.] ])
         b = np.array([[1.], [1.], [2.], [2.], [3.], [3.], [3.], [3.], [4.], [5.], [6.], [6.] ])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # wrong size bounds
         A = np.eye(3)
@@ -91,28 +93,28 @@ class TestPolyhedron(unittest.TestCase):
         p = Polyhedron.from_lower_bound(x)
         A_lb = np.array([[-1., 0.], [0., -1.]])
         b_lb = np.array([[-1.], [-1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A_lb, b_lb)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # from upper bound
         p = Polyhedron.from_upper_bound(x)
         A_ub = np.array([[1., 0.], [0., 1.]])
         b_ub = np.array([[1.], [1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A_ub, b_ub)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # from upper and lower bounds
         p = Polyhedron.from_bounds(x, x)
         A = np.vstack((A_lb, A_ub))
         b = np.vstack((b_lb, b_ub))
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # different size lower and upper bound
         y = np.ones((3,1))
@@ -124,10 +126,10 @@ class TestPolyhedron(unittest.TestCase):
         p = Polyhedron.from_lower_bound(x, indices, n)
         A_lb = np.array([[0., -1., 0.], [0., 0., -1.]])
         b_lb = np.array([[-1.], [-1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A_lb, b_lb)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # from lower bound of not all the variables
         indices = [0, 2]
@@ -135,10 +137,10 @@ class TestPolyhedron(unittest.TestCase):
         p = Polyhedron.from_upper_bound(x, indices, n)
         A_ub = np.array([[1., 0., 0.], [0., 0., 1.]])
         b_ub = np.array([[1.], [1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A_ub, b_ub)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # from upper and lower bounds of not all the variables
         indices = [0, 1]
@@ -146,10 +148,10 @@ class TestPolyhedron(unittest.TestCase):
         p = Polyhedron.from_bounds(x, x, indices, n)
         A = np.array([[-1., 0., 0.], [0., -1., 0.], [1., 0., 0.], [0., 1., 0.]])
         b = np.array([[-1.], [-1.], [1.], [1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # too many indices
         indices = [1, 2, 3]
@@ -173,16 +175,16 @@ class TestPolyhedron(unittest.TestCase):
         b = np.array([[1.], [0.]])
         C = np.ones((1, 2))/np.sqrt(2.)
         d = np.ones((1, 1))/np.sqrt(2.)
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b)),
             normalize=False
-            )
-        self._test_matrix_unordered_rows(
+            ))
+        self.assertTrue(same_rows(
             np.hstack((C, d)),
             np.hstack((p.C, p.d)),
             normalize=False
-            )
+            ))
         
     def test_remove_equalities(self):
 
@@ -221,10 +223,10 @@ class TestPolyhedron(unittest.TestCase):
         p.remove_redundant_inequalities()
         A_min = np.array([[-1., 1.], [0., -1.], [2., 2.]])
         b_min = np.array([[1.], [1.], [2.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A_min, b_min)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # both inequalities and equalities
         x_min = - np.ones((2, 1))
@@ -240,18 +242,18 @@ class TestPolyhedron(unittest.TestCase):
         p.remove_redundant_inequalities()
         A_min = np.array([[1., 0.], [0., 1.]])
         b_min = np.array([[1.], [1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A_min, b_min)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # add (redundant) inequality coincident with the equality
         p.add_inequality(C, d)
         p.remove_redundant_inequalities()
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A_min, b_min)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # add (redundant) inequality
         p.add_inequality(
@@ -259,74 +261,74 @@ class TestPolyhedron(unittest.TestCase):
             np.array([[1.1]])
             )
         p.remove_redundant_inequalities()
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A_min, b_min)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
-    def test_is_empty(self):
+    def test_empty(self):
 
         # full dimensional
         x_min = 1.*np.ones((2,1))
         x_max = 2.*np.ones((2,1))
         p = Polyhedron.from_bounds(x_min, x_max)
-        self.assertFalse(p.is_empty())
+        self.assertFalse(p.empty)
 
         # lower dimensional, but not empy
         C = np.ones((1, 2))
         d = np.array([[3.]])
         p.add_equality(C, d)
-        self.assertFalse(p.is_empty())
+        self.assertFalse(p.empty)
 
         # lower dimensional and empty
         x_0_max = np.array([[.5]])
         p.add_upper_bound(x_0_max, [0])
-        self.assertTrue(p.is_empty())
+        self.assertTrue(p.empty)
 
-    def test_is_bounded(self):
+    def test_bounded(self):
 
         # bounded (empty), easy (ker(A) empty)
         x_min = np.ones((2, 1))
         x_max = - np.ones((2, 1))
         p = Polyhedron.from_bounds(x_min, x_max)
-        self.assertTrue(p.is_bounded())
+        self.assertTrue(p.bounded)
 
         # bounded (empty), tricky (ker(A) not empty)
         x0_min = np.array([[1.]])
         x0_max = np.array([[-1.]])
         p = Polyhedron.from_bounds(x0_min, x0_max, [0], 2)
-        self.assertTrue(p.is_bounded())
+        self.assertTrue(p.bounded)
 
         # bounded easy
         x_min = 1.*np.ones((2,1))
         x_max = 2.*np.ones((2,1))
         p = Polyhedron.from_bounds(x_min, x_max)
-        self.assertTrue(p.is_bounded())
+        self.assertTrue(p.bounded)
 
         # unbounded, halfspace
         x0_min = np.array([[0.]])
         p = Polyhedron.from_lower_bound(x0_min, [0], 2)
-        self.assertFalse(p.is_bounded())
+        self.assertFalse(p.bounded)
 
         # unbounded, positive orthant
         x1_min = x0_min
         p.add_lower_bound(x1_min, [1])
-        self.assertFalse(p.is_bounded())
+        self.assertFalse(p.bounded)
 
         # unbounded: parallel inequalities, slice of positive orthant
         x0_max = np.array([[1.]])
         p.add_upper_bound(x0_max, [0])
-        self.assertFalse(p.is_bounded())
+        self.assertFalse(p.bounded)
 
         # unbounded lower dimensional, line in the positive orthant
         x0_min = x0_max
         p.add_lower_bound(x0_min, [0])
-        self.assertFalse(p.is_bounded())
+        self.assertFalse(p.bounded)
 
         # bounded lower dimensional, segment in the positive orthant
         x1_max = np.array([[1000.]])
         p.add_upper_bound(x1_max, [1])
-        self.assertTrue(p.is_bounded())
+        self.assertTrue(p.bounded)
 
         # with equalities, 3d case
         x_min = np.array([[-1.],[-2.]])
@@ -335,7 +337,7 @@ class TestPolyhedron(unittest.TestCase):
         C = np.array([[1., 0., -1.]])
         d = np.zeros((1,1))
         p.add_equality(C, d)
-        self.assertTrue(p.is_bounded())
+        self.assertTrue(p.bounded)
 
     def test_contains(self):
 
@@ -417,46 +419,40 @@ class TestPolyhedron(unittest.TestCase):
         x_min = np.zeros((2,1))
         x_max = 2. * np.ones((2,1))
         p = Polyhedron.from_bounds(x_min, x_max)
-        r, c = p.chebyshev()
-        self.assertAlmostEqual(r, 1.)
-        np.testing.assert_array_almost_equal(c, np.ones((2, 1)))
+        self.assertAlmostEqual(p.radius, 1.)
+        np.testing.assert_array_almost_equal(p.center, np.ones((2, 1)))
 
         # add nasty inequality
         A = np.zeros((1,2))
         b = np.ones((1,1))
         p.add_inequality(A,b)
-        r, c = p.chebyshev()
-        self.assertAlmostEqual(r, 1.)
-        np.testing.assert_array_almost_equal(c, np.ones((2, 1)))
+        self.assertAlmostEqual(p.radius, 1.)
+        np.testing.assert_array_almost_equal(p.center, np.ones((2, 1)))
 
         # add equality
         C = np.ones((1,2))
         d = np.array([[3.]])
         p.add_equality(C,d)
-        r, c = p.chebyshev()
-        self.assertAlmostEqual(r, np.sqrt(2.)/2.)
-        np.testing.assert_array_almost_equal(c, 1.5*np.ones((2, 1)))
+        self.assertAlmostEqual(p.radius, np.sqrt(2.)/2.)
+        np.testing.assert_array_almost_equal(p.center, 1.5*np.ones((2, 1)))
 
         # negative radius
         x_min = np.ones((2,1))
         x_max = - np.ones((2,1))
         p = Polyhedron.from_bounds(x_min, x_max)
-        r, c = p.chebyshev()
-        self.assertAlmostEqual(r, -1.)
-        np.testing.assert_array_almost_equal(c, np.zeros((2, 1)))
+        self.assertAlmostEqual(p.radius, -1.)
+        np.testing.assert_array_almost_equal(p.center, np.zeros((2, 1)))
 
         # unbounded
         p = Polyhedron.from_lower_bound(x_min)
-        r, c = p.chebyshev()
-        self.assertTrue(r is None)
-        self.assertTrue(c is None)
+        self.assertTrue(p.radius is None)
+        self.assertTrue(p.center is None)
 
         # bounded very difficult
         x0_max = np.array([[2.]])
         p.add_upper_bound(x0_max, [1])
-        r, c = p.chebyshev()
-        self.assertAlmostEqual(r, .5)
-        self.assertAlmostEqual(c[0,0], 1.5)
+        self.assertAlmostEqual(p.radius, .5)
+        self.assertAlmostEqual(p.center[0,0], 1.5)
 
         # 3d case
         x_min = np.array([[-1.],[-2.]])
@@ -465,11 +461,10 @@ class TestPolyhedron(unittest.TestCase):
         C = np.array([[1., 0., -1.]])
         d = np.zeros((1,1))
         p.add_equality(C, d)
-        r, c = p.chebyshev()
-        self.assertAlmostEqual(r, np.sqrt(2.))
-        self.assertAlmostEqual(c[0,0], 0.)
-        self.assertAlmostEqual(c[2,0], 0.)
-        self.assertTrue(np.abs(c[1,0]) < 2. - r + 1.e-6)
+        self.assertAlmostEqual(p.radius, np.sqrt(2.))
+        self.assertAlmostEqual(p.center[0,0], 0.)
+        self.assertAlmostEqual(p.center[2,0], 0.)
+        self.assertTrue(np.abs(p.center[1,0]) < 2. - p.radius + 1.e-6)
 
     def test_from_convex_hull(self):
 
@@ -486,10 +481,10 @@ class TestPolyhedron(unittest.TestCase):
             [1., 1.],
             ])
         b = np.array([[0.],[0.],[1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # simple 3d
         points = [
@@ -506,10 +501,10 @@ class TestPolyhedron(unittest.TestCase):
             [1., 1., 1.],
             ])
         b = np.array([[0.],[0.],[0.],[1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
         # another 2d with internal point
         points = [
@@ -527,12 +522,12 @@ class TestPolyhedron(unittest.TestCase):
             [0., 1.],
             ])
         b = np.array([[0.],[0.],[1.],[1.]])
-        self._test_matrix_unordered_rows(
+        self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b))
-            )
+            ))
 
-    def test_get_vertices(self):
+    def test_vertices(self):
 
         # basic eample
         A = np.array([[-1, 0.],[0., -1.],[2., 1.],[-0.5, 1.]])
@@ -544,8 +539,7 @@ class TestPolyhedron(unittest.TestCase):
             np.array([[0.],[2.]]),
             np.array([[.8],[2.4]])
         ]
-        v_list = p.get_vertices()
-        self._test_list_of_arrays(v_list, u_list)
+        self.assertTrue(same_vectors(p.vertices, u_list))
 
         # 1d example
         A = np.array([[-1],[1.]])
@@ -555,43 +549,29 @@ class TestPolyhedron(unittest.TestCase):
             np.array([[-1.]]),
             np.array([[1.]])
         ]
-        v_list = p.get_vertices()
-        self._test_list_of_arrays(v_list, u_list)
+        self.assertTrue(same_vectors(p.vertices, u_list))
 
         # unbounded
         x_min = np.zeros((2,1))
         p = Polyhedron.from_lower_bound(x_min)
-        v_list = p.get_vertices()
-        self.assertTrue(v_list is None)
+        self.assertTrue(p.vertices is None)
 
         # lower dimensional (because of the inequalities)
         x_max = np.array([[1.],[0.]])
         p.add_upper_bound(x_max)
-        v_list = p.get_vertices()
-        self.assertTrue(v_list is None)
+        self.assertTrue(p.vertices is None)
 
         # empty
         x_max = - np.ones((2,1))
         p.add_upper_bound(x_max)
-        v_list = p.get_vertices()
-        self.assertTrue(v_list is None)
+        self.assertTrue(p.vertices is None)
 
         # 3d case
         x_min = - np.ones((3,1))
         x_max = - x_min
         p = Polyhedron.from_bounds(x_min, x_max)
-        u_list = [
-            np.array([[1.],[1.],[1.]]),
-            np.array([[1.],[1.],[-1.]]),
-            np.array([[1.],[-1.],[1.]]),
-            np.array([[-1.],[1.],[1.]]),
-            np.array([[1.],[-1.],[-1.]]),
-            np.array([[-1.],[-1.],[1.]]),
-            np.array([[-1.],[1.],[-1.]]),
-            np.array([[-1.],[-1.],[-1.]]),
-        ]
-        v_list = p.get_vertices()
-        self._test_list_of_arrays(v_list, u_list)
+        u_list = [np.array(v).reshape(3,1) for v in product([1., -1.], repeat=3)]
+        self.assertTrue(same_vectors(p.vertices, u_list))
 
         # 3d case with equalities
         x_min = np.array([[-1.],[-2.]])
@@ -606,35 +586,95 @@ class TestPolyhedron(unittest.TestCase):
             np.array([[1.],[-2.],[1.]]),
             np.array([[-1.],[-2.],[-1.]])
         ]
-        v_list = p.get_vertices()
-        self._test_list_of_arrays(v_list, u_list)
+        self.assertTrue(same_vectors(p.vertices, u_list))
 
-    def _test_matrix_unordered_rows(self, A, B, normalize=True):
-        """
-        Tests that two matrices contain the same rows.
-        The order of the rows can be different.
-        The option normalize, normalizes the rows of A and B. 
-        """
-        self.assertTrue(A.shape[0] == B.shape[0])
-        if normalize:
-            for i in range(A.shape[0]):
-                A[i,:] = A[i,:]/np.linalg.norm(A[i,:])
-                B[i,:] = B[i,:]/np.linalg.norm(B[i,:])
-        for a in A:
-            i = np.where([np.allclose(a, b) for b in B])[0]
-            self.assertTrue(len(i) == 1)
-            B = np.delete(B, i, 0)
+    def test_delete_attributes(self):
 
-    def _test_list_of_arrays(self, v_list, u_list):
-        """
-        Tests that two lists of array contain the same elements.
-        The order of the elements in the lists can be different.
-        """
-        self.assertTrue(len(u_list) == len(v_list))
-        for v in v_list:
-            i = np.where([np.allclose(v, u) for u in u_list])[0]
-            self.assertTrue(len(i) == 1)
-            del u_list[i[0]]
+        # initialize polyhedron
+        x_min = - np.ones((2,1))
+        x_max = - x_min
+        p = Polyhedron.from_bounds(x_min, x_max)
+
+        # compute alle the property attributes
+        self.assertFalse(p.empty)
+        self.assertTrue(p.bounded)
+        self.assertAlmostEqual(p.radius, 1.)
+        np.testing.assert_array_almost_equal(
+            p.center,
+            np.zeros((2,1))
+            )
+        self.assertTrue(same_vectors(
+            p.vertices,
+            [np.array(v).reshape(2,1) for v in product([1., -1.], repeat=2)]
+            ))
+
+        # add inequality
+        A = np.eye(2)
+        b = .8*np.ones((2,1))
+        p.add_inequality(A, b)
+        self.assertFalse(p.empty)
+        self.assertTrue(p.bounded)
+        self.assertAlmostEqual(p.radius, .9)
+        np.testing.assert_array_almost_equal(
+            p.center,
+            -.1*np.ones((2,1))
+            )
+        self.assertTrue(same_vectors(
+            p.vertices,
+            [np.array(v).reshape(2,1) for v in product([.8, -1.], repeat=2)]
+            ))
+
+        # add equality
+        C = np.array([[1., 1.]])
+        d = np.zeros((1, 1))
+        p.add_equality(C, d)
+        self.assertFalse(p.empty)
+        self.assertTrue(p.bounded)
+        self.assertAlmostEqual(p.radius, .8*np.sqrt(2.))
+        np.testing.assert_array_almost_equal(
+            p.center,
+            np.zeros((2,1))
+            )
+        self.assertTrue(same_vectors(
+            p.vertices,
+            [np.array([[-.8],[.8]]), np.array([[.8],[-.8]])]
+            ))
+
+    def test_orthogonal_projection(self):
+        # (more tests on projections are in geometry/test_orthogonal_projection.py)
+
+        # unbounded polyhedron
+        x_min = - np.ones((3, 1))
+        p = Polyhedron.from_lower_bound(x_min)
+        self.assertRaises(ValueError, p.project_to, range(2))
+
+        # simple 3d onto 2d
+        p.add_upper_bound(- x_min)
+        E = np.vstack((
+            np.eye(2),
+            - np.eye(2)
+            ))
+        f = np.ones((4, 1))
+        vertices = [np.array(v).reshape(2,1) for v in product([1., -1.], repeat=2)]
+        proj = p.project_to(range(2))
+        proj.remove_redundant_inequalities()
+        self.assertTrue(same_rows(
+            np.hstack((E, f)),
+            np.hstack((proj.A, proj.b))
+            ))
+        self.assertTrue(same_vectors(vertices, proj.vertices))
+
+        # lower dimensional
+        C = np.array([[1., 1., 0.]])
+        d = np.zeros((1, 1))
+        p.add_equality(C, d)
+        self.assertRaises(ValueError, p.project_to, range(2))
+
+        # lower dimensional
+        x_min = - np.ones((3, 1))
+        x_max = 2. * x_min
+        p = Polyhedron.from_bounds(x_min, x_max)
+        self.assertRaises(ValueError, p.project_to, range(2))
 
 if __name__ == '__main__':
     unittest.main()
