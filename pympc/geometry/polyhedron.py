@@ -818,13 +818,12 @@ class Polyhedron:
             raise ValueError('wrong number of residual dimensions.')
 
         # extract vertices components
-        vertices = self.get_vertices()
-        if vertices is None:
+        if self.vertices is None:
         	print('Cannot plot unbounded or empty polyhedra.')
         	return
 
         # call qhull thorugh scipy for the convex hull (needed to order the vertices in counterclockwise order)
-        vertices = np.hstack(vertices).T[:,residual_dimensions]
+        vertices = np.hstack(self.vertices).T[:,residual_dimensions]
         hull = ConvexHull(vertices)
         vertices = [hull.points[i].tolist() for i in hull.vertices]
         vertices += [vertices[0]]
