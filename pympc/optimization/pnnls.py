@@ -1,6 +1,6 @@
 # external imports
-from scipy.optimize import nnls
 import numpy as np
+from scipy.optimize import nnls
 
 def pnnls(A, B, c):
     """

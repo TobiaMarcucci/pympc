@@ -14,5 +14,7 @@ setup(name='pympc',
           ],
       install_requires=[
           'numpy',
+          'scipy',
+          'matplotlib'
       ],
       zip_safe=False)

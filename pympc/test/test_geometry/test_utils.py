@@ -4,7 +4,7 @@ import numpy as np
 from random import shuffle
 
 # internal inputs
-from pympc.geometry.utils import nullspace_basis, linearly_independent_rows, clean_matrix, plane_through_points, same_rows, same_vectors
+from pympc.geometry.utils import nullspace_basis, linearly_independent_rows, plane_through_points, same_rows, same_vectors
 
 class TestUtils(unittest.TestCase):
 
@@ -44,14 +44,6 @@ class TestUtils(unittest.TestCase):
         A = np.eye(3)
         li_rows = linearly_independent_rows(A)
         self.assertTrue(li_rows == range(3))
-
-    def test_clean_matrix(self):
-
-        # identity matrix with small numbers
-        A = np.array([[1.,1.e-9,0.],[0.,1.,0.],[1.e-7,0.,1.]])
-        I = clean_matrix(A, 1.e-6)
-        np.testing.assert_array_equal(A, A)
-        np.testing.assert_array_equal(I, np.eye(3))
 
     def test_plane_through_points(self):
 

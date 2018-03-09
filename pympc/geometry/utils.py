@@ -1,6 +1,5 @@
 # external imports
 import numpy as np
-from copy import copy
 
 def nullspace_basis(A):
     """

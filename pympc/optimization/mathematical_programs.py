@@ -1,6 +1,5 @@
 # external imports
 import numpy as np
-from copy import copy
 
 # internal inputs
 from pympc.optimization.pnnls import linear_program, quadratic_program
