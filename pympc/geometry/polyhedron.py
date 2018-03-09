@@ -1,5 +1,6 @@
 # external imports
 import numpy as np
+from copy import copy
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import matplotlib.patches as patches
@@ -312,7 +313,7 @@ class Polyhedron:
         """
 
         # make f a 2d matrix
-        if len(f.shape) == 1:
+        if f.ndim == 1:
             f = np.reshape(f, (f.shape[0], 1))
 
         # check nomber of rows
@@ -359,8 +360,12 @@ class Polyhedron:
         Returns
         ----------
         minimal_facets : list of int
-            List of indices of the non-redundant inequalities A x <= b.
+            List of indices of the non-redundant inequalities A x <= b (None if the polyhedron in empty).
         """
+
+        # check emptyness
+        if self.empty:
+            return None
 
         # if there are equalities, project
         if self.C.shape[0] != 0:
@@ -398,7 +403,14 @@ class Polyhedron:
         Removes the redundant facets of the polyhedron, it modifies the attributes A and b.
         """
 
+        # get minimal facets
         minimal_facets = self.get_minimal_facets()
+
+        # raise error if empty polyhedron
+        if minimal_facets is None:
+            raise ValueError('empty polyhedron, cannot remove redundant inequalities.')
+
+        # remove redundancy
         self.A = self.A[minimal_facets,:]
         self.b = self.b[minimal_facets]
 
@@ -571,6 +583,28 @@ class Polyhedron:
                 break
 
         return included
+
+    def get_intersection_with(self, P2):
+        """
+        Intersects this instance of Polyhderon (P1) with the polyhedron P2.
+
+        Arguments
+        ----------
+        P2 : instance of Polyhderon
+            Polyhderon with which we want to intersect this polyhedron.
+
+        Returns
+        ----------
+        P3 : instance of Polyhderon
+            Intersection of the two polyhedra.
+        """
+
+        # copy P3 (to not modify P2) and intersect
+        P3 = copy(P2)
+        P3.add_inequality(self.A, self.b)
+        P3.add_equality(self.C, self.d)
+
+        return P3
 
     @property
     def radius(self):

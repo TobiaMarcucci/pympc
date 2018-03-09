@@ -266,6 +266,12 @@ class TestPolyhedron(unittest.TestCase):
             np.hstack((p.A, p.b))
             ))
 
+        # empty polyhderon
+        x_min = np.ones((2,1))
+        x_max = np.zeros((2,1))
+        p = Polyhedron.from_bounds(x_min, x_max)
+        self.assertRaises(ValueError, p.remove_redundant_inequalities)
+
     def test_empty(self):
 
         # full dimensional
@@ -412,6 +418,34 @@ class TestPolyhedron(unittest.TestCase):
         p2.add_upper_bound(x1_max, [1])
         self.assertFalse(p1.is_included_in(p2))
         self.assertTrue(p2.is_included_in(p1))
+
+    def test_get_intersection_with(self):
+
+        # first polyhedron
+        x1_min = - np.ones((2,1))
+        x1_max = - x1_min
+        p1 = Polyhedron.from_bounds(x1_min, x1_max)
+
+        # second polyhedron
+        x2_min = np.zeros((2,1))
+        x2_max = 2. * np.ones((2,1))
+        p2 = Polyhedron.from_bounds(x2_min, x2_max)
+
+        # intersection
+        p3 = p1.get_intersection_with(p2)
+        p3.remove_redundant_inequalities()
+        p4 = Polyhedron.from_bounds(x2_min, x1_max)
+        self.assertTrue(same_rows(
+            np.hstack((p3.A, p3.b)),
+            np.hstack((p4.A, p4.b))
+            ))
+
+        # add equalities
+        C1 = np.array([[1., 0.]])
+        d1 = np.array([-.5])
+        p1.add_equality(C1, d1)
+        p3 = p1.get_intersection_with(p2)
+        self.assertTrue(p3.empty)
 
     def test_chebyshev(self):
 
