@@ -1,5 +1,57 @@
+# external imports
 import numpy as np
 import matplotlib.pyplot as plt
+
+def plot_state_space_trajectory(x, dim=[0,1], text=False, **kwargs):
+    """
+    Plots one component of the state x as a function of another (2d plot).
+
+    Arguments
+    ----------
+    x : list of numpy.ndarray
+        Trajectory of the state.
+    dim : list of int
+        List of the indices of the components of the state that we want to plot (2 indices).
+    """
+
+    # check inputs
+    if len(dim) != 2:
+        raise ValueError('can plot only 2-dimensional trajectories.')
+
+    # plot trajectory
+    for t in range(len(x)-1):
+        plt.plot([x[t][dim[0]], x[t+1][dim[0]]], [x[t][dim[1]], x[t+1][dim[1]]], **kwargs)
+
+    # plot text
+    for t in range(len(x)):
+        if text:
+            plt.text(x[t][0], x[t][1], r'$x('+str(t)+')$')
+
+    # scatter initial condition
+    plt.scatter(x[0][dim[0]], x[0][dim[1]], color='w', edgecolor='k', zorder=3)
+
+    # axis labels
+    plt.xlabel(r'$x_{' + str(dim[0]+1) + '}$')
+    plt.ylabel(r'$x_{' + str(dim[1]+1) + '}$')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def input_sequence(u_sequence, t_s, u_bounds=None):
     """
@@ -134,27 +186,6 @@ def output_trajectory(C, x_trajectory, t_s, y_bounds=None):
 
     return
 
-
-def state_space_trajectory(x_trajectory, state_components=[0,1], **kwargs):
-    """
-    Plots the state trajectories as functions of time (2d plot).
-
-    INPUTS:
-        x_trajectory: state trajectory \in R^((N+1)*n_x)
-        N: time steps
-        state_components: components of the state vector to be plotted.
-    """
-    for k in range(len(x_trajectory)-1):
-        plt.plot([x_trajectory[k][state_components[0]], x_trajectory[k+1][state_components[0]]], [x_trajectory[k][state_components[1]], x_trajectory[k+1][state_components[1]]], **kwargs)
-        # plt.text(x_trajectory[k][0], x_trajectory[k][1], r'$x('+str(k)+')$')
-    # ax = plt.axes()
-    x_0 = (x_trajectory[0][state_components[0]][0], x_trajectory[0][state_components[1]][0])
-    plt.scatter(x_0[0], x_0[1], color='w', edgecolor='k')
-    # plt.text(x_0[0], x_0[1], r'$x(0)$')
-    plt.xlabel(r'$x_{' + str(state_components[0]+1) + '}$')
-    plt.ylabel(r'$x_{' + str(state_components[1]+1) + '}$')
-    return
-
 # def state_partition(critical_regions, active_set=False, facet_index=False, **kwargs):
 #     if critical_regions is None:
 #         raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
@@ -172,51 +203,51 @@ def state_space_trajectory(x_trajectory, state_components=[0,1], **kwargs):
 
 
 
-from pympc.geometry.polytope import Polytope
-def state_partition(critical_regions, feasible_set=None, active_set=False, facet_index=False, **kwargs):
-    if critical_regions is None:
-        raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
+# from pympc.geometry.polytope import Polytope
+# def state_partition(critical_regions, feasible_set=None, active_set=False, facet_index=False, **kwargs):
+#     if critical_regions is None:
+#         raise ValueError('Explicit solution not computed yet! First run .compute_explicit_solution().')
 
-    fig, ax = plt.subplots()
-    for cr in critical_regions:
-        p = Polytope(cr.polytope.lhs_min, cr.polytope.rhs_min)
-        if feasible_set is not None:
-            p.add_facets(feasible_set.lhs_min, feasible_set.rhs_min)
-        p.assemble()
-        try:
-            pass
-            p.plot(facecolor=np.random.rand(3), **kwargs)
-        except AttributeError:
-            pass
-        ax.autoscale_view()
-    return
+#     fig, ax = plt.subplots()
+#     for cr in critical_regions:
+#         p = Polytope(cr.polytope.lhs_min, cr.polytope.rhs_min)
+#         if feasible_set is not None:
+#             p.add_facets(feasible_set.lhs_min, feasible_set.rhs_min)
+#         p.assemble()
+#         try:
+#             pass
+#             p.plot(facecolor=np.random.rand(3), **kwargs)
+#         except AttributeError:
+#             pass
+#         ax.autoscale_view()
+#     return
 
-def grouped_state_partition(critical_regions, active_set=False, first_input=False, facet_index=False, **kwargs):
-    u_offset_list = []
-    u_linear_list = []
-    cr_families = []
-    for cr in critical_regions:
-        cr_family = np.where(np.isclose(cr.u_offset[0], u_offset_list))[0]
-        if cr_family and all(np.isclose(cr.u_linear[0,:], u_linear_list[cr_family[0]])):
-            cr_families[cr_family[0]].append(cr)
-        else:
-            cr_families.append([cr])
-            u_offset_list.append(cr.u_offset[0])
-            u_linear_list.append(cr.u_linear[0,:])
-    fig, ax = plt.subplots()
-    for i, family in enumerate(cr_families):
-        color = np.random.rand(3)
-        for cr in family:
-            cr.polytope.plot(facecolor=color, **kwargs)
-            ax.autoscale_view()
-            if active_set:
-                plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
-            if first_input:
-                plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.u_linear[0,:])+str(cr.u_offset[0]))
-            if facet_index:
-                for j in range(0, len(cr.polytope.minimal_facets)):
-                    plt.text(cr.polytope.facet_centers(j)[0], cr.polytope.facet_centers(j)[1], str(cr.polytope.minimal_facets[j]))
-    return
+# def grouped_state_partition(critical_regions, active_set=False, first_input=False, facet_index=False, **kwargs):
+#     u_offset_list = []
+#     u_linear_list = []
+#     cr_families = []
+#     for cr in critical_regions:
+#         cr_family = np.where(np.isclose(cr.u_offset[0], u_offset_list))[0]
+#         if cr_family and all(np.isclose(cr.u_linear[0,:], u_linear_list[cr_family[0]])):
+#             cr_families[cr_family[0]].append(cr)
+#         else:
+#             cr_families.append([cr])
+#             u_offset_list.append(cr.u_offset[0])
+#             u_linear_list.append(cr.u_linear[0,:])
+#     fig, ax = plt.subplots()
+#     for i, family in enumerate(cr_families):
+#         color = np.random.rand(3)
+#         for cr in family:
+#             cr.polytope.plot(facecolor=color, **kwargs)
+#             ax.autoscale_view()
+#             if active_set:
+#                 plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.active_set))
+#             if first_input:
+#                 plt.text(cr.polytope.center[0], cr.polytope.center[1], str(cr.u_linear[0,:])+str(cr.u_offset[0]))
+#             if facet_index:
+#                 for j in range(0, len(cr.polytope.minimal_facets)):
+#                     plt.text(cr.polytope.facet_centers(j)[0], cr.polytope.facet_centers(j)[1], str(cr.polytope.minimal_facets[j]))
+#     return
 
 
 

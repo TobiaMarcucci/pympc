@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 # internal inputs
-from pympc.dynamics.discrete_time_systems import LinearSystem, AffineSystem,PieceWiseAffineSystem
+from pympc.dynamics.discrete_time_systems import LinearSystem, AffineSystem,PieceWiseAffineSystem, mcais
 from pympc.geometry.polyhedron import Polyhedron
 
 class TestLinearSystem(unittest.TestCase):
@@ -38,6 +38,69 @@ class TestLinearSystem(unittest.TestCase):
                 np.vstack(x),
                 A_bar.dot(x0) + B_bar.dot(np.vstack(u))
                 )
+
+    def test_solve_dare_and_simulate_closed_loop(self):
+        np.random.seed(1)
+
+        # test lqr on random systems
+        for i in range(100):
+            n = np.random.randint(5, 10)
+            m = np.random.randint(1, n -1)
+            controllable = False
+            while not controllable:
+                A = np.random.rand(n,n)
+                B = np.random.rand(n,m)
+                R = np.hstack([np.linalg.matrix_power(A, j).dot(B) for j in range(n)])
+                r = np.linalg.matrix_rank(R)
+                controllable = r == n
+            S = LinearSystem(A, B)
+            Q = np.eye(n)
+            R = np.eye(m)
+            P, K = S.solve_dare(Q, R)
+            self.assertTrue(np.min(np.linalg.eig(P)[0]) > 0.)
+
+            # simulate in closed-loop and check that x' P x is a Lyapunov function
+            N = 10
+            x0 = np.random.rand(n,1)
+            x_list = S.simulate_closed_loop(x0, N, K)
+            V_list = [x.T.dot(P).dot(x)[0,0] for x in x_list]
+            dV_list = [V_list[i] - V_list[i+1] for i in range(len(V_list)-1)]
+            self.assertTrue(min(dV_list) > 0.)
+
+    def test_get_mcais(self):
+        """
+        Tests only if the function macais() il called correctly.
+        For the tests of mcais() see the class TestMCAIS.
+        """
+
+        # damped pendulum linearized around the stable equilibrium
+        A = np.array([[0., 1.], [-1., -1.]])
+        B = np.array([[0.], [1.]])
+        h = .1
+        S = LinearSystem.from_continuous(A, B, h)
+        x_min = - np.ones((2,1))
+        x_max = - x_min
+        X = Polyhedron.from_bounds(x_min, x_max)
+        O_inf = S.get_mcais(X)[0]
+        self.assertTrue(O_inf.contains(np.zeros((2,1))))
+        O_inf.remove_redundant_inequalities()
+
+        # undamped pendulum linearized around the unstable equilibrium
+        A = np.array([[0., 1.], [1., 0.]])
+        S = LinearSystem.from_continuous(A, B, h)
+        K = S.solve_dare(np.eye(2), np.eye(1))[1]
+        d_min = - np.ones((3,1))
+        d_max = - d_min
+        D = Polyhedron.from_bounds(d_min, d_max)
+        O_inf = S.get_mcais_closed_loop(K, D)[0]
+        self.assertTrue(O_inf.contains(np.zeros((2,1))))
+
+        # undamped pendulum linearized around the unstable equilibrium
+        u_min = - np.ones((1,1))
+        u_max = - u_min
+        U = Polyhedron.from_bounds(u_min, u_max)
+        O_inf = S.get_mcais_closed_loop_orthogonal_domains(K, X, U)[0]
+        self.assertTrue(O_inf.contains(np.zeros((2,1))))
 
     def test_from_continuous(self):
 
@@ -315,6 +378,43 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
             state_domains,
             input_domains
             )
+
+class TestMCAIS(unittest.TestCase):
+
+    def test_mcais(self):
+        np.random.seed(1)
+
+        # domain
+        nx = 2
+        x_min = - np.ones((nx, 1))
+        x_max = - x_min
+        X = Polyhedron.from_bounds(x_min, x_max)
+
+        # stable dynamics
+        for i in range(10):
+            stable = False
+            while not stable:
+                A = np.random.rand(nx, nx)
+                stable = np.max(np.absolute(np.linalg.eig(A)[0])) < 1.
+
+            # get mcais
+            O_inf, _ = mcais(A, X)
+
+            # generate random initial conditions
+            for j in range(100):
+                x = 3.*np.random.rand(nx, 1) - 1.5
+
+                # if inside stays inside X, if outside sooner or later will leave X
+                if O_inf.contains(x):
+                    while np.linalg.norm(x) > 0.001:
+                        x = A.dot(x)
+                        self.assertTrue(X.contains(x))
+                else:
+                    while X.contains(x):
+                        x = A.dot(x)
+                        if np.linalg.norm(x) < 0.0001:
+                            self.assertTrue(False)
+                            pass
 
 if __name__ == '__main__':
     unittest.main()
