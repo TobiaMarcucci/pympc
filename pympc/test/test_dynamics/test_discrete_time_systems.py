@@ -39,6 +39,20 @@ class TestLinearSystem(unittest.TestCase):
                 A_bar.dot(x0) + B_bar.dot(np.vstack(u))
                 )
 
+    def test_controllable(self):
+
+        # double integrator (controllable)
+        A = np.array([[0., 1.],[0., 0.]])
+        B = np.array([[0.],[1.]])
+        h = .1
+        S = LinearSystem.from_continuous(A, B, h)
+        self.assertTrue(S.controllable)
+
+        # make it uncontrollable
+        B = np.array([[1.],[0.]])
+        S = LinearSystem.from_continuous(A, B, h)
+        self.assertFalse(S.controllable)
+
     def test_solve_dare_and_simulate_closed_loop(self):
         np.random.seed(1)
 
@@ -50,10 +64,8 @@ class TestLinearSystem(unittest.TestCase):
             while not controllable:
                 A = np.random.rand(n,n)
                 B = np.random.rand(n,m)
-                R = np.hstack([np.linalg.matrix_power(A, j).dot(B) for j in range(n)])
-                r = np.linalg.matrix_rank(R)
-                controllable = r == n
-            S = LinearSystem(A, B)
+                S = LinearSystem(A, B)
+                controllable = S.controllable
             Q = np.eye(n)
             R = np.eye(m)
             P, K = S.solve_dare(Q, R)
@@ -67,39 +79,22 @@ class TestLinearSystem(unittest.TestCase):
             dV_list = [V_list[i] - V_list[i+1] for i in range(len(V_list)-1)]
             self.assertTrue(min(dV_list) > 0.)
 
-    def test_get_mcais(self):
+    def test_mcais(self):
         """
         Tests only if the function macais() il called correctly.
         For the tests of mcais() see the class TestMCAIS.
         """
 
-        # damped pendulum linearized around the stable equilibrium
-        A = np.array([[0., 1.], [-1., -1.]])
-        B = np.array([[0.], [1.]])
-        h = .1
-        S = LinearSystem.from_continuous(A, B, h)
-        x_min = - np.ones((2,1))
-        x_max = - x_min
-        X = Polyhedron.from_bounds(x_min, x_max)
-        O_inf = S.get_mcais(X)[0]
-        self.assertTrue(O_inf.contains(np.zeros((2,1))))
-        O_inf.remove_redundant_inequalities()
-
         # undamped pendulum linearized around the unstable equilibrium
         A = np.array([[0., 1.], [1., 0.]])
+        B = np.array([[0.], [1.]])
+        h = .1
         S = LinearSystem.from_continuous(A, B, h)
         K = S.solve_dare(np.eye(2), np.eye(1))[1]
         d_min = - np.ones((3,1))
         d_max = - d_min
         D = Polyhedron.from_bounds(d_min, d_max)
-        O_inf = S.get_mcais_closed_loop(K, D)[0]
-        self.assertTrue(O_inf.contains(np.zeros((2,1))))
-
-        # undamped pendulum linearized around the unstable equilibrium
-        u_min = - np.ones((1,1))
-        u_max = - u_min
-        U = Polyhedron.from_bounds(u_min, u_max)
-        O_inf = S.get_mcais_closed_loop_orthogonal_domains(K, X, U)[0]
+        O_inf = S.mcais(K, D)[0]
         self.assertTrue(O_inf.contains(np.zeros((2,1))))
 
     def test_from_continuous(self):

@@ -35,6 +35,9 @@ class LinearSystem:
         # system size
         self.nx, self.nu = B.shape
 
+        # property variables
+        self._controllable = None
+
         return
 
     def simulate(self, x0, u):
@@ -116,14 +119,8 @@ class LinearSystem:
         K = - np.linalg.inv(self.B.T.dot(P).dot(self.B)+R).dot(self.B.T).dot(P).dot(self.A)
 
         return P, K
-        
-    def get_mcais(self, X):
-        """
-        See the documentation of mcais().
-        """
-        return mcais(self.A, X)
 
-    def get_mcais_closed_loop(self, K, D):
+    def mcais(self, K, D):
         """
         Returns the maximal constraint-admissible invariant set O_inf for the closed-loop system X(t+1) = (A + B K) x(t).
         It holds that x(0) in O_inf <=> (x(t), u(t) = K x(t)) in D for all t >= 0.
@@ -155,37 +152,6 @@ class LinearSystem:
 
         return O_inf, t
 
-    def get_mcais_closed_loop_orthogonal_domains(self, K, X, U):
-        """
-        Returns the maximal constraint-admissible invariant set O_inf for the closed-loop system X(t+1) = (A + B K) x(t).
-        It holds that x(0) in O_inf <=> x(t) in X and u(t) = K x(t) in U for all t >= 0.
-
-        Arguments
-        ----------
-        K : numpy.ndarray
-            Stabilizing feedback gain for the linear system.
-        X : instance of Polyhedron
-            Constraint set in the state space.
-        U : instance of Polyhedron
-            Constraint set in the input space.
-
-        Returns
-        ----------
-        O_inf : instance of Polyhedron
-            Maximal constraint-admissible (positive) ivariant.
-        t : int
-            Determinedness index.
-        """
-
-        # state- and input-space constraint set
-        D = Polyhedron(
-            block_diag(X.A, U.A),
-            np.vstack((X.b, U.b))
-            )
-        O_inf, t = self.get_mcais_closed_loop(K, D)
-
-        return O_inf, t
-
     def condense(self, N):
         """
         Constructs the matrices A_bar and B_bar such that x_bar = A_bar x(0) + B_bar u_bar with x_bar = (x(0), ... , x(N)) and u_bar = (u(0), ... , u(N-1)).
@@ -211,6 +177,20 @@ class LinearSystem:
         A_bar, B_bar, _ = condense_pwa_system([S], [0]*N)
 
         return A_bar, B_bar
+
+    @property
+    def controllable(self):
+
+        # check if already computes
+        if self._controllable is not None:
+            return self._controllable
+
+        # check controllability
+        controllable = False
+        R = np.hstack([np.linalg.matrix_power(self.A, i).dot(self.B) for i in range(self.nx)])
+        self._controllable = np.linalg.matrix_rank(R) == self.nx
+        
+        return self._controllable
 
     @staticmethod
     def from_continuous(A, B, h, method='zero_order_hold'):
@@ -486,7 +466,7 @@ class PieceWiseAffineSystem(object):
         # loop over al the combinations (avoiding to check twice)
         for i, Di in enumerate(self.domains):
             for j in range(i+1, self.nm):
-                Dij = Di.get_intersection_with(self.domains[j])
+                Dij = Di.intersection_with(self.domains[j])
 
                 # check the Chebyshev radius of the intersection
                 if Dij.radius > tol:

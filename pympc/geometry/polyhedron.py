@@ -1,10 +1,11 @@
 # external imports
 import numpy as np
 from copy import copy
+from scipy.spatial import HalfspaceIntersection, ConvexHull
+from scipy.linalg import block_diag
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import matplotlib.patches as patches
-from scipy.spatial import HalfspaceIntersection, ConvexHull
 
 # pympc imports
 from pympc.optimization.mathematical_programs import LinearProgram
@@ -345,7 +346,7 @@ class Polyhedron:
                 self.C[i,:] = self.C[i,:]/r
                 self.d[i,:] = self.d[i,:]/r
 
-    def get_minimal_facets(self, tol=1.e-7):
+    def minimal_facets(self, tol=1.e-7):
         """
         Computes the indices of the facets that generate a minimal representation of the polyhedron solving an LP for each facet of the redundant representation.
         (See "Fukuda - Frequently asked questions in polyhedral computation" Sec.2.21.)
@@ -403,7 +404,7 @@ class Polyhedron:
         """
 
         # get minimal facets
-        minimal_facets = self.get_minimal_facets()
+        minimal_facets = self.minimal_facets()
 
         # raise error if empty polyhedron
         if minimal_facets is None:
@@ -583,9 +584,9 @@ class Polyhedron:
 
         return included
 
-    def get_intersection_with(self, P2):
+    def intersection_with(self, P2):
         """
-        Intersects this instance of Polyhderon (P1) with the polyhedron P2.
+        Returns the intersection between this instance of Polyhderon (P1) and the polyhedron P2.
 
         Arguments
         ----------
@@ -604,6 +605,28 @@ class Polyhedron:
         P3.add_equality(self.C, self.d)
 
         return P3
+
+    def cartesian_product_with(self, P2):
+        """
+        Returns the Cartesian product between this instance of Polyhderon (P1) and the polyhedron P2.
+
+        Arguments
+        ----------
+        P2 : instance of Polyhderon
+            Polyhderon with which we want to multiply this polyhedron.
+
+        Returns
+        ----------
+        P3 : instance of Polyhderon
+            Cartesian product of the two polyhedra.
+        """
+
+        return Polyhedron(
+            block_diag(self.A, P2.A),
+            np.vstack((self.b, P2.b)),
+            block_diag(self.C, P2.C),
+            np.vstack((self.d, P2.d)),
+            )
 
     @property
     def radius(self):

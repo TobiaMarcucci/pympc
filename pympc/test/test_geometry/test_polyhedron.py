@@ -2,6 +2,7 @@
 import unittest
 import numpy as np
 from itertools import product
+from scipy.linalg import block_diag
 
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron, convex_hull_method
@@ -218,7 +219,7 @@ class TestPolyhedron(unittest.TestCase):
         p = Polyhedron(A,b)
         self.assertEqual(
             [1, 2, 5],
-            sorted(p.get_minimal_facets())
+            sorted(p.minimal_facets())
             )
         p.remove_redundant_inequalities()
         A_min = np.array([[-1., 1.], [0., -1.], [2., 2.]])
@@ -237,7 +238,7 @@ class TestPolyhedron(unittest.TestCase):
         p.add_equality(C, d)
         self.assertEqual(
             [2, 3],
-            sorted(p.get_minimal_facets())
+            sorted(p.minimal_facets())
             )
         p.remove_redundant_inequalities()
         A_min = np.array([[1., 0.], [0., 1.]])
@@ -419,7 +420,7 @@ class TestPolyhedron(unittest.TestCase):
         self.assertFalse(p1.is_included_in(p2))
         self.assertTrue(p2.is_included_in(p1))
 
-    def test_get_intersection_with(self):
+    def test_intersection_with(self):
 
         # first polyhedron
         x1_min = - np.ones((2,1))
@@ -432,7 +433,7 @@ class TestPolyhedron(unittest.TestCase):
         p2 = Polyhedron.from_bounds(x2_min, x2_max)
 
         # intersection
-        p3 = p1.get_intersection_with(p2)
+        p3 = p1.intersection_with(p2)
         p3.remove_redundant_inequalities()
         p4 = Polyhedron.from_bounds(x2_min, x1_max)
         self.assertTrue(same_rows(
@@ -444,8 +445,38 @@ class TestPolyhedron(unittest.TestCase):
         C1 = np.array([[1., 0.]])
         d1 = np.array([-.5])
         p1.add_equality(C1, d1)
-        p3 = p1.get_intersection_with(p2)
+        p3 = p1.intersection_with(p2)
         self.assertTrue(p3.empty)
+
+    def test_cartesian_product_with(self):
+
+        # simple case
+        n = 2
+        x_min = -np.ones((n,1))
+        x_max = -x_min
+        p1 = Polyhedron.from_bounds(x_min, x_max)
+        C = np.ones((1,n))
+        d = np.zeros((1,1))
+        p1.add_equality(C, d)
+        p2 = p1.cartesian_product_with(p1)
+
+        # derive the cartesian product
+        x_min = -np.ones((2*n,1))
+        x_max = -x_min
+        p3 = Polyhedron.from_bounds(x_min, x_max)
+        C = block_diag(*[np.ones((1,n))]*2)
+        d = np.zeros((2,1))
+        p3.add_equality(C, d)
+
+        # compare results
+        self.assertTrue(same_rows(
+            np.hstack((p2.A, p2.b)),
+            np.hstack((p3.A, p3.b))
+            ))
+        self.assertTrue(same_rows(
+            np.hstack((p2.C, p2.d)),
+            np.hstack((p3.C, p3.d))
+            ))
 
     def test_chebyshev(self):
 
