@@ -56,6 +56,13 @@ class TestLinearSystem(unittest.TestCase):
     def test_solve_dare_and_simulate_closed_loop(self):
         np.random.seed(1)
 
+        # uncontrollable system
+        A = np.array([[0., 1.],[0., 0.]])
+        B = np.array([[1.],[0.]])
+        h = .1
+        S = LinearSystem.from_continuous(A, B, h)
+        self.assertRaises(ValueError, S.solve_dare, np.eye(2), np.eye(1))
+
         # test lqr on random systems
         for i in range(100):
             n = np.random.randint(5, 10)

@@ -112,6 +112,10 @@ class LinearSystem:
             Optimal feedback gain matrix.
         """
 
+        # check controllability
+        if not self.controllable:
+            raise ValueError('uncontrollable system, cannot solve Riccati equation.')
+
         # cost to go
         P = solve_discrete_are(self.A, self.B, Q, R)
 
@@ -189,7 +193,7 @@ class LinearSystem:
         controllable = False
         R = np.hstack([np.linalg.matrix_power(self.A, i).dot(self.B) for i in range(self.nx)])
         self._controllable = np.linalg.matrix_rank(R) == self.nx
-        
+
         return self._controllable
 
     @staticmethod
