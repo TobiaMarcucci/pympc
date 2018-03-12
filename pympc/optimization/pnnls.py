@@ -73,7 +73,7 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
     sol : dict
         Dictionary with the solution of the LP.
 
-        Fields
+        Kays
         ----------
         min : float
             Minimum of the LP (None if the problem is unfeasible or unbounded).
