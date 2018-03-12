@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 # internal inputs
-from pympc.dynamics.discrete_time_systems import LinearSystem, AffineSystem,PieceWiseAffineSystem, mcais
+from pympc.dynamics.discrete_time_systems import LinearSystem, AffineSystem, PieceWiseAffineSystem, mcais
 from pympc.geometry.polyhedron import Polyhedron
 
 class TestLinearSystem(unittest.TestCase):
@@ -86,6 +86,20 @@ class TestLinearSystem(unittest.TestCase):
             dV_list = [V_list[i] - V_list[i+1] for i in range(len(V_list)-1)]
             self.assertTrue(min(dV_list) > 0.)
 
+            # simulate in closed-loop and check that 1/2 x' P x is exactly the cost to go
+            A_cl = A + B.dot(K)
+            x0 = np.random.rand(n,1)
+            infinite_horizon_V = .5*x0.T.dot(P).dot(x0)
+            finite_horizon_V = 0.
+            max_iter = 1000
+            t = 0
+            while not np.isclose(infinite_horizon_V, finite_horizon_V):
+            	finite_horizon_V += .5*(x0.T.dot(Q).dot(x0) + (K.dot(x0)).T.dot(R).dot(K).dot(x0))
+            	x0 = A_cl.dot(x0)
+            	t += 1
+            	if t == max_iter:
+            		self.assertTrue(False)
+            	
     def test_mcais(self):
         """
         Tests only if the function macais() il called correctly.

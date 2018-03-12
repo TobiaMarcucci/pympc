@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 # internal inputs
-from pympc.optimization.mathematical_programs import LinearProgram, QuadraticProgram
+from pympc.optimization.convex_programs import LinearProgram, QuadraticProgram
 from pympc.geometry.polyhedron import Polyhedron
 
 class TestLinearProgram(unittest.TestCase):

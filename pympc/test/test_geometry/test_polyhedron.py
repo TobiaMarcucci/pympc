@@ -213,17 +213,24 @@ class TestPolyhedron(unittest.TestCase):
 
     def test_remove_redundant_inequalities(self):
 
-        # only inequalities
+        # minimal facets only inequalities
         A = np.array([[1., 1.], [-1., 1.], [0., -1.], [0., 1.], [0., 1.], [2., 2.]])
-        b = np.array([[1.], [1.], [1.], [1.], [2.], [2.]])
+        b = np.array([[1.],          [1.],      [1.],     [1.],     [2.],     [2.]])
         p = Polyhedron(A,b)
-        self.assertEqual(
-            [1, 2, 5],
-            sorted(p.minimal_facets())
-            )
+        mf = set(p.minimal_facets())
+        self.assertTrue(mf == set([1,2,0]) or mf == set([1,2,5]))
+        
+        # add nasty redundant inequality
+        A = np.zeros((1,2))
+        b = np.ones((1,1))
+        p.add_inequality(A, b)
+        mf = set(p.minimal_facets())
+        self.assertTrue(mf == set([1,2,0]) or mf == set([1,2,5]))
+
+        # remove redundant facets
         p.remove_redundant_inequalities()
-        A_min = np.array([[-1., 1.], [0., -1.], [2., 2.]])
-        b_min = np.array([[1.], [1.], [2.]])
+        A_min = np.array([[-1., 1.], [0., -1.], [1., 1.]])
+        b_min = np.array([[1.], [1.], [1.]])
         self.assertTrue(same_rows(
             np.hstack((A_min, b_min)),
             np.hstack((p.A, p.b))

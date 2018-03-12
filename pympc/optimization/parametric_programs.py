@@ -3,248 +3,8 @@ import numpy as np
 from copy import copy
 
 # internal inputs
-from pympc.optimization.pnnls import linear_program, quadratic_program
 from pympc.geometry.polyhedron import Polyhedron
-
-class LinearProgram(object):
-    """
-    Defines a linear program in the form min_{x in X} f' x.
-    """
-
-    def __init__(self, X, f=None):
-        """
-        Instantiates the linear program.
-
-        Arguments
-        ----------
-        X : instance of Polyhderon
-            Constraint set of the LP.
-        f : numpy.ndarray
-            Gradient of the cost function.
-        """
-
-        # make the cost vector a 2d matrix
-        if f is not None and len(f.shape) == 1:
-            f = np.reshape(f, (f.shape[0], 1))
-
-        # store inputs
-        self.X = X
-        self.f = f
-
-    def solve(self):
-        """
-        Returns the solution of the linear program.
-
-        Returns
-        ----------
-        sol : dict
-            Dictionary with the solution of the LP (see the documentation of pympc.optimization.pnnls.linear_program for the details of the fields of sol).
-        """
-
-        # check that a cost function has been set
-        if self.f is None:
-            raise ValueError('set a cost before solving the linear program.')
-
-        # solve the LP
-        sol = linear_program(
-            self.f,
-            self.X.A,
-            self.X.b,
-            self.X.C,
-            self.X.d
-            )
-
-        return sol
-
-    def solve_min_norm_one(self, W=None):
-        """
-        Sets the cost function to be the weighted norm one ||W x||_1 and solves the LP.
-        Adds a number of slack variables s equal to the size of x
-        The new optimization vector is [x' s']'.
-
-        Arguments
-        ----------
-        W : numpy.ndarray
-            Weight matrix of the cost function (if None it is set to the identity matrix).
-
-        Returns
-        ----------
-        sol : dict
-            Dictionary with the solution of the LP (see the documentation of pympc.optimization.pnnls.linear_program for the details of the fields of sol).
-            Slack variables are removed from the solution.
-        """
-
-        # problem size
-        n_ineq, n_x = self.X.A.shape
-        n_eq = self.X.C.shape[0]
-
-        # set W to identity if W is not passed
-        if W is None:
-            W = np.eye(n_x)
-
-        # new inequalities
-        A = np.vstack((
-            np.hstack((self.X.A, np.zeros((n_ineq, n_x)))),
-            np.hstack((W, -np.eye(n_x))),
-            np.hstack((-W, -np.eye(n_x)))
-            ))
-        b = np.vstack((
-            self.X.b,
-            np.zeros((n_x, 1)),
-            np.zeros((n_x, 1))
-            ))
-
-        # new equalities
-        C = np.hstack((
-            self.X.C,
-            np.zeros((n_eq, n_x))
-            ))
-        d = self.X.d
-
-        # new f
-        f = np.vstack((
-            np.zeros((n_x, 1)),
-            np.ones((n_x, 1))
-            ))
-
-        # solve linear program and remove slacks
-        sol = linear_program(f, A, b, C, d)
-        sol = self._remove_slacks(sol)
-
-        return sol
-
-    def solve_min_norm_inf(self, W=None):
-        """
-        Sets the cost function to be the weighted infinity norm ||W x||_inf and solves the LP. Adds one slack variable. The new optimization vector is [x' s]'.
-
-        Arguments
-        ----------
-        W : numpy.ndarray
-            Weight matrix of the cost function (if None it is set to the identity matrix).
-
-        Returns
-        ----------
-        sol : dict
-            Dictionary with the solution of the LP (see the documentation of pympc.optimization.pnnls.linear_program for the details of the fields of sol).
-            Slack variables are removed from the solution.
-        """
-
-        # problem size
-        n_ineq, n_x = self.X.A.shape
-        n_eq = self.X.C.shape[0]
-
-        # set W to identity if W is not passed
-        if W is None:
-            W = np.eye(n_x)
-
-        # new inequalities
-        A = np.vstack((
-            np.hstack((self.X.A, np.zeros((n_ineq, 1)))),
-            np.hstack((W, -np.ones((n_x, 1)))),
-            np.hstack((-W, -np.ones((n_x, 1))))
-            ))
-        b = np.vstack((
-            self.X.b,
-            np.zeros((n_x, 1)),
-            np.zeros((n_x, 1))
-            ))
-
-        # new equalities
-        C = np.hstack((self.X.C, np.zeros((n_eq, 1))))
-        d = self.X.d
-
-        # new f
-        f = np.vstack((
-            np.zeros((n_x, 1)),
-            np.ones((1, 1))
-            ))
-
-        # solve linear program and remove slacks
-        sol = linear_program(f, A, b, C, d)
-        sol = self._remove_slacks(sol)
-
-        return sol
-
-    def _remove_slacks(self, sol):
-        """
-        Removes the slack variables from the solution of the linear program.
-
-        Arguments
-        ----------
-        sol : dict
-            Dictionary with the solution of the LP with slack variables.
-
-        Returns
-        ----------
-        sol : dict
-            Dictionary with the solution of the LP without slack variables.
-        """
-
-        # problem size
-        n_ineq, n_x = self.X.A.shape
-        n_eq = self.X.C.shape[0]
-
-        # remove slack variables
-        if sol['min'] is not None:
-            sol['argmin'] = sol['argmin'][:n_x, :]
-            sol['active_set'] = [i for i in sol['active_set'] if i < n_ineq]
-            sol['multiplier_inequality'] = sol['multiplier_inequality'][:n_ineq, :]
-            if n_eq > 0:
-                sol['multiplier_equality'] = sol['multiplier_equality'][:n_eq, :]
-
-        return sol
-
-class QuadraticProgram(object):
-    """
-    Defines a quadratic program in the form min_{x in X} .5 x' H x + f' x.
-    """
-
-    def __init__(self, X, H, f=None):
-        """
-        Instantiates the quadratic program.
-
-        Arguments
-        ----------
-        X : instance of Polyhderon
-            Constraint set of the QP.
-        H : numpy.ndarray
-            Hessian of the cost function.
-        f : numpy.ndarray
-            Gradient of the cost function.
-        """
-
-        # make the cost vector a 2d matrix
-        if f is None:
-            f = np.zeros((H.shape[0], 1))
-        elif len(f.shape) == 1:
-            f = np.reshape(f, (f.shape[0], 1))
-
-        # store inputs
-        self.X = X
-        self.H = H
-        self.f = f
-
-    def solve(self):
-        """
-        Returns the solution of the quadratic program.
-
-        Returns
-        ----------
-        sol : dict
-            Dictionary with the solution of the QP (see the documentation of pympc.optimization.pnnls.quadratic_program for the details of the fields of sol).
-        """
-
-        # solve the LP
-        sol = quadratic_program(
-            self.H,
-            self.f,
-            self.X.A,
-            self.X.b,
-            self.X.C,
-            self.X.d
-            )
-
-        return sol
+from pympc.optimization.convex_programs import QuadraticProgram
 
 class MultiParametricQuadraticProgram(object):
     """
@@ -261,6 +21,7 @@ class MultiParametricQuadraticProgram(object):
         Arguments : numpy.ndarray
         """
         self.Huu = Huu
+        self.Huu_inv = np.linalg.inv(self.Huu)
         self.Hxx = Hxx
         self.Hux = Hux
         self.fu = fu
@@ -298,9 +59,13 @@ class MultiParametricQuadraticProgram(object):
             Critical region for the given active set.
         """
 
+        # ensure that LICQ will hold
+        Aua = self.Au[active_set, :]
+        if len(active_set) > 0  and np.linalg.matrix_rank(Aua) < Aua.shape[0]:
+            return None
+
         # split active and inactive
         inactive_set = [i for i in range(self.Ax.shape[0]) if i not in active_set]
-        Aua = self.Au[active_set, :]
         Aui = self.Au[inactive_set, :]
         Axa = self.Ax[active_set, :]
         Axi = self.Ax[inactive_set, :]
@@ -308,19 +73,18 @@ class MultiParametricQuadraticProgram(object):
         bi = self.b[inactive_set, :]
 
         # multipliers
-        Huu_inv = np.linalg.inv(self.Huu)
-        M = np.linalg.inv(Aua.dot(Huu_inv).dot(Aua.T))
-        pax = M.dot(Axa - Huu_inv.dot(self.Hux))
-        pa0 = - M.dot(ba + Huu_inv.dot(self.fu))
+        M = np.linalg.inv(Aua.dot(self.Huu_inv).dot(Aua.T))
+        pax = M.dot(Axa - Aua.dot(self.Huu_inv).dot(self.Hux))
+        pa0 = - M.dot(ba + Aua.dot(self.Huu_inv).dot(self.fu))
         px = np.zeros(self.Ax.shape)
-        p0 = np.zeros(self.Ax.shape[0])
+        p0 = np.zeros((self.Ax.shape[0], 1))
         px[active_set, :] = pax
         p0[active_set, :] = pa0
         p = {'x': px, '0':p0}
 
         # primary variables
-        ux = - Huu_inv.dot(self.Hux + Aua.T.dot(pax))
-        u0 = - Huu_inv.dot(self.fu + Aua.T.dot(pa0))
+        ux = - self.Huu_inv.dot(self.Hux + Aua.T.dot(pax))
+        u0 = - self.Huu_inv.dot(self.fu + Aua.T.dot(pa0))
         u = {'x':ux, '0':u0}
 
         # critical region
@@ -332,11 +96,12 @@ class MultiParametricQuadraticProgram(object):
             pa0,
             bi - Aui.dot(u0)
             ))
-        cr = Polyhedron(Acd, bcr)
+        cr = Polyhedron(Acr, bcr)
+        cr.normalize()
 
         # optimal value function V(x) = 1/2 x' Vxx x + Vx' x + V0
         Vxx = ux.T.dot(self.Huu).dot(ux) + 2.*self.Hux.T.dot(ux) + self.Hxx
-        Vx = (ux.T.dot(Huu.T) + self.Hux.T).dot(u0) + ux.T.dot(self.fu) + self.fx
+        Vx = (ux.T.dot(self.Huu.T) + self.Hux.T).dot(u0) + ux.T.dot(self.fu) + self.fx
         V0 = .5*u0.T.dot(self.Huu).dot(u0) + self.fu.T.dot(u0) + self.g
         V = {'xx':Vxx, 'x':Vx, '0':V0}
 
@@ -362,8 +127,8 @@ class MultiParametricQuadraticProgram(object):
 
         # first try the guess for the active set
         if active_set_guess is not None:
-            cr = self.explicit_solve_given_active_set(active_set)
-            if cr.contains(x):
+            cr = self.explicit_solve_given_active_set(active_set_guess)
+            if cr is not None and cr.contains(x):
                 return cr
 
         # otherwise solve the QP to get the active set
@@ -397,8 +162,9 @@ class MultiParametricQuadraticProgram(object):
         qp = QuadraticProgram(D, self.Huu, f)
         sol = qp.solve()
 
-        # "lift" optimal alue function
-        sol['min'] += .5*x.T.dot(self.Hxx).dot(x) + self.fx.T.dot(x) + self.g
+        # "lift" optimal value function
+        if sol['min'] is not None:
+            sol['min'] += .5*x.T.dot(self.Hxx).dot(x) + self.fx.T.dot(x) + self.g
 
         return sol
 
@@ -420,7 +186,7 @@ class MultiParametricQuadraticProgram(object):
         """
 
         # start from the origin and guess its active set
-        x = np.zeros((self.A.shape[0], 1))
+        x = np.zeros(self.fx.shape)
         active_set_guess = []
         x_buffer = [(x, active_set_guess)]
         crs_found = []
@@ -429,30 +195,37 @@ class MultiParametricQuadraticProgram(object):
         while len(x_buffer) > 0:
 
             # get critical region for the first point in the buffer
-            cr = self.explicit_solve_given_point(x_buffer[0])
+            cr = self.explicit_solve_given_point(*x_buffer[0])
             del x_buffer[0]
 
             # if feasible
             if cr is not None:
 
+                # clean buffer from the points covered by the new critical region
+                x_buffer = [x for x in x_buffer if not cr.contains(x[0])]
+
                 # step outside each minimal facet
-                for i in cr.minimal_facets:
-                    x = cr.facet_center(i) + step_size*cr.A[i:i+1,:].T
+                try:
+                    for i in cr.minimal_facets():
+                        x = cr.facet_center(i) + step_size*cr.A[i:i+1,:].T
 
-                    # check if the new point has been already explored
-                    if not any([cr_found.contains(x) for cr_found in crs_found]):
+                        # check if the new point has been already explored
+                        if not any([cr_found.contains(x) for cr_found in crs_found]):
 
-                        # guess the active set on the other side of the facet
-                        if i in cr.active_set:
-                            active_set_guess = [j for j in cr.active_set if j != i]
-                        else:
-                            active_set_guess = sorted(cr.active_set + [i])
+                            # guess the active set on the other side of the facet
+                            if i in cr.active_set:
+                                active_set_guess = [j for j in cr.active_set if j != i]
+                            else:
+                                active_set_guess = sorted(cr.active_set + [i])
 
-                        # add to the buffes
-                        x_buffer.append((x, active_set_guess))
+                            # add to the buffes
+                            x_buffer.append((x, active_set_guess))
+                except TypeError:
+                    import pdb; pdb.set_trace()
 
                 # if feasible, add the the list of critical regions
                 crs_found.append(cr)
+                print(str(cr.active_set))
 
         return ExplicitSolution(crs_found)
                 

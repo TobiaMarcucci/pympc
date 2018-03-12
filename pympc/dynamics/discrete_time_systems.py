@@ -4,7 +4,7 @@ from scipy.linalg import block_diag, solve_discrete_are
 
 # internal imports
 from pympc.geometry.polyhedron import Polyhedron
-from pympc.optimization.mathematical_programs import LinearProgram
+from pympc.optimization.convex_programs import LinearProgram
 from pympc.dynamics.discretization_methods import explicit_euler, zero_order_hold
 from pympc.dynamics.utils import check_affine_system
 
@@ -93,8 +93,8 @@ class LinearSystem:
     def solve_dare(self, Q, R):
         """
         Returns the solution of the Discrete Algebraic Riccati Equation (DARE).
-        Consider the linear quadratic control problem V*(x(0)) = min_{x(.), u(.)} 1/2 sum_{t=0}^inf x(t)' Q x(t) + u(t)' R u(t) subject to x(t+1) = A x(t) + B u(t).
-        The optimal solution is u(0) = K x(0) which leads to V*(x(0)) = 1/2 x(0)' P x(0).
+        Consider the linear quadratic control problem V*(x(0)) = min_{x(.), u(.)} 1/2 sum_{t=0}^inf x'(t) Q x(t) + u'(t) R u(t) subject to x(t+1) = A x(t) + B u(t).
+        The optimal solution is u(0) = K x(0) which leads to V*(x(0)) = 1/2 x'(0) P x(0).
         The pair A, B is assumed to be controllable.
 
         Arguments
@@ -577,6 +577,7 @@ def mcais(A, X, tol=1.e-9):
             convergence = True
         else:
             t += 1
+    O_inf.remove_redundant_inequalities()
 
     return O_inf, t
 

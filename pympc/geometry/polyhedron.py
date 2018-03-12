@@ -8,7 +8,7 @@ from matplotlib.path import Path
 import matplotlib.patches as patches
 
 # pympc imports
-from pympc.optimization.mathematical_programs import LinearProgram
+from pympc.optimization.convex_programs import LinearProgram
 from pympc.geometry.utils import nullspace_basis, plane_through_points
 
 class Polyhedron:
@@ -390,10 +390,9 @@ class Polyhedron:
             constraint = Polyhedron(E_minimal, f_relaxed)
             lp = LinearProgram(constraint, -E[i,:].T)
             sol = lp.solve()
-            cost_i = - sol['min']
 
             # remove redundant facets from the list
-            if cost_i - f[i] < tol or np.isnan(cost_i):
+            if  - sol['min'] - f[i] < tol:
                 minimal_facets.remove(i)
 
         return minimal_facets
