@@ -8,8 +8,38 @@ from pympc.dynamics.discrete_time_systems import AffineSystem, PieceWiseAffineSy
 from pympc.optimization.parametric_programs import MultiParametricQuadraticProgram
 
 class ModelPredictiveController:
+    """
+    Model predictive controller for linear systems, it solves the optimal control problem
+    V*(x(0)) := min_{x(.), u(.)} 1/2 sum_{t=0}^{N-1} x'(t) Q x(t) + u'(t) R u(t) + \frac{1}{2} x'(N) P x(N)
+               s.t. x(t+1) = A x(t) + B u(t), t=0, ..., N-1,
+                    (x(t), u(t)) in D, t=0, ..., N-1,
+                    x(N) in X_N,
+    in order to get the optimal control seuquence (u(0), ..., u(N-1)).
+    """
 
     def __init__(self, S, N, Q, R, P, D, X_N):
+        """
+        Initilizes the controller.
+
+        Arguments
+        ----------
+        S : instance of LinerSystem
+            Linear system to be controlled.
+        N : int
+            Horizon of the optimal control problem.
+        Q : numpy.ndarray
+            Quadratic cost for the state.
+        R : numpy.ndarray
+            Quadratic cost for the input.
+        P : numpy.ndarray
+            Quadratic cost for the terminal state.
+        D : instance of Polyhedron
+            Stage constraint for state and inputs.
+        X_N : instance of Polyhedron
+            Terminal set.
+        """
+
+        # store inputs
         self.S = S
         self.N = N
         self.Q = Q
@@ -17,82 +47,177 @@ class ModelPredictiveController:
         self.P = P
         self.D = D
         self.X_N = X_N
-        self.mpqp = self.condense_program()
+
+        # initilize explicit solution
         self.explicit_solution = None
-        return
+
+        # condense mpqp
+        self.mpqp = self.condense_program()
 
     def condense_program(self):
+        """
+        Generates and stores the optimal control problem in condensed form.
+
+        Returns
+        ----------
+        instance of MultiParametricQuadraticProgram
+            Condensed mpQP.
+        """
+
+        # create fake PWA system and use PWA condenser
         c = np.zeros((self.S.nx, 1))
         S = AffineSystem(self.S.A, self.S.B, c)
         S = PieceWiseAffineSystem([S], [self.D])
         mode_sequence = [0]*self.N
+
         return condense_optimal_control_problem(S, self.Q, self.R, self.P, self.X_N, mode_sequence)
 
     def feedforward(self, x):
         """
-        Given the state of the system, returns the optimal sequence of N inputs and the related cost.
+        Given the state x of the system, returns the optimal sequence of N inputs and the related cost.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            State of the system.
+
+        Returns
+        ----------
+        u_feedforward : list of numpy.ndarray
+            Optimal control signals for t = 0, ..., N-1.
+        V : float
+            Optimal value function for the given state.
         """
         sol = self.mpqp.implicit_solve_fixed_point(x)
         if sol['min'] is None:
             return None, None
         u_feedforward = [sol['argmin'][self.S.nu*i : self.S.nu*(i+1), :] for i in range(self.N)]
-        return u_feedforward, sol['min']
+        V = sol['min']
+        return u_feedforward, V
 
     def feedback(self, x):
         """
-        Returns the a single input vector (the first of feedforward(x)).
+        Returns the optimal feedback for the given state x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            State of the system.
+
+        Returns
+        ----------
+        u_feedback : numpy.ndarray
+            Optimal feedback.
         """
+
+        # get feedforward and extract first input
         u_feedforward = self.feedforward(x)[0]
         if u_feedforward is None:
             return None
+
         return u_feedforward[0]
 
-    def store_explicit_solution(self, verbose):
+    def store_explicit_solution(self, **kwargs):
         """
-        Arguments
+        Solves the mpqp (condensed optimal control problem) explicitly.
+
+        Returns
         ----------
-        verbose : bool
-            If True it prints the number active sets found at each iteration of the solver.
+        instance of ExplicitSolution
+            Explicit solution of the underlying mpqp problem.
         """
-        self.explicit_solution = self.mpqp.solve(verbose=verbose)
+
+        self.explicit_solution = self.mpqp.solve(**kwargs)
 
     def feedforward_explicit(self, x):
         """
-        Finds the critical region where the state x is, and returns the PWA feedforward.
+        Finds the critical region where the state x is and returns the optimal feedforward and the cost to go.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            State of the system.
+
+        Returns
+        ----------
+        u_feedforward : list of numpy.ndarray
+            Optimal control signals for t = 0, ..., N-1.
+        V : float
+            Optimal value function for the given state.
         """
+
+        # check that the explicit solution has been found
         if self.explicit_solution is None:
             raise ValueError('explicit solution not stored.')
+
+        # evaluate lookup table
         u = self.explicit_solution.u(x)
-        u = [u[t*self.S.nu:(t+1)*self.S.nu, :] for t in range(self.N)]
+        if u is not None:
+            u = [u[t*self.S.nu:(t+1)*self.S.nu, :] for t in range(self.N)]
+
         return u, self.explicit_solution.V(x)
 
     def feedback_explicit(self, x):
         """
-        Returns the a single input vector (the first of feedforward_explicit(x)).
+        Finds the critical region where the state x is and returns the optimal feedback for the given state x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            State of the system.
+
+        Returns
+        ----------
+        u_feedback : numpy.ndarray
+            Optimal feedback.
         """
+
+        # get feedforward and extract first input
         u_feedforward = self.feedforward_explicit(x)[0]
         if u_feedforward is None:
             return None
+
         return u_feedforward[0]
 
     def plot_state_space_partition(self, print_active_set=False, **kwargs):
         """
         Finds the critical region where the state x is, and returns the PWA feedforward.
+
+        Arguments
+        ----------
+        print_active_set : bool
+            If True it prints the active set of each critical region in its center.
         """
+
+        # check that the required plot is 2d and that the solution is available
         if self.S.nx != 2:
             raise ValueError('can plot only 2-dimensional partitions.')
         if self.explicit_solution is None:
             raise ValueError('explicit solution not stored.')
+
+        # plot every critical region with random colors
         for cr in self.explicit_solution.critical_regions:
             cr.polyhedron.plot(facecolor=np.random.rand(3), **kwargs)
+
+            # if required print active sets
             if print_active_set:
                 plt.text(cr.polyhedron.center[0], cr.polyhedron.center[1], str(cr.active_set))
 
-    def plot_optimal_value_function(self, resolution=200., **kwargs):
+    def plot_optimal_value_function(self, resolution=100., **kwargs):
+        """
+        Plots the level sets of the optimal value function V*(x).
+
+        Arguments
+        ----------
+        resolution : float
+            Size of the grid for the contour plot.
+        """
 
         # check dimension of the state
         if self.S.nx != 2:
             raise ValueError('can plot only 2-dimensional value functions.')
+        if self.explicit_solution is None:
+            raise ValueError('explicit solution not stored.')
 
         # get feasible set
         feasible_set = self.mpqp.get_feasible_set()
