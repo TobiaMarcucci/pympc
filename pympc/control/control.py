@@ -1,5 +1,6 @@
 # external imports
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.linalg import block_diag
 
 # internal inputs
@@ -46,8 +47,14 @@ class ModelPredictiveController:
             return None
         return u_feedforward[0]
 
-    def store_explicit_solution(self):
-        self.explicit_solution = self.mpqp.solve()
+    def store_explicit_solution(self, verbose):
+        """
+        Arguments
+        ----------
+        verbose : bool
+            If True it prints the number active sets found at each iteration of the solver.
+        """
+        self.explicit_solution = self.mpqp.solve(verbose=verbose)
 
     def feedforward_explicit(self, x):
         """
@@ -55,7 +62,9 @@ class ModelPredictiveController:
         """
         if self.explicit_solution is None:
             raise ValueError('explicit solution not stored.')
-        return self.explicit_solution.u(x), self.explicit_solution.V(x)
+        u = self.explicit_solution.u(x)
+        u = [u[t*self.S.nu:(t+1)*self.S.nu, :] for t in range(self.N)]
+        return u, self.explicit_solution.V(x)
 
     def feedback_explicit(self, x):
         """
@@ -65,6 +74,49 @@ class ModelPredictiveController:
         if u_feedforward is None:
             return None
         return u_feedforward[0]
+
+    def plot_state_space_partition(self, print_active_set=False, **kwargs):
+        """
+        Finds the critical region where the state x is, and returns the PWA feedforward.
+        """
+        if self.S.nx != 2:
+            raise ValueError('can plot only 2-dimensional partitions.')
+        if self.explicit_solution is None:
+            raise ValueError('explicit solution not stored.')
+        for cr in self.explicit_solution.critical_regions:
+            cr.polyhedron.plot(facecolor=np.random.rand(3), **kwargs)
+            if print_active_set:
+                plt.text(cr.polyhedron.center[0], cr.polyhedron.center[1], str(cr.active_set))
+
+    def plot_optimal_value_function(self, resolution=200., **kwargs):
+
+        # check dimension of the state
+        if self.S.nx != 2:
+            raise ValueError('can plot only 2-dimensional value functions.')
+
+        # get feasible set
+        feasible_set = self.mpqp.get_feasible_set()
+
+        # create box containing the feasible set
+        x_max = max([v[0,0] for v in feasible_set.vertices])
+        x_min = min([v[0,0] for v in feasible_set.vertices])
+        y_max = max([v[1,0] for v in feasible_set.vertices])
+        y_min = min([v[1,0] for v in feasible_set.vertices])
+
+        # create grid
+        x = np.arange(x_min, x_max, (x_max-x_min)/resolution)
+        y = np.arange(y_min, y_max, (y_max-y_min)/resolution)
+        X, Y = np.meshgrid(x, y)
+
+        # evaluate grid
+        zs = np.array([self.explicit_solution.V(np.array([[x],[y]])) for x,y in zip(np.ravel(X), np.ravel(Y))])
+        Z = zs.reshape(X.shape)
+
+        # plot
+        feasible_set.plot(**kwargs)
+        cp = plt.contour(X, Y, Z)
+        plt.colorbar(cp)
+        plt.title(r'$V^*(x)$')
 
 def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
     """

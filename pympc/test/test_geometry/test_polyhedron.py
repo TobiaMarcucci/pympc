@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from itertools import product
 from scipy.linalg import block_diag
+from copy import copy
 
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron, convex_hull_method
@@ -211,6 +212,26 @@ class TestPolyhedron(unittest.TestCase):
             residual = E.dot(np.array([[n]])) - f
             self.assertAlmostEqual(np.min(np.abs(residual)), 0.)
 
+        # add another feasible equality (raises 'equality constraints C x = d do not have a nullspace.')
+        C = np.array([[1., -1.]])
+        d = np.zeros((1, 1))
+        p1 = copy(p)
+        p1.add_equality(C, d)
+        self.assertRaises(ValueError, p1._remove_equalities)
+
+        # add another unfeasible equality (raises 'equality constraints C x = d do not have a nullspace.')
+        C = np.array([[0., 1.]])
+        d = np.array([[5.]])
+        p1.add_equality(C, d)
+        self.assertRaises(ValueError, p1._remove_equalities)
+
+        # add a linearly dependent equality (raises 'equality constraints C x = d are linearly dependent.')
+        C = 2*np.ones((1, 2))
+        d = np.ones((1, 1))
+        p2 = copy(p)
+        p2.add_equality(C, d)
+        self.assertRaises(ValueError, p2._remove_equalities)
+
     def test_remove_redundant_inequalities(self):
 
         # minimal facets only inequalities
@@ -274,7 +295,13 @@ class TestPolyhedron(unittest.TestCase):
             np.hstack((p.A, p.b))
             ))
 
-        # empty polyhderon
+        # add unfeasible equality (raises: 'empty polyhedron, cannot remove redundant inequalities.')
+        C = np.ones((1, 2))
+        d = -np.ones((1, 1))
+        p.add_equality(C, d)
+        self.assertRaises(ValueError, p.remove_redundant_inequalities)
+
+        # empty polyhderon (raises: 'empty polyhedron, cannot remove redundant inequalities.')
         x_min = np.ones((2,1))
         x_max = np.zeros((2,1))
         p = Polyhedron.from_bounds(x_min, x_max)

@@ -164,19 +164,24 @@ class MultiParametricQuadraticProgram(object):
 
         # "lift" optimal value function
         if sol['min'] is not None:
-            sol['min'] += .5*x.T.dot(self.Hxx).dot(x) + self.fx.T.dot(x) + self.g
+            sol['min'] += (.5*x.T.dot(self.Hxx).dot(x) + self.fx.T.dot(x) + self.g)[0,0]
 
         return sol
 
-    def solve(self, step_size=1.e-5):
+    def solve(self, step_size=1.e-5, verbose=False):
         """
         Returns the explicit solution of the mpQP.
         It assumes that the facet-to-facet property holds (i.e. each facet of a critical region is shared with another single critical region).
+        The following is a simple home-made algorithm.
+        For every critical region, it looks at its non-redundat inequalities and guesses the active set beyond them.
+        It then solves the KKTs for the given active set and check if the guess was right, if not it solves a QP to get the right active set and solves the KKTs again. 
 
         Arguments
         ----------
         step_size : float
             Size of the step taken to explore a new critical region from the facet of its parent.
+        verbose : bool
+            If True it prints the number active sets found at each iteration of the solver.
 
         Returns
         ----------
@@ -205,37 +210,54 @@ class MultiParametricQuadraticProgram(object):
                 x_buffer = [x for x in x_buffer if not cr.contains(x[0])]
 
                 # step outside each minimal facet
-                try:
-                    for i in cr.minimal_facets():
-                        x = cr.facet_center(i) + step_size*cr.A[i:i+1,:].T
+                for i in cr.minimal_facets():
+                    x = cr.facet_center(i) + step_size*cr.A[i:i+1,:].T
 
-                        # check if the new point has been already explored
-                        if not any([cr_found.contains(x) for cr_found in crs_found]):
+                    # check if the new point has been already explored
+                    if not any([cr_found.contains(x) for cr_found in crs_found]):
 
-                            # guess the active set on the other side of the facet
-                            if i in cr.active_set:
-                                active_set_guess = [j for j in cr.active_set if j != i]
-                            else:
-                                active_set_guess = sorted(cr.active_set + [i])
+                        # guess the active set on the other side of the facet
+                        if i in cr.active_set:
+                            active_set_guess = [j for j in cr.active_set if j != i]
+                        else:
+                            active_set_guess = sorted(cr.active_set + [i])
 
-                            # add to the buffes
-                            x_buffer.append((x, active_set_guess))
-                except TypeError:
-                    import pdb; pdb.set_trace()
+                        # add to the buffes
+                        x_buffer.append((x, active_set_guess))
 
                 # if feasible, add the the list of critical regions
                 crs_found.append(cr)
-                print(str(cr.active_set))
+                if verbose:
+                    print('Critical region found: ' + str(len(crs_found)) + '.     \r'),
 
         return ExplicitSolution(crs_found)
-                
+
+    def get_feasible_set(self):
+        """
+        Returns the feasible set of the mqQP, i.e. {x | exists u: Au u + Ax x <= b}.
+
+        Returns
+        ----------
+        instance of Polyhedron
+            Feasible set.
+        """
+
+        # constraint set
+        C = Polyhedron(
+            np.hstack((self.Ax, self.Au)),
+            self.b
+            )
+
+        # feasible set
+        return C.project_to(range(self.Ax.shape[1]))
+
 class CriticalRegion(object):
     """
     Critical Region (CR) of a multi-parametric quadratic program.
     A CR is the region of space where a fixed active set is optimal.
     """
 
-    def __init__(self, active_set, u, p, V, polytope):
+    def __init__(self, active_set, u, p, V, polyhedron):
         """
         Instatiates the critical region.
 
@@ -249,7 +271,7 @@ class CriticalRegion(object):
             Explicit dual solution for the given active set (with keys: 'x' for the linear term, '0' for the offset term).
         V : dict
             Explicit expression of the optimal value function for the given active set (with keys: 'xx' for the quadratic term, 'x' for the linear term, '0' for the offset term).
-        polytope : instance of Polyhedron
+        polyhedron : instance of Polyhedron
             Region of space where the given active set is actually optimal.
         """
 
@@ -257,7 +279,7 @@ class CriticalRegion(object):
         self._u = u
         self._p = p
         self._V = V
-        self.polytope = polytope
+        self.polyhedron = polyhedron
 
     def contains(self, x):
         """
@@ -273,7 +295,7 @@ class CriticalRegion(object):
         bool
             True if the point is contained in the critical region, False otherwise.
         """
-        return self.polytope.contains(x)
+        return self.polyhedron.contains(x)
 
     def minimal_facets(self):
         """
@@ -285,11 +307,12 @@ class CriticalRegion(object):
             List of indices of the non-redundant inequalities.
         """
 
-        return self.polytope.minimal_facets()
+        return self.polyhedron.minimal_facets()
 
     def facet_center(self, i):
         """
         Returns the Cebyshec center of the i-th facet.
+        Implementation note: it is necessary to add the facet as an equality constraint, otherwise if we add it as an inequality the radius of the facet is zero and the center ends up in a vertex of the facet itself, and stepping out the facet starting from  vertex will not find the neighbour critical region.
 
         Arguments
         ----------
@@ -302,8 +325,12 @@ class CriticalRegion(object):
             Chebyshev center of the i-th facet.
         """
 
-        # add an equality to the original polytope
-        facet = copy(self.polytope)
+        # handle 1-dimensional case
+        if self.polyhedron.A.shape[1] == 1:
+            return np.linalg.inv(self.polyhedron.A[i:i+1, :]).dot(self.polyhedron.b[i:i+1, :])
+
+        # add an equality to the original polyhedron
+        facet = copy(self.polyhedron)
         facet.add_equality(
             facet.A[i:i+1, :],
             facet.b[i:i+1, :]
@@ -372,9 +399,9 @@ class CriticalRegion(object):
         Returns
         ----------
         numpy.ndarray
-            Left hand side of self.polytope.
+            Left hand side of self.polyhedron.
         """
-        return self.polytope.A
+        return self.polyhedron.A
 
     @property
     def b(self):
@@ -384,9 +411,9 @@ class CriticalRegion(object):
         Returns
         ----------
         numpy.ndarray
-            Right hand side of self.polytope.
+            Right hand side of self.polyhedron.
         """
-        return self.polytope.b
+        return self.polyhedron.b
 
 class ExplicitSolution(object):
     """

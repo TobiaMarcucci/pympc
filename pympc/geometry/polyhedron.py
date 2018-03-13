@@ -437,6 +437,10 @@ class Polyhedron:
 
         # change of variables
         N = nullspace_basis(self.C)
+        if N.shape[1] == 0:
+            raise ValueError('equality constraints C x = d do not have a nullspace.')
+        if N.shape[1] != self.C.shape[1] - self.C.shape[0]:
+            raise ValueError('equality constraints C x = d are linearly dependent.')
         R = nullspace_basis(N.T)
 
         # new representation
