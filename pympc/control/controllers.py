@@ -283,12 +283,16 @@ def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
     Q_bar = block_diag(*[Q for i in range(N)] + [P])
     R_bar = block_diag(*[R for i in range(N)])
 
-    # get blocks for condensed objective
-    Huu = R_bar + B_bar.T.dot(Q_bar).dot(B_bar)
-    Hux = B_bar.T.dot(Q_bar).dot(A_bar)
-    Hxx = A_bar.T.dot(Q_bar).dot(A_bar)
-    fu = B_bar.T.dot(Q_bar).dot(c_bar)
-    fx = A_bar.T.dot(Q_bar).dot(c_bar)
+    # get blocks quadratic term objective
+    H = dict()
+    H['uu'] = R_bar + B_bar.T.dot(Q_bar).dot(B_bar)
+    H['ux'] = B_bar.T.dot(Q_bar).dot(A_bar)
+    H['xx'] = A_bar.T.dot(Q_bar).dot(A_bar)
+
+    # get blocks linear term objective
+    f = dict()
+    f['u'] = B_bar.T.dot(Q_bar).dot(c_bar)
+    f['x'] = A_bar.T.dot(Q_bar).dot(c_bar)
     g = c_bar.T.dot(Q_bar).dot(c_bar)
 
     # stack constraint matrices
@@ -302,11 +306,12 @@ def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
     h_bar = np.vstack([D.b for D in D_sequence] + [X_N.b])
 
     # get blocks for condensed contraints
-    Au = G_bar + F_bar.dot(B_bar)
-    Ax = F_bar.dot(A_bar)
+    A = dict()
+    A['u'] = G_bar + F_bar.dot(B_bar)
+    A['x'] = F_bar.dot(A_bar)
     b = h_bar - F_bar.dot(c_bar)
 
-    return MultiParametricQuadraticProgram(Huu, Hux, Hxx, fu, fx, g, Au, Ax, b)
+    return MultiParametricQuadraticProgram(H, f, g, A, b)
 
 
 
@@ -329,8 +334,8 @@ def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
 
 class HybridModelPredictiveController(object):
 
-	def __init__(self, S, N, Q, R, P, X_N):
-		"""
+    def __init__(self, S, N, Q, R, P, X_N):
+        """
         Initilizes the controller.
 
         Arguments
@@ -374,10 +379,10 @@ class HybridModelPredictiveController(object):
         In order to express it in mixed-integer form, for t = 0, ..., N-1, we introduce the auxiliary variables z_i(t), and we set
         x(t+1) = sum_{i=1}^s z_i(t).
         We now reformulate the dynamics as
-        z_i(t) >= alpha_ii delta_i(t),
-        z_i(t) <= beta_ii delta_i(t),
-        A_i x(t) + B_i u(t) + c_i - z_i(t) >= sum_{j=1, j!=i}^s alpha_ij delta_j(t),
-        A_i x(t) + B_i u(t) + c_i - z_i(t) <= sum_{j=1, j!=i}^s beta_ij delta_j(t).
+        z_i(t) >= alpha_ii delta_i(t),                                               (1)
+        z_i(t) <= beta_ii delta_i(t),                                                (2)
+        A_i x(t) + B_i u(t) + c_i - z_i(t) >= sum_{j=1, j!=i}^s alpha_ij delta_j(t), (3)
+        A_i x(t) + B_i u(t) + c_i - z_i(t) <= sum_{j=1, j!=i}^s beta_ij delta_j(t).  (4)
         Here alpha_ij (<< 0) and beta_ij (>> 0) are both vectors of bigMs and delta_j(t) is a binary variable (equal to 1 if the system is in mode j, zero otherwise).
         If the system is in mode k at time t (i.e. delta_k(t) = 1), we have that
         z_i(t) = 0, for all i != k,
@@ -409,24 +414,24 @@ class HybridModelPredictiveController(object):
 
         # outer loop over the number of affine systems
         for i, S_i in enumerate(self.S.affine_systems):
-        	alpha_i = []
-        	beta_i = []
-        	A_i = np.hstack((S_i.A, S_i.B))
+            alpha_i = []
+            beta_i = []
+            A_i = np.hstack((S_i.A, S_i.B))
 
-        	# inner loop over the number of affine systems
-        	for j, S_j in enumerate(self.S.affine_systems):
-        		alpha_ij = []
-        	    beta_ij = []
-        	    lp = LinearProgram(D_j)
+            # inner loop over the number of affine systems
+            for j, S_j in enumerate(self.S.affine_systems):
+                alpha_ij = []
+                beta_ij = []
+                lp = LinearProgram(D_j)
 
-        	    # solve two LPs for each component of the state vector
+                # solve two LPs for each component of the state vector
                 for k in range(S_i.nx):
-                	lp.f = A_i[k:k+1,:].T
-                	sol = lp.solve()
-                	alpha_ij.append(sol['min'] + S_i.c[k,0])
-                	lp.f = - lp.f
-                	sol = lp.solve()
-                	beta_ij.append(- sol['min'] + S_i.c[k,0])
+                    lp.f = A_i[k:k+1,:].T
+                    sol = lp.solve()
+                    alpha_ij.append(sol['min'] + S_i.c[k,0])
+                    lp.f = - lp.f
+                    sol = lp.solve()
+                    beta_ij.append(- sol['min'] + S_i.c[k,0])
 
                 # close inner loop appending bigMs
                 alpha_i.append(np.vstack(alpha_ij))
@@ -444,7 +449,7 @@ class HybridModelPredictiveController(object):
         Each one of the s domains of the PWA system has the form
         D_i = {(x,u) | F_i x + G_i u <= h_i}.
         The bigM reformulation (for t = 0, ..., N-1) of this constraint is
-        F_i x(t) + G_i u(t) <= h_i + sum_{j=1, j!=i}^s gamma_ij delta_j(t).
+        F_i x(t) + G_i u(t) <= h_i + sum_{j=1, j!=i}^s gamma_ij delta_j(t). (5)
         Here gamma_ij (>> 0) is a vector of bigMs and delta_j(t) is a binary variable (equal to 1 if the system is in mode j, zero otherwise).
         If the system is in mode k at time t (i.e. delta_k(t) = 1), we have that
         F_i x(t) + G_i u(t) <= h_i + gamma_ik, for all i != k,
@@ -488,30 +493,219 @@ class HybridModelPredictiveController(object):
         return gamma
 
     def _condense_program(self):
-    	Ex, Eu, Ez, Ed, e = self._build_inequalities()
-    	Ex_bar, Eu_bar, Ez_bar, Ed_bar, e_bar = self._build_inequalities(Ex, Eu, Ez, Ed, e)
-    	A_bar, Bz_bar = slef._condense_equalities()
-    	H, f, g, A, b = _condense_cost() # with H, f, A dictionaries
-    	return MultiParametricMixedIntegerQuadraticProgram(H, f, g, A, b)
+        """
+        Constructs a multiparametric Mixed Integer Quadratic Program (mpMIQP) in the form
+                                |u|' |Huu   0 0   0| |u|
+                                |z|  |  0 Hzz 0 Hzx| |z|
+        V(x) := min_{u,z,d} 1/2 |d|  |        0   0| |d|
+                                |x|  |sym       Hxx| |x|
+                      s.t. Au u + Az z + Ad d + Ax x <= b
+        where:
+        u := (u(0), ..., u(N-1)), continuous,
+        z := (z(0), ..., z(N-1)), continuous,
+        d := (d(0), ..., d(N-1)), binary,
+        while x  is the intial condition.
+
+        Returns
+        ----------
+        mpmiqp : instance of MultiParametricMixedIntegerQuadraticProgram
+            Parametric program above.
+        """
+
+        # construct  blocks and condense constraints
+        E = self._build_inequalities()
+        E_bar = self._condense_inequalities(E)
+        A_bar, Bz_bar = self._condense_equalities()
+
+        # objective of the mpmiqp
+        H = dict()
+        H['uu'] = block_diag(*[self.R for i in range(self.N)])
+        Q_bar = block_diag(*[self.Q for i in range(self.N)] + [self.P])
+        H['zz'] = Bz_bar.T.dot(Q_bar).dot(Bz_bar)
+        H['zx'] = Bz_bar.T.dot(Q_bar).dot(A_bar)
+        H['xx'] = A_bar.T.dot(Q_bar).dot(A_bar)
+
+        # constraints of the mpmiqp
+        A = dict()
+        A['u'] = E_bar['u']
+        A['z'] = E_bar['z'] + E_bar['x'].dot(Bz_bar)
+        A['d'] = E_bar['d']
+        A['x'] = E_bar['x'].dot(A_bar)
+        b = E_bar['0']
+
+        return MultiParametricMixedIntegerQuadraticProgram(H, A, b)
 
     def _build_inequalities(self):
-    	pass
+        """
+        Puts equations (1-4) from the documentation of _get_bigM_dynamics(), equation (5) from the documentation of _get_bigM_domains(), and the condition
+        sum_{i=1}^s delta_i(t) = 1 (6)
+        in the form
+        Ex x(t) + Eu u(t) + Ez z(t) + Ed delta(t) <= E0
+        where z(t) := (z_1(t), ..., z_s(t)) and delta(t) := (delta_1(t), ..., delta_s(t)).
 
-    def _condense_equlities(self):
-    	pass
+        Returns
+        ----------
+        E : dict of numpy.ndarray
+            Entries: 'x', 'u', 'z', 'd', '0' (see the defintion above).
+        """
 
-    def _condense_inequlities(self):
-    	pass
+        # rename dimensions
+        nx = self.S.nx
+        nu = self.S.nu
+        s  = self.S.nm
+        n_ineq = sum([D.A.shape[0] for D in self.S.domains])
 
-    def _condense_cost(self):
-    	pass
+        # build blocks
+        E = dict()
+        E['x'] = np.vstack((
+            np.zeros((nx*s, nx)),                             # Equation 1
+            np.zeros((nx*s, nx)),                             # Equation 2
+            np.vstack([-S.A for S in self.S.affine_systems]), # Equation 3
+            np.vstack([S.A for S in self.S.affine_systems]),  # Equation 4
+            np.vstack([D.A[:,:nx] for D in self.S.domains]),  # Equation 5
+            np.zeros((2, nx))                                 # Equation 6
+            ))
+        E['u'] = np.vstack((
+            np.zeros((nx*s, nu)),                             # Equation 1
+            np.zeros((nx*s, nu)),                             # Equation 2
+            np.vstack([-S.B for S in self.S.affine_systems]), # Equation 3
+            np.vstack([S.B for S in self.S.affine_systems]),  # Equation 4
+            np.vstack([D.A[:,nx:] for D in self.S.domains]),  # Equation 5
+            np.zeros((2, nu))                                 # Equation 6
+            ))
+        E['z'] = np.vstack((
+            block_diag(*[-np.eye(nx)]*s), # Equation 1
+            block_diag(*[np.eye(nx)]*s),  # Equation 2
+            block_diag(*[np.eye(nx)]*s),  # Equation 3
+            block_diag(*[-np.eye(nx)]*s), # Equation 4
+            np.zeros((n_ineq, nx*s)),     # Equation 5
+            np.zeros((2, nx*s))           # Equation 6
+            ))
+        E['d'] = np.vstack((
+            block_diag(*[self._alpha[i][i] for i in range(s)]), # Equation 1
+            -block_diag(*[self._beta[i][i] for i in range(s)]), # Equation 2
+            self._bigM_matrices(self._alpha),                   # Equation 3
+            -self._bigM_matrices(self._beta),                   # Equation 4
+            -self._bigM_matrices(self._gamma),                  # Equation 5
+            np.vstack((np.ones((1, s)), -np.ones((1, s))))      # Equation 6
+            ))
+        E['0'] = np.vstack((
+            np.zeros((nx*s, 1)),                              # Equation 1
+            np.zeros((nx*s, 1)),                              # Equation 2
+            np.vstack([S.c for S in self.S.affine_systems]),  # Equation 3
+            np.vstack([-S.c for S in self.S.affine_systems]), # Equation 4
+            np.vstack([D.b for D in self.S.domains]),         # Equation 5
+            np.array([[1.],[-1.]])                            # Equation 6
+            ))
+
+        return E
+
+    @staticmethod
+    def _bigM_matrices(bigM):
+        """
+        Builds a matrix with the form
+        |         0 bigM[1][2] bigM[1][3] ...|
+        |bigM[2][1]          0 bigM[2][3] ...|
+        |bigM[3][1] bigM[3][2]          0 ...|
+        |       ...        ...        ... ...|
+        
+        Arguments
+        ----------
+        bigM : list of lists of numpy.ndarray
+            bigM[i][j] with i and j in {1, ..., s} is a vector of bigMs.
+        """
+
+        # initialize the ouptut with zeros
+        s = len(bigM)
+        n_ineq_i = [bigM_i[0].shape[0] for bigM_i in bigM]
+        mat = np.zeros((sum(n_ineq_i), s))
+
+        # assemble with bigMs
+        for i in range(s):
+            for j in range(s):
+                if j != i:
+                    mat[sum(n_ineq_i[:i]):sum(n_ineq_i[:i+1]), j:j+1] = bigM[i][j]
+
+        return mat
+
+    def _condense_inequalities(self, E):
+        """
+        Stacks the inequalities
+        Ex x(t) + Eu u(t) + Ez z(t) + Ed delta(t) <= E0, t = 0, ..., N-1,
+        x(N) in X_N,
+        in the form
+        Ex_bar x_bar + Eu_bar u_bar + Ez_bar z_bar + Ed_bar delta_bar <= E0_bar
+        where
+        x_bar := (x(0), ..., x(N)),
+        u_bar := (u(0), ..., u(N-1)),
+        z_bar := (z(0), ..., z(N-1)),
+        delta_bar := (delta(0), ..., delta(N-1)).
+
+        Arguments
+        ----------
+        E : dict of numpy.ndarray
+            Entries: 'x', 'u', 'z', 'd', '0' (see the defintion above).
+
+        Returns
+        ----------
+        E_bar : dict of numpy.ndarray
+            Entries: 'x', 'u', 'z', 'd', '0' (see the defintion above).
+        """
+
+        # build blocks
+        E_bar = dict()
+        E_bar['x'] = block_diag(*[E['x']]*self.N + [self.X_N.A])
+        E_bar['u'] = block_diag(*[E['u']]*self.N)
+        E_bar['u'] = np.vstack((
+            E_bar['u'],
+            np.zeros((X_N.A.shape[0], E_bar['u'].shape[1]))
+        ))
+        E_bar['z'] = block_diag(*[E['z']]*self.N)
+        E_bar['z'] = np.vstack((
+            E_bar['z'],
+            np.zeros((X_N.A.shape[0], E_bar['z'].shape[1]))
+        ))
+        E_bar['d'] = block_diag(*[E['d']]*self.N)
+        E_bar['d'] = np.vstack((
+            E_bar['d'],
+            np.zeros((X_N.A.shape[0], E_bar['d'].shape[1]))
+        ))
+        E_bar['0'] = np.vstack([E['0']]*self.N + [self.X_N.b])
+
+        return E_bar
+
+
+    def _condense_equalities(self):
+        """
+        Puts the equality constraint
+        x(0) = x0,
+        x(t+1) = sum_{i=1}^s z_i(t), t = 0, ..., N-1,
+        in the form
+        x_bar = A_bar x0 + Bz_bar z_bar.
+
+        Returns
+        ----------
+        A_bar, Bz_bar : numpy.ndarray
+            See the definition above.
+        """
+
+        # build blocks
+        A_bar = np.vstack((
+            np.eye(self.S.nx),
+            np.zeros((self.S.nx*self.S.nm, self.S.nx))
+            ))
+        Bz_bar = block_diag(*[np.hstack([np.eye(self.S.nx)]*self.S.nm)]*self.N)
+        Bz_bar = np.vstack((
+            np.zeros((self.S.nx, Bz_bar.shape[1])),
+            Bz_bar
+            ))
+
+        return A_bar, Bz_bar
 
     def feedforward(self, x):
-    	sol = self.mpmiqp.solve(x)
-    	if sol['min'] is None:
-    		return None, None
-    	u_feedforward = sol['argmin_continuous'][:self.S.nu*self.N, :]
-    	V = sol['min']
-    	return u_feedforward, V
-
-
+        sol = self.mpmiqp.solve(x)
+        if sol['min'] is None:
+            return None, None
+        u_feedforward = sol['argmin_continuous'][:nu*self.N, :]
+        V = sol['min']
+        return u_feedforward, V

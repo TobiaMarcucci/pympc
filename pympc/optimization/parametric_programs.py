@@ -14,21 +14,28 @@ class MultiParametricQuadraticProgram(object):
              s.t. Au u + Ax x <= b
     """
 
-    def __init__(self, Huu, Hux, Hxx, fu, fx, g, Au, Ax, b):
+    def __init__(self, H, f, g, A, b):
         """
         Instantiates the parametric mpQP.
 
-        Arguments : numpy.ndarray
+        Arguments
+        ----------
+        H : dict of numpy.ndarray
+            Blocks of the quaratic term, entries: 'xx', 'ux', 'xx'.
+        f : dict of numpy.ndarray
+            Blocks of the linear term, entries: 'x', 'u'.
+        g : numpy.ndarray
+            Offset term in the cost function.
+        A : dict of numpy.ndarray
+            Left-hand side of the constraints, entries: 'x', 'u'.
+        b : numpy.ndarray
+            Right-hand side of the constraints.
         """
-        self.Huu = Huu
-        self.Huu_inv = np.linalg.inv(self.Huu)
-        self.Hxx = Hxx
-        self.Hux = Hux
-        self.fu = fu
-        self.fx = fx
+        self.H = H
+        self.Huu_inv = np.linalg.inv(self.H['uu'])
+        self.f = f
         self.g = g
-        self.Au = Au
-        self.Ax = Ax
+        self.A = A
         self.b = b
 
     def explicit_solve_given_active_set(self, active_set):
@@ -60,31 +67,31 @@ class MultiParametricQuadraticProgram(object):
         """
 
         # ensure that LICQ will hold
-        Aua = self.Au[active_set, :]
+        Aua = self.A['u'][active_set, :]
         if len(active_set) > 0  and np.linalg.matrix_rank(Aua) < Aua.shape[0]:
             return None
 
         # split active and inactive
-        inactive_set = [i for i in range(self.Ax.shape[0]) if i not in active_set]
-        Aui = self.Au[inactive_set, :]
-        Axa = self.Ax[active_set, :]
-        Axi = self.Ax[inactive_set, :]
+        inactive_set = [i for i in range(self.A['x'].shape[0]) if i not in active_set]
+        Aui = self.A['u'][inactive_set, :]
+        Axa = self.A['x'][active_set, :]
+        Axi = self.A['x'][inactive_set, :]
         ba = self.b[active_set, :]
         bi = self.b[inactive_set, :]
 
         # multipliers
         M = np.linalg.inv(Aua.dot(self.Huu_inv).dot(Aua.T))
-        pax = M.dot(Axa - Aua.dot(self.Huu_inv).dot(self.Hux))
-        pa0 = - M.dot(ba + Aua.dot(self.Huu_inv).dot(self.fu))
-        px = np.zeros(self.Ax.shape)
-        p0 = np.zeros((self.Ax.shape[0], 1))
+        pax = M.dot(Axa - Aua.dot(self.Huu_inv).dot(self.H['ux']))
+        pa0 = - M.dot(ba + Aua.dot(self.Huu_inv).dot(self.f['u']))
+        px = np.zeros(self.A['x'].shape)
+        p0 = np.zeros((self.A['x'].shape[0], 1))
         px[active_set, :] = pax
         p0[active_set, :] = pa0
         p = {'x': px, '0':p0}
 
         # primary variables
-        ux = - self.Huu_inv.dot(self.Hux + Aua.T.dot(pax))
-        u0 = - self.Huu_inv.dot(self.fu + Aua.T.dot(pa0))
+        ux = - self.Huu_inv.dot(self.H['ux'] + Aua.T.dot(pax))
+        u0 = - self.Huu_inv.dot(self.f['u'] + Aua.T.dot(pa0))
         u = {'x':ux, '0':u0}
 
         # critical region
@@ -100,9 +107,9 @@ class MultiParametricQuadraticProgram(object):
         cr.normalize()
 
         # optimal value function V(x) = 1/2 x' Vxx x + Vx' x + V0
-        Vxx = ux.T.dot(self.Huu).dot(ux) + 2.*self.Hux.T.dot(ux) + self.Hxx
-        Vx = (ux.T.dot(self.Huu.T) + self.Hux.T).dot(u0) + ux.T.dot(self.fu) + self.fx
-        V0 = .5*u0.T.dot(self.Huu).dot(u0) + self.fu.T.dot(u0) + self.g
+        Vxx = ux.T.dot(self.H['uu']).dot(ux) + 2.*self.H['ux'].T.dot(ux) + self.H['xx']
+        Vx = (ux.T.dot(self.H['uu'].T) + self.H['ux'].T).dot(u0) + ux.T.dot(self.f['u']) + self.f['x']
+        V0 = .5*u0.T.dot(self.H['uu']).dot(u0) + self.f['u'].T.dot(u0) + self.g
         V = {'xx':Vxx, 'x':Vx, '0':V0}
 
         return CriticalRegion(active_set, u, p, V, cr)
@@ -155,16 +162,16 @@ class MultiParametricQuadraticProgram(object):
         """
 
         # fix constraints and cost function
-        D = Polyhedron(self.Au, self.b - self.Ax.dot(x))
-        f = self.Hux.dot(x) + self.fu
+        D = Polyhedron(self.A['u'], self.b - self.A['x'].dot(x))
+        f = self.H['ux'].dot(x) + self.f['u']
 
         # solve QP
-        qp = QuadraticProgram(D, self.Huu, f)
+        qp = QuadraticProgram(D, self.H['uu'], f)
         sol = qp.solve()
 
         # "lift" optimal value function
         if sol['min'] is not None:
-            sol['min'] += (.5*x.T.dot(self.Hxx).dot(x) + self.fx.T.dot(x) + self.g)[0,0]
+            sol['min'] += (.5*x.T.dot(self.H['xx']).dot(x) + self.f['x'].T.dot(x) + self.g)[0,0]
 
         return sol
 
@@ -191,7 +198,7 @@ class MultiParametricQuadraticProgram(object):
         """
 
         # start from the origin and guess its active set
-        x = np.zeros(self.fx.shape)
+        x = np.zeros(self.f['x'].shape)
         active_set_guess = []
         x_buffer = [(x, active_set_guess)]
         crs_found = []
@@ -244,12 +251,12 @@ class MultiParametricQuadraticProgram(object):
 
         # constraint set
         C = Polyhedron(
-            np.hstack((self.Ax, self.Au)),
+            np.hstack((self.A['x'], self.A['u'])),
             self.b
             )
 
         # feasible set
-        return C.project_to(range(self.Ax.shape[1]))
+        return C.project_to(range(self.A['x'].shape[1]))
 
 class CriticalRegion(object):
     """
@@ -522,3 +529,24 @@ class ExplicitSolution(object):
 
         # return None if not covered
         return None
+
+class MultiParametricMixedIntegerQuadraticProgram(object):
+    """
+    Multiparametric Mixed Integer Quadratic Program (mpMIQP) in the form that comes out from the MPC problem fro a piecewise affine system, i.e.
+                                |u|' |Huu   0 0   0| |u|
+                                |z|  |  0 Hzz 0 Hzx| |z|
+        V(x) := min_{u,z,d} 1/2 |d|  |        0   0| |d|
+                                |x|  |sym       Hxx| |x|
+                      s.t. Au u + Az z + Ad d + Ax x <= b
+        where:
+        u := (u(0), ..., u(N-1)), continuous,
+        z := (z(0), ..., z(N-1)), continuous,
+        d := (d(0), ..., d(N-1)), binary,
+        while x  is the intial condition.
+    """
+    def __init__(self, arg):
+        self.arg = arg
+        
+
+
+# forse è meglio chiamare i solver per qp e miq direttamente da qui, pittosto che passare dalle classi non parametriche

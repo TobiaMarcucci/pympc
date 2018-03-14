@@ -15,16 +15,19 @@ class TestMultiParametricQuadraticProgram(unittest.TestCase):
     def test_solve(self):
 
         # 1-dimensional mpqp
-        Huu = np.array([[1.]])
-        Hxx = np.zeros((1,1))
-        Hux = np.zeros((1,1))
-        fu = np.zeros((1,1))
-        fx = np.zeros((1,1))
+        H = dict()
+        H['uu'] = np.array([[1.]])
+        H['xx'] = np.zeros((1,1))
+        H['ux'] = np.zeros((1,1))
+        f = dict()
+        f['u'] = np.zeros((1,1))
+        f['x'] = np.zeros((1,1))
         g = np.zeros((1,1))
-        Au = np.array([[1.],[-1.],[0.],[0.]])
-        Ax = np.array([[-1.],[1.],[1.],[-1.]])
+        A = dict()
+        A['u'] = np.array([[1.],[-1.],[0.],[0.]])
+        A['x'] = np.array([[-1.],[1.],[1.],[-1.]])
         b = np.array([[1.],[1.],[2.],[2.]])
-        mpqp = MultiParametricQuadraticProgram(Huu, Hux, Hxx, fu, fx, g, Au, Ax, b)
+        mpqp = MultiParametricQuadraticProgram(H, f, g, A, b)
 
         # explicit solve given active set
         cr = mpqp.explicit_solve_given_active_set([])
