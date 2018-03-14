@@ -352,7 +352,7 @@ class PieceWiseAffineSystem(object):
         Arguments
         ----------
         affine_systems : list of instances of AffineSystem
-            List of the dynamics for eache mode of the system.
+            List of the dynamics for each mode of the system.
         domains : list of instances of Polyhedron
             Domains of each mode of the system.
         """
