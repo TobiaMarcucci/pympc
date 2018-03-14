@@ -11,7 +11,7 @@ import matplotlib.patches as patches
 from pympc.optimization.convex_programs import LinearProgram
 from pympc.geometry.utils import nullspace_basis, plane_through_points
 
-class Polyhedron:
+class Polyhedron(object):
     """
     Polyhedron in the form {x in R^n | A x <= b, C x = d}.
     """
@@ -587,7 +587,7 @@ class Polyhedron:
 
         return included
 
-    def intersection_with(self, P2):
+    def intersection(self, P2):
         """
         Returns the intersection between this instance of Polyhderon (P1) and the polyhedron P2.
 
@@ -609,7 +609,7 @@ class Polyhedron:
 
         return P3
 
-    def cartesian_product_with(self, P2):
+    def cartesian_product(self, P2):
         """
         Returns the Cartesian product between this instance of Polyhderon (P1) and the polyhedron P2.
 

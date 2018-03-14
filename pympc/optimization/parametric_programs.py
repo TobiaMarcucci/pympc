@@ -544,9 +544,12 @@ class MultiParametricMixedIntegerQuadraticProgram(object):
         d := (d(0), ..., d(N-1)), binary,
         while x  is the intial condition.
     """
-    def __init__(self, arg):
-        self.arg = arg
+    def __init__(self, H, A, b):
+        self.H = H
+        self.A = A
+        self.b = b
+
+    def solve(self, x):
+        pass
         
-
-
-# forse è meglio chiamare i solver per qp e miq direttamente da qui, pittosto che passare dalle classi non parametriche
+# forse e meglio chiamare i solver per qp e miq direttamente da qui, pittosto che passare dalle classi non parametriche

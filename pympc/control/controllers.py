@@ -5,10 +5,10 @@ from scipy.linalg import block_diag
 
 # internal inputs
 from pympc.dynamics.discrete_time_systems import AffineSystem, PieceWiseAffineSystem
-from pympc.optimization.parametric_programs import MultiParametricQuadraticProgram
+from pympc.optimization.parametric_programs import MultiParametricQuadraticProgram, MultiParametricMixedIntegerQuadraticProgram
 from pympc.optimization.convex_programs import LinearProgram
 
-class ModelPredictiveController:
+class ModelPredictiveController(object):
     """
     Model predictive controller for linear systems, it solves the optimal control problem
     V*(x(0)) := min_{x(.), u(.)} 1/2 sum_{t=0}^{N-1} x'(t) Q x(t) + u'(t) R u(t) + \frac{1}{2} x'(N) P x(N)
@@ -89,11 +89,16 @@ class ModelPredictiveController:
         V : float
             Optimal value function for the given state.
         """
+
+        # solve and check feasibility
         sol = self.mpqp.implicit_solve_fixed_point(x)
         if sol['min'] is None:
             return None, None
+
+        # from vector to list of vectors
         u_feedforward = [sol['argmin'][self.S.nu*i : self.S.nu*(i+1), :] for i in range(self.N)]
         V = sol['min']
+
         return u_feedforward, V
 
     def feedback(self, x):
@@ -313,25 +318,6 @@ def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
 
     return MultiParametricQuadraticProgram(H, f, g, A, b)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class HybridModelPredictiveController(object):
 
     def __init__(self, S, N, Q, R, P, X_N):
@@ -422,7 +408,7 @@ class HybridModelPredictiveController(object):
             for j, S_j in enumerate(self.S.affine_systems):
                 alpha_ij = []
                 beta_ij = []
-                lp = LinearProgram(D_j)
+                lp = LinearProgram(self.S.domains[j])
 
                 # solve two LPs for each component of the state vector
                 for k in range(S_i.nx):
@@ -438,8 +424,8 @@ class HybridModelPredictiveController(object):
                 beta_i.append(np.vstack(beta_ij))
 
             # close outer loop appending bigMs
-            alpha.append(np.vstack(alpha_i))
-            beta.append(np.vstack(beta_i))
+            alpha.append(alpha_i)
+            beta.append(beta_i)
 
         return alpha, beta
 
@@ -532,6 +518,8 @@ class HybridModelPredictiveController(object):
         A['d'] = E_bar['d']
         A['x'] = E_bar['x'].dot(A_bar)
         b = E_bar['0']
+
+        print 
 
         return MultiParametricMixedIntegerQuadraticProgram(H, A, b)
 
@@ -658,17 +646,17 @@ class HybridModelPredictiveController(object):
         E_bar['u'] = block_diag(*[E['u']]*self.N)
         E_bar['u'] = np.vstack((
             E_bar['u'],
-            np.zeros((X_N.A.shape[0], E_bar['u'].shape[1]))
+            np.zeros((self.X_N.A.shape[0], E_bar['u'].shape[1]))
         ))
         E_bar['z'] = block_diag(*[E['z']]*self.N)
         E_bar['z'] = np.vstack((
             E_bar['z'],
-            np.zeros((X_N.A.shape[0], E_bar['z'].shape[1]))
+            np.zeros((self.X_N.A.shape[0], E_bar['z'].shape[1]))
         ))
         E_bar['d'] = block_diag(*[E['d']]*self.N)
         E_bar['d'] = np.vstack((
             E_bar['d'],
-            np.zeros((X_N.A.shape[0], E_bar['d'].shape[1]))
+            np.zeros((self.X_N.A.shape[0], E_bar['d'].shape[1]))
         ))
         E_bar['0'] = np.vstack([E['0']]*self.N + [self.X_N.b])
 
@@ -692,7 +680,7 @@ class HybridModelPredictiveController(object):
         # build blocks
         A_bar = np.vstack((
             np.eye(self.S.nx),
-            np.zeros((self.S.nx*self.S.nm, self.S.nx))
+            np.zeros((self.S.nx*self.N, self.S.nx))
             ))
         Bz_bar = block_diag(*[np.hstack([np.eye(self.S.nx)]*self.S.nm)]*self.N)
         Bz_bar = np.vstack((
@@ -703,9 +691,51 @@ class HybridModelPredictiveController(object):
         return A_bar, Bz_bar
 
     def feedforward(self, x):
+        """
+        Given the state x of the system, returns the optimal sequence of N inputs and the related cost.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            State of the system.
+
+        Returns
+        ----------
+        u_feedforward : list of numpy.ndarray
+            Optimal control signals for t = 0, ..., N-1.
+        V : float
+            Optimal value function for the given state.
+        """
+
+        # solve and check feasibility
         sol = self.mpmiqp.solve(x)
         if sol['min'] is None:
             return None, None
-        u_feedforward = sol['argmin_continuous'][:nu*self.N, :]
+
+        # from vector to list of vectors
+        u_feedforward = [sol['u'][self.S.nu*i : self.S.nu*(i+1), :] for i in range(self.N)]
         V = sol['min']
+        
         return u_feedforward, V
+
+    def feedback(self, x):
+        """
+        Returns the optimal feedback for the given state x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            State of the system.
+
+        Returns
+        ----------
+        u_feedback : numpy.ndarray
+            Optimal feedback.
+        """
+
+        # get feedforward and extract first input
+        u_feedforward = self.feedforward(x)[0]
+        if u_feedforward is None:
+            return None
+
+        return u_feedforward[0]

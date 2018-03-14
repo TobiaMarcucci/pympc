@@ -8,7 +8,7 @@ from pympc.optimization.convex_programs import LinearProgram
 from pympc.dynamics.discretization_methods import explicit_euler, zero_order_hold
 from pympc.dynamics.utils import check_affine_system
 
-class LinearSystem:
+class LinearSystem(object):
     """
     Discrete-time linear systems in the form x(t+1) = A x(t) + B u(t).
     """
@@ -229,7 +229,7 @@ class LinearSystem:
 
         return LinearSystem(A_d, B_d)
 
-class AffineSystem:
+class AffineSystem(object):
     """
     Discrete-time affine systems in the form x(t+1) = A x(t) + B u(t) + c.
     """
@@ -352,29 +352,41 @@ class PieceWiseAffineSystem(object):
         Arguments
         ----------
         affine_systems : list of instances of AffineSystem
-            List of the dynamics for each mode of the system.
+            List of the dynamics for each mode of the system (in case a LinearSystem is passed through this list it is automatically converted to an instance of AffineSystem).
         domains : list of instances of Polyhedron
             Domains of each mode of the system.
         """
 
-        # check affine systems
+        # same number of systems and domains
         if len(affine_systems) != len(domains):
             raise ValueError('the number of affine systems has to be equal to the number of domains.')
+
+        # same number of states for each system
         nx = set(S.nx for S in affine_systems)
         if len(nx) != 1:
             raise ValueError('all the affine systems must have the same number of states.')
         self.nx = list(nx)[0]
+
+        # same number of inputs for each system
         nu = set(S.nu for S in affine_systems)
         if len(nu) != 1:
             raise ValueError('all the affine systems must have the same number of inputs.')
         self.nu = list(nu)[0]
 
-        # check domains
+        # same dimensions for each domain
         nxu = set(D.A.shape[1] for D in domains)
         if len(nxu) != 1:
             raise ValueError('all the domains must have equal dimnesionality.')
+
+        # dimension of each domain equal too number of states plus number of inputs
         if list(nxu)[0] != self.nx + self.nu:
             raise ValueError('the domains and the affine systems must have coherent dimensions.')
+
+        # make instances of LinearSystem instances of AffineSystem
+        for i, S in enumerate(affine_systems):
+            if isinstance(S, LinearSystem):
+                c = np.zeros((self.nx, 1))
+                affine_systems[i] = AffineSystem(S.A, S.B, c)
 
         # store inputs
         self.affine_systems = affine_systems
@@ -477,46 +489,6 @@ class PieceWiseAffineSystem(object):
                     return False
 
         return True
-
-    @staticmethod
-    def from_orthogonal_domains(affine_systems, state_domains, input_domains):
-        """
-        Instantiates a PWA system with orthogonal domains for state and input, i.e.: D_i = X_i x U_i.
-
-        Arguments
-        ----------
-        affine_systems : list of instances of AffineSystem
-            List of the dynamics for eache mode of the system.
-        state_domains : list of instances of Polyhedron
-            Domains of each mode of the system for the state vector.
-        input_domains : list of instances of Polyhedron
-            Domains of each mode of the system for the input vector.
-        """
-
-        # check affine systems
-        if len(state_domains) != len(input_domains):
-            raise ValueError('the number of state domains has to be equal to the number of input domains.')
-        nx = set(X.A.shape[1] for X in state_domains)
-        if len(nx) != 1:
-            raise ValueError('all the state domains must have the same dimensionality.')
-        nu = set(U.A.shape[1] for U in input_domains)
-        if len(nu) != 1:
-            raise ValueError('all the input domains must have the same dimensionality.')
-
-        # direct product of the domains
-        domains = []
-        for i in range(len(state_domains)):
-            A_i = linalg.block_diag(
-                state_domains[i].A,
-                input_domains[i].A
-                )
-            b_i = np.vstack((
-                state_domains[i].b,
-                input_domains[i].b
-                ))
-            domains.append(Polyhedron(A_i, b_i))
-
-        return PieceWiseAffineSystem(affine_systems, domains)
 
 def mcais(A, X, tol=1.e-9):
     """

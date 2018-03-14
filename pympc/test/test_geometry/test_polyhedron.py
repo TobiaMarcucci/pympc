@@ -454,7 +454,7 @@ class TestPolyhedron(unittest.TestCase):
         self.assertFalse(p1.is_included_in(p2))
         self.assertTrue(p2.is_included_in(p1))
 
-    def test_intersection_with(self):
+    def test_intersection(self):
 
         # first polyhedron
         x1_min = - np.ones((2,1))
@@ -467,7 +467,7 @@ class TestPolyhedron(unittest.TestCase):
         p2 = Polyhedron.from_bounds(x2_min, x2_max)
 
         # intersection
-        p3 = p1.intersection_with(p2)
+        p3 = p1.intersection(p2)
         p3.remove_redundant_inequalities()
         p4 = Polyhedron.from_bounds(x2_min, x1_max)
         self.assertTrue(same_rows(
@@ -479,10 +479,10 @@ class TestPolyhedron(unittest.TestCase):
         C1 = np.array([[1., 0.]])
         d1 = np.array([-.5])
         p1.add_equality(C1, d1)
-        p3 = p1.intersection_with(p2)
+        p3 = p1.intersection(p2)
         self.assertTrue(p3.empty)
 
-    def test_cartesian_product_with(self):
+    def test_cartesian_product(self):
 
         # simple case
         n = 2
@@ -492,7 +492,7 @@ class TestPolyhedron(unittest.TestCase):
         C = np.ones((1,n))
         d = np.zeros((1,1))
         p1.add_equality(C, d)
-        p2 = p1.cartesian_product_with(p1)
+        p2 = p1.cartesian_product(p1)
 
         # derive the cartesian product
         x_min = -np.ones((2*n,1))
