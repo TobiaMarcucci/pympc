@@ -341,60 +341,6 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
         S_pwa = PieceWiseAffineSystem(affine_systems, domains)
         self.assertTrue(S_pwa.is_well_posed())
 
-    def test_from_orthogonal_domains(self):
-        np.random.seed(1)
-
-        # different number of state and input domains
-        A = np.ones((3,3))
-        B = np.ones((3,2))
-        c = np.ones((3,1))
-        S = AffineSystem(A, B, c)
-        affine_systems = [S]*5
-        Fx = np.ones((6,3))
-        gx = np.ones((6,1))
-        X = Polyhedron(Fx, gx)
-        state_domains = [X]*5
-        Fu = np.ones((9,2))
-        gu = np.ones((9,1))
-        U = Polyhedron(Fu, gu)
-        input_domains = [U]*4
-        self.assertRaises(
-            ValueError,
-            PieceWiseAffineSystem.from_orthogonal_domains,
-            affine_systems,
-            state_domains,
-            input_domains
-            )
-
-        # different number of states
-        Fx = np.ones((6,4))
-        gx = np.ones((6,1))
-        del state_domains[-1]
-        state_domains.append(Polyhedron(Fx, gx))
-        input_domains.append(U)
-        self.assertRaises(
-            ValueError,
-            PieceWiseAffineSystem.from_orthogonal_domains,
-            affine_systems,
-            state_domains,
-            input_domains
-            )
-
-        # different number of states
-        Fu = np.ones((9,3))
-        gu = np.ones((9,1))
-        del state_domains[-1]
-        del input_domains[-1]
-        state_domains.append(X)
-        input_domains.append(Polyhedron(Fu, gu))
-        self.assertRaises(
-            ValueError,
-            PieceWiseAffineSystem.from_orthogonal_domains,
-            affine_systems,
-            state_domains,
-            input_domains
-            )
-
 class TestMCAIS(unittest.TestCase):
 
     def test_mcais(self):

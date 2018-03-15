@@ -2,7 +2,7 @@
 import numpy as np
 import gurobipy as grb
 
-def linear_program(f, A, b, C=None, d=None):
+def linear_program(f, A, b, C=None, d=None, **kwargs):
     """
     Solves the linear program min_x f^T x s.t. A x <= b, C x = d.
 
@@ -43,6 +43,8 @@ def linear_program(f, A, b, C=None, d=None):
 
     # run the optimization
     model.setParam('OutputFlag', 0)
+    for parameter, value in kwargs.items():
+        model.setParam(parameter, value)
     model.optimize()
 
     # return result
@@ -51,7 +53,7 @@ def linear_program(f, A, b, C=None, d=None):
 
     return sol
 
-def quadratic_program(H, f, A, b, C=None, d=None):
+def quadratic_program(H, f, A, b, C=None, d=None, **kwargs):
     """
     Solves the strictly convex (H > 0) quadratic program min .5 x' H x + f' x s.t. A x <= b, C x  = d.
 
@@ -93,7 +95,9 @@ def quadratic_program(H, f, A, b, C=None, d=None):
     model = _build_model(H=H, f=f, A=A, b=b, C=C, d=d)
 
     # run the optimization
-    model.setParam('OutputFlag', False)
+    model.setParam('OutputFlag', 0)
+    for parameter, value in kwargs.items():
+        model.setParam(parameter, value)
     model.optimize()
 
     # return result
@@ -262,16 +266,18 @@ def _get_active_set_qp(model, ineq_mult, tol=1.e-6):
 
 def linear_expression(A_list, b, x_list, tol=1.e-10):
     """
-    Generates a list of Gurobi linear expressions A x - b (one element per row of A).
+    Generates a list of Gurobi linear expressions
+    A[0] x[0] + A[1] x[1] + ... - b
+    (one element per row of A).
 
     Arguments
     ----------
-    A : numpy.ndarray
-        Jacobian of the linear expression.
+    A_list : list of numpy.ndarray
+        List of the Jacobians of the linear expression wrt the variables in x_list.
     b : numpy.ndarray
         Offest term of the linear expression.
-    x : instance of gurobipy.Var
-        Variable of the linear expression.
+    x_list : list of instances of gurobipy.Var
+        Variables of the linear expression, one per matrix A[i].
     tol : float
         Maximum absolute value for the elements of A and b to be considered nonzero.
 
@@ -333,64 +339,43 @@ def quadratic_expression(H, x, tol=1.e-7):
 
     return expr
 
-# def read_status(status):
-#     """
-#     Translates the gurobi status from numbers to string describing it.
+def mixed_integer_quadratic_program(Huu, Hzz, fz, Au, Az, Ad, b, **kwargs):
+    """
+    Solves the MIQP coming out the MPC problem for PWA systems.
 
-#     Arguments
-#     ----------
-#     status : instance of gurobipy.GRB.Status
-#         Status of the mathematical program
+    Arguments
+    ----------
+    Huu : numpy.ndarray
+        Hessian of the quadratic expression wrt the control inputs.
+    Hzz : numpy.ndarray
+        Hessian of the quadratic expression wrt the auxiliary continuous variables.
+    fz : numpy.ndarray
+        Term in objective linear in the auxiliary continuous variables.
+    Au : numpy.ndarray
+        Left-hand side of the constraints, term in u.
+    Az : numpy.ndarray
+        Left-hand side of the constraints, term in z.
+    Ad : numpy.ndarray
+        Left-hand side of the constraints, term in d.
+    b : numpy.ndarray
+        Right-hand side of the constraints.
 
-#     Returns
-#     ----------
-#     str
-#         Sting describing the status.
-#     """
-    
-#     # check the lookup table
-#     status = str(status)
-#     table = {
-#         '2': 'OPTIMAL',
-#         '3': 'INFEASIBLE',
-#         '4': 'INFEASIBLE OR UNBOUNDED',
-#         '9': 'TIME LIMIT',
-#         '11': 'INTERRUPTED',
-#         '13': 'SUBOPTIMAL',
-#         }
+    Returns
+    ----------
+    sol : dict
+        Dictionary with the solution of the MIQP.
 
-#     return table[status]
-
-# def real_variable(model, d_list, **kwargs):
-#     """
-#     Creates a Gurobi variable with dimension d_list (e.g., [3,4,5]) with minus infinity as lower bounds.
-
-#     Arguments
-#     ----------
-#     model : instance of gurobipy.Model
-#         Model of the mathematical program.
-#     d_list : list of int
-#         List of the dimensions of the variable.
-
-#     Returns
-#     ----------
-#     x : instance of gurobipy.Var
-#         Variable of the linear expression.
-#     model : instance of gurobipy.Model
-#         Model of the mathematical program with the new variable inside it.
-#     """
-
-#     # set lower bound
-#     lb_x = [-grb.GRB.INFINITY]
-
-#     # create variable
-#     for d in d_list:
-#         lb_x = [lb_x * d]
-#     x = model.addVars(*d_list, lb=lb_x, **kwargs)
-
-#     return x, model
-
-def mixed_integer_quadratic_program(Huu, Hzz, fz, Au, Az, Ad, b):
+        Keys
+        ----------
+        min : float
+            Optimal value of the objective function.
+        u : numpy.ndarray
+            Optimal value for the inputs.
+        z : numpy.ndarray
+            Optimal value for the auxiliary continuous variables.
+        d : numpy.ndarray
+            Optimal value for the binary variables.
+    """
 
     # initialize model
     model = grb.Model()
@@ -414,7 +399,9 @@ def mixed_integer_quadratic_program(Huu, Hzz, fz, Au, Az, Ad, b):
     model.setObjective(cost)
 
     # run the optimization
-    model.setParam('OutputFlag', False)
+    model.setParam('OutputFlag', 0)
+    for parameter, value in kwargs.items():
+        model.setParam(parameter, value)
     model.optimize()
 
     # intialize solution

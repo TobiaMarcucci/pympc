@@ -91,7 +91,7 @@ class ModelPredictiveController(object):
         """
 
         # solve and check feasibility
-        sol = self.mpqp.implicit_solve_fixed_point(x)
+        sol = self.mpqp.solve(x)
         if sol['min'] is None:
             return None, None
 
@@ -133,7 +133,7 @@ class ModelPredictiveController(object):
             Explicit solution of the underlying mpqp problem.
         """
 
-        self.explicit_solution = self.mpqp.solve(**kwargs)
+        self.explicit_solution = self.mpqp.explicit_solve(**kwargs)
 
     def feedforward_explicit(self, x):
         """
@@ -656,7 +656,7 @@ class HybridModelPredictiveController(object):
         for d in d_list:
             mode_sequence.append(np.where(d > .5)[0][0])
             
-        return u_list, x_list, sol['min'], mode_sequence
+        return u_list, x_list, mode_sequence, sol['min']
 
     def feedback(self, x):
         """

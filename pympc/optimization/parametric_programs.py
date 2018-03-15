@@ -22,13 +22,13 @@ class MultiParametricQuadraticProgram(object):
         Arguments
         ----------
         H : dict of numpy.ndarray
-            Blocks of the quaratic term, entries: 'xx', 'ux', 'xx'.
+            Blocks of the quaratic term, keys: 'xx', 'ux', 'xx'.
         f : dict of numpy.ndarray
-            Blocks of the linear term, entries: 'x', 'u'.
+            Blocks of the linear term, keys: 'x', 'u'.
         g : numpy.ndarray
             Offset term in the cost function.
         A : dict of numpy.ndarray
-            Left-hand side of the constraints, entries: 'x', 'u'.
+            Left-hand side of the constraints, keys: 'x', 'u'.
         b : numpy.ndarray
             Right-hand side of the constraints.
         """
@@ -140,13 +140,13 @@ class MultiParametricQuadraticProgram(object):
                 return cr
 
         # otherwise solve the QP to get the active set
-        sol = self.implicit_solve_fixed_point(x)
+        sol = self.solve(x)
         if sol['active_set'] is None:
             return None
 
         return self.explicit_solve_given_active_set(sol['active_set'])
 
-    def implicit_solve_fixed_point(self, x):
+    def solve(self, x):
         """
         Solves the QP at the given point x.
 
@@ -176,7 +176,7 @@ class MultiParametricQuadraticProgram(object):
 
         return sol
 
-    def solve(self, step_size=1.e-5, verbose=False):
+    def explicit_solve(self, step_size=1.e-5, verbose=False):
         """
         Returns the explicit solution of the mpQP.
         It assumes that the facet-to-facet property holds (i.e. each facet of a critical region is shared with another single critical region).
@@ -545,12 +545,42 @@ class MultiParametricMixedIntegerQuadraticProgram(object):
         d := (d(0), ..., d(N-1)), binary,
         while x  is the intial condition.
     """
+
     def __init__(self, H, A, b):
+        """
+        Initializes the mpMIQP.
+
+        Arguments
+        -----------
+        H : dict of numpy.ndarry
+            Dictionary with the blocks of the cost function Hessian, keys: 'uu', 'zz', 'xx', 'zx'.
+        A : dict of numpy.ndarry
+            Dictionary with the blocks of the constraint Jacobian, keys: 'u', 'z', 'd', 'x'.
+        b : numpy.ndarray
+            Right-hand side of the constraints.
+        """
+
+        # store matrices
         self.H = H
         self.A = A
         self.b = b
 
     def solve(self, x):
+        """
+        Solves the mpMIQP for the given value of the parameter x.
+
+        Arguments
+        ----------
+        x : numpy.ndarry
+            Numeric value of the parameter vector.
+
+        Returns
+        ----------
+        sol : dict
+            Dictionary with the solution of the MIQP, keys: 'min', 'u', 'z', 'd'.
+        """
+
+        # solve MIQP
         sol = mixed_integer_quadratic_program(
             self.H['uu'],
             self.H['zz'],
@@ -560,6 +590,9 @@ class MultiParametricMixedIntegerQuadraticProgram(object):
             self.A['d'],
             self.b - self.A['x'].dot(x)
             )
+
+        # in not unfeasible lift the cost function with the offset term
         if sol['min'] is not None:
             sol['min'] += .5*x.T.dot(self.H['xx']).dot(x)[0,0]
+
         return sol

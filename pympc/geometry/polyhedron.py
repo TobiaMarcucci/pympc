@@ -748,11 +748,12 @@ class Polyhedron(object):
         if self.C.shape[0] > 0:
             A, b, N, R = self._remove_equalities()
             T = np.hstack((N, R))
-            self.center = np.linalg.inv(T).dot(self.center)
-            self.center = self.center[:N.shape[1], :]
+            center = np.linalg.inv(T).dot(self.center)
+            center = center[:N.shape[1], :]
         else:
             A = self.A
             b = self.b
+            center = self.center
 
         # handle 1d cases
         if A.shape[1] == 1:
@@ -763,7 +764,7 @@ class Polyhedron(object):
         # call qhull through scipy
         else:
 	    	halfspaces = np.hstack((A, -b))
-	    	polyhedron = HalfspaceIntersection(halfspaces, self.center.flatten())
+	    	polyhedron = HalfspaceIntersection(halfspaces, center.flatten())
 	    	V = polyhedron.intersections
 	    	self._vertices = [V[i:i+1,:].T for i in range(V.shape[0])]
 

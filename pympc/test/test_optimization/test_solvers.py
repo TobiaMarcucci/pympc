@@ -5,6 +5,8 @@ import pip
 
 # internal inputs
 from pympc.optimization import pnnls
+
+# available solvers
 lp_solvers = [pnnls.linear_program]
 qp_solvers = [pnnls.quadratic_program]
 

@@ -232,7 +232,7 @@ class QuadraticProgram(object):
             Dictionary with the solution of the QP (see the documentation of pympc.optimization.pnnls.quadratic_program for the details of the fields of sol).
         """
 
-        # solve the LP
+        # solve the QP
         sol = quadratic_program(
             self.H,
             self.f,

@@ -482,7 +482,7 @@ class PieceWiseAffineSystem(object):
         # loop over al the combinations (avoiding to check twice)
         for i, Di in enumerate(self.domains):
             for j in range(i+1, self.nm):
-                Dij = Di.intersection_with(self.domains[j])
+                Dij = Di.intersection(self.domains[j])
 
                 # check the Chebyshev radius of the intersection
                 if Dij.radius > tol:

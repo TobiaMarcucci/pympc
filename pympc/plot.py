@@ -2,7 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_state_space_trajectory(x, dim=[0,1], text=False, **kwargs):
+def plot_state_space_trajectory(x, dim=[0,1], text=False, label=None, **kwargs):
     """
     Plots one component of the state x as a function of another (2d plot).
 
@@ -20,7 +20,18 @@ def plot_state_space_trajectory(x, dim=[0,1], text=False, **kwargs):
 
     # plot trajectory
     for t in range(len(x)-1):
-        plt.plot([x[t][dim[0]], x[t+1][dim[0]]], [x[t][dim[1]], x[t+1][dim[1]]], **kwargs)
+        if t == 0:
+            plt.plot(
+                [x[0][dim[0]], x[1][dim[0]]],
+                [x[0][dim[1]], x[1][dim[1]]],
+                label=label,
+                **kwargs
+                )
+        plt.plot(
+            [x[t][dim[0]], x[t+1][dim[0]]],
+            [x[t][dim[1]], x[t+1][dim[1]]],
+            **kwargs
+            )
 
     # plot text
     for t in range(len(x)):
@@ -28,7 +39,13 @@ def plot_state_space_trajectory(x, dim=[0,1], text=False, **kwargs):
             plt.text(x[t][0], x[t][1], r'$x('+str(t)+')$')
 
     # scatter initial condition
-    plt.scatter(x[0][dim[0]], x[0][dim[1]], color='w', edgecolor='k', zorder=3)
+    plt.scatter(
+        x[0][dim[0]],
+        x[0][dim[1]],
+        color='w',
+        edgecolor='k',
+        zorder=3
+        )
 
     # axis labels
     plt.xlabel(r'$x_{' + str(dim[0]+1) + '}$')
@@ -73,9 +90,17 @@ def plot_input_sequence(u, h, u_bounds=None):
         plt.xlim((0., N*h))
         if i == 0:
             if u_bounds is not None:
-                plt.legend([input_plot, bound_plot], ['Optimal control', 'Control bounds'], loc=1)
+                plt.legend(
+                    [input_plot, bound_plot],
+                    ['Optimal control', 'Control bounds'],
+                    loc=1
+                    )
             else:
-                plt.legend([input_plot], ['Optimal control'], loc=1)
+                plt.legend(
+                    [input_plot],
+                    ['Optimal control'],
+                    loc=1
+                    )
     plt.xlabel(r'$t$')
 
 def plot_state_trajectory(x, h, x_bounds=None):
@@ -117,9 +142,17 @@ def plot_state_trajectory(x, h, x_bounds=None):
         plt.xlim((0., N*h))
         if i == 0:
             if x_bounds is not None:
-                plt.legend([state_plot, bound_plot], ['Optimal trajectory', 'State bounds'], loc=1)
+                plt.legend(
+                    [state_plot, bound_plot],
+                    ['Optimal trajectory', 'State bounds'],
+                    loc=1
+                    )
             else:
-                plt.legend([state_plot], ['Optimal trajectory'], loc=1)
+                plt.legend(
+                    [state_plot],
+                    ['Optimal trajectory'],
+                    loc=1
+                    )
     plt.xlabel(r'$t$')
 
 def plot_output_trajectory(C, x, h, y_bounds=None):
@@ -166,7 +199,15 @@ def plot_output_trajectory(C, x, h, y_bounds=None):
         plt.xlim((0., N*h))
         if i == 0:
             if y_bounds is not None:
-                plt.legend([output_plot, bound_plot], ['Optimal trajectory', 'Output bounds'], loc=1)
+                plt.legend(
+                    [output_plot, bound_plot],
+                    ['Optimal trajectory', 'Output bounds'],
+                    loc=1
+                    )
             else:
-                plt.legend([output_plot], ['Optimal trajectory'], loc=1)
+                plt.legend(
+                    [output_plot],
+                    ['Optimal trajectory'],
+                    loc=1
+                    )
     plt.xlabel(r'$t$')

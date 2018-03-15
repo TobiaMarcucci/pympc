@@ -52,15 +52,15 @@ class TestMultiParametricQuadraticProgram(unittest.TestCase):
         self.assertAlmostEqual(cr._u['0'], -1.)
 
         # implicit solve given point
-        sol = mpqp.implicit_solve_fixed_point(np.array([[1.5]]))
+        sol = mpqp.solve(np.array([[1.5]]))
         self.assertAlmostEqual(sol['min'], .125)
         self.assertAlmostEqual(sol['argmin'], .5)
         self.assertEqual(sol['active_set'], [1])
 
         # solve
-        exp_sol = mpqp.solve()
+        exp_sol = mpqp.explicit_solve()
         for x in [np.array([[.5]]), np.array([[1.5]]), np.array([[-1.5]]), np.array([[2.5]]), np.array([[-2.5]])]:
-            sol = mpqp.implicit_solve_fixed_point(x)
+            sol = mpqp.solve(x)
             if sol['min'] is not None:
                 self.assertAlmostEqual(sol['min'], exp_sol.V(x))
                 np.testing.assert_array_almost_equal(sol['argmin'], exp_sol.u(x))
