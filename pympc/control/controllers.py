@@ -249,75 +249,6 @@ class ModelPredictiveController(object):
         plt.colorbar(cp)
         plt.title(r'$V^*(x)$')
 
-def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
-    """
-    For a given mode sequences, condenses the optimal control problem for a PWA affine system
-    min_{x(.), u(.)} 1/2 sum_{t=0}^{N-1} (x'(t) Q x(t) + u'(t) R u(t)) + 1/2 x'(N) P x'(N)
-                s.t. x(t+1) = A_{z(t)} x(t) + B_{z(t)} u(t) + c_{z(t)}
-                     F_{z(t)} x(t) + G_{z(t)} u(t) <= h_{z(t)}
-                     F_N x(N) <= h_N
-    where z(t) denotes the mode of the PWA system at time t.
-    The problem is then stated as a mpQP with parametric initial state x(0).
-
-    Arguments
-    ----------
-    S : instance of PieceWiseAffineSystem
-        PWA system of the optimal control problem.
-    Q : numpy.ndarray
-        Hessian of the state cost.
-    R : numpy.ndarray
-        Hessian of the input cost.
-    P : numpy.ndarray
-        Hessian of the terminal state cost.
-    X_N : instance of Polyhedron
-        Terminal state constraint.
-    mode_sequence : list of int
-        Sequence of the modes of the PWA system.
-
-    Returns
-    ----------
-    instance of MultiParametricQuadraticProgram
-        Condensed mpQP.
-    """
-
-    # condense dynamics
-    A_bar, B_bar, c_bar = S.condense(mode_sequence)
-
-    # stack cost matrices
-    N = len(mode_sequence)
-    Q_bar = block_diag(*[Q for i in range(N)] + [P])
-    R_bar = block_diag(*[R for i in range(N)])
-
-    # get blocks quadratic term objective
-    H = dict()
-    H['uu'] = R_bar + B_bar.T.dot(Q_bar).dot(B_bar)
-    H['ux'] = B_bar.T.dot(Q_bar).dot(A_bar)
-    H['xx'] = A_bar.T.dot(Q_bar).dot(A_bar)
-
-    # get blocks linear term objective
-    f = dict()
-    f['u'] = B_bar.T.dot(Q_bar).dot(c_bar)
-    f['x'] = A_bar.T.dot(Q_bar).dot(c_bar)
-    g = c_bar.T.dot(Q_bar).dot(c_bar)
-
-    # stack constraint matrices
-    D_sequence = [S.domains[m]for m in mode_sequence]
-    F_bar = block_diag(*[D.A[:,:S.nx] for D in D_sequence] + [X_N.A])
-    G_bar = block_diag(*[D.A[:,S.nx:] for D in D_sequence])
-    G_bar = np.vstack((
-        G_bar,
-        np.zeros((X_N.A.shape[0], G_bar.shape[1]))
-        ))
-    h_bar = np.vstack([D.b for D in D_sequence] + [X_N.b])
-
-    # get blocks for condensed contraints
-    A = dict()
-    A['u'] = G_bar + F_bar.dot(B_bar)
-    A['x'] = F_bar.dot(A_bar)
-    b = h_bar - F_bar.dot(c_bar)
-
-    return MultiParametricQuadraticProgram(H, f, g, A, b)
-
 class HybridModelPredictiveController(object):
 
     def __init__(self, S, N, Q, R, P, X_N):
@@ -519,8 +450,6 @@ class HybridModelPredictiveController(object):
         A['x'] = E_bar['x'].dot(A_bar)
         b = E_bar['0']
 
-        print 
-
         return MultiParametricMixedIntegerQuadraticProgram(H, A, b)
 
     def _build_inequalities(self):
@@ -710,13 +639,24 @@ class HybridModelPredictiveController(object):
         # solve and check feasibility
         sol = self.mpmiqp.solve(x)
         if sol['min'] is None:
-            return None, None
+            return None, None, None, None
 
         # from vector to list of vectors
-        u_feedforward = [sol['u'][self.S.nu*i : self.S.nu*(i+1), :] for i in range(self.N)]
-        V = sol['min']
-        
-        return u_feedforward, V
+        nu = self.S.nu
+        nx = self.S.nx
+        s = self.S.nm
+        nz = nx*s
+        u_list = [sol['u'][nu*i:nu*(i+1), :] for i in range(self.N)]
+        z_list = [sol['z'][nz*i:nz*(i+1), :] for i in range(self.N)]
+        d_list = [sol['d'][s*i:s*(i+1), :] for i in range(self.N)]
+        x_list = [x]
+        for z in z_list:
+            x_list.append(np.sum([z[nx*i:nx*(i+1), :] for i in range(s)], axis=0))
+        mode_sequence = []
+        for d in d_list:
+            mode_sequence.append(np.where(d > .5)[0][0])
+            
+        return u_list, x_list, sol['min'], mode_sequence
 
     def feedback(self, x):
         """
@@ -739,3 +679,88 @@ class HybridModelPredictiveController(object):
             return None
 
         return u_feedforward[0]
+
+    def get_mpqp(self, mode_sequence):
+        """
+        Returns the optimal control problem in condensed form for the given mode sequence.
+
+        Arguments
+        ----------
+        mode_sequence : list of int
+            Sequence of the modes of the PWA system.
+
+        Returns
+        ----------
+        instance of MultiParametricQuadraticProgram
+            Condensed mpQP.
+        """
+        return condense_optimal_control_problem(self.S, self.Q, self.R, self.P, self.X_N, mode_sequence)
+
+def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
+    """
+    For a given mode sequences, condenses the optimal control problem for a PWA affine system
+    min_{x(.), u(.)} 1/2 sum_{t=0}^{N-1} (x'(t) Q x(t) + u'(t) R u(t)) + 1/2 x'(N) P x'(N)
+                s.t. x(t+1) = A_{z(t)} x(t) + B_{z(t)} u(t) + c_{z(t)}
+                     F_{z(t)} x(t) + G_{z(t)} u(t) <= h_{z(t)}
+                     F_N x(N) <= h_N
+    where z(t) denotes the mode of the PWA system at time t.
+    The problem is then stated as a mpQP with parametric initial state x(0).
+
+    Arguments
+    ----------
+    S : instance of PieceWiseAffineSystem
+        PWA system of the optimal control problem.
+    Q : numpy.ndarray
+        Hessian of the state cost.
+    R : numpy.ndarray
+        Hessian of the input cost.
+    P : numpy.ndarray
+        Hessian of the terminal state cost.
+    X_N : instance of Polyhedron
+        Terminal state constraint.
+    mode_sequence : list of int
+        Sequence of the modes of the PWA system.
+
+    Returns
+    ----------
+    instance of MultiParametricQuadraticProgram
+        Condensed mpQP.
+    """
+
+    # condense dynamics
+    A_bar, B_bar, c_bar = S.condense(mode_sequence)
+
+    # stack cost matrices
+    N = len(mode_sequence)
+    Q_bar = block_diag(*[Q for i in range(N)] + [P])
+    R_bar = block_diag(*[R for i in range(N)])
+
+    # get blocks quadratic term objective
+    H = dict()
+    H['uu'] = R_bar + B_bar.T.dot(Q_bar).dot(B_bar)
+    H['ux'] = B_bar.T.dot(Q_bar).dot(A_bar)
+    H['xx'] = A_bar.T.dot(Q_bar).dot(A_bar)
+
+    # get blocks linear term objective
+    f = dict()
+    f['u'] = B_bar.T.dot(Q_bar).dot(c_bar)
+    f['x'] = A_bar.T.dot(Q_bar).dot(c_bar)
+    g = c_bar.T.dot(Q_bar).dot(c_bar)
+
+    # stack constraint matrices
+    D_sequence = [S.domains[m]for m in mode_sequence]
+    F_bar = block_diag(*[D.A[:,:S.nx] for D in D_sequence] + [X_N.A])
+    G_bar = block_diag(*[D.A[:,S.nx:] for D in D_sequence])
+    G_bar = np.vstack((
+        G_bar,
+        np.zeros((X_N.A.shape[0], G_bar.shape[1]))
+        ))
+    h_bar = np.vstack([D.b for D in D_sequence] + [X_N.b])
+
+    # get blocks for condensed contraints
+    A = dict()
+    A['u'] = G_bar + F_bar.dot(B_bar)
+    A['x'] = F_bar.dot(A_bar)
+    b = h_bar - F_bar.dot(c_bar)
+
+    return MultiParametricQuadraticProgram(H, f, g, A, b)

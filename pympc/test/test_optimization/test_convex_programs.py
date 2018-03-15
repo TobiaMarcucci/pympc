@@ -1,6 +1,7 @@
 # external imports
 import unittest
 import numpy as np
+import pip
 
 # internal inputs
 from pympc.optimization.convex_programs import LinearProgram, QuadraticProgram

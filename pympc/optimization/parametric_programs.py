@@ -5,6 +5,7 @@ from copy import copy
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
 from pympc.optimization.convex_programs import QuadraticProgram
+from pympc.optimization.gurobi import mixed_integer_quadratic_program
 
 class MultiParametricQuadraticProgram(object):
     """
@@ -550,6 +551,15 @@ class MultiParametricMixedIntegerQuadraticProgram(object):
         self.b = b
 
     def solve(self, x):
-        pass
-        
-# forse e meglio chiamare i solver per qp e miq direttamente da qui, pittosto che passare dalle classi non parametriche
+        sol = mixed_integer_quadratic_program(
+            self.H['uu'],
+            self.H['zz'],
+            self.H['zx'].dot(x),
+            self.A['u'],
+            self.A['z'],
+            self.A['d'],
+            self.b - self.A['x'].dot(x)
+            )
+        if sol['min'] is not None:
+            sol['min'] += .5*x.T.dot(self.H['xx']).dot(x)[0,0]
+        return sol
