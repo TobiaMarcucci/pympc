@@ -1,4 +1,5 @@
 # external imports
+from six.moves import range  # behaves like xrange on python2, range on python3
 import numpy as np
 from copy import copy
 from scipy.spatial import HalfspaceIntersection, ConvexHull
@@ -375,7 +376,7 @@ class Polyhedron(object):
             f = self.b
 
         # initialize list of non-redundant facets
-        minimal_facets = range(E.shape[0])
+        minimal_facets = list(range(E.shape[0]))
 
         # check each facet
         for i in range(E.shape[0]):
@@ -737,7 +738,7 @@ class Polyhedron(object):
 
         # check full dimensionality
         tol = 1.e-7
-        if self.radius < tol:
+        if self.radius is None or self.radius < tol:
             return None
 
         # check boundedness
