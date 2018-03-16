@@ -13,6 +13,7 @@ setup(name='pympc',
           'computational geometry'
           ],
       install_requires=[
+          'six',
           'numpy',
           'scipy',
           'matplotlib'
