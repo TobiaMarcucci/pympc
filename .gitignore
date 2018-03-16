@@ -5,3 +5,8 @@
 gurobi.log
 .DS_Store
 .ipynb_checkpoints
+venv
+build
+dist
+*.egg-info
+.pytest_cache

@@ -94,12 +94,12 @@ class TestLinearSystem(unittest.TestCase):
             max_iter = 1000
             t = 0
             while not np.isclose(infinite_horizon_V, finite_horizon_V):
-            	finite_horizon_V += .5*(x0.T.dot(Q).dot(x0) + (K.dot(x0)).T.dot(R).dot(K).dot(x0))
-            	x0 = A_cl.dot(x0)
-            	t += 1
-            	if t == max_iter:
-            		self.assertTrue(False)
-            	
+                finite_horizon_V += .5*(x0.T.dot(Q).dot(x0) + (K.dot(x0)).T.dot(R).dot(K).dot(x0))
+                x0 = A_cl.dot(x0)
+                t += 1
+                if t == max_iter:
+                    self.assertTrue(False)
+
     def test_mcais(self):
         """
         Tests only if the function macais() il called correctly.
@@ -284,7 +284,7 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
                 u_list.append(u_t)
                 x_tp1 = A_t.dot(x_t) + B_t.dot(u_t) + c_t
                 x = np.vstack((x, x_tp1))
-                
+
                 # create a domain that contains x and u (it has to be super-tight so that the pwa system is well posed!)
                 D = Polyhedron.from_bounds(
                     np.vstack((x_t/1.01, u_t/1.01)),

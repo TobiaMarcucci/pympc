@@ -181,7 +181,7 @@ class Polyhedron(object):
         S : numpy.ndarray
             Selection matrix.
         """
-        
+
         # if indices is None select all the rows
         n = self.A.shape[1]
         if indices is None:
@@ -573,7 +573,7 @@ class Polyhedron(object):
         P1 = Polyhedron(A1, b1)
         A2 = np.vstack((P2.A, P2.C, -P2.C))
         b2 = np.vstack((P2.b, P2.d, -P2.d))
-        
+
         # check inclusion, one facet per time
         included = True
         lp = LinearProgram(P1)
@@ -721,11 +721,11 @@ class Polyhedron(object):
 
     @property
     def vertices(self):
-    	"""
-    	Returns the set of vertices of the polyhdron.
-    	It assumes the polyhedron to be bounded (i.e. to be a polytope) and full dimensional (equality constraints are allowed but inequalities cannot make the polytope lower dimensional).
+        """
+        Returns the set of vertices of the polyhdron.
+        It assumes the polyhedron to be bounded (i.e. to be a polytope) and full dimensional (equality constraints are allowed but inequalities cannot make the polytope lower dimensional).
 
-    	Returns
+        Returns
         ----------
         vertices : list of numpy.ndarray
             List of the vertices of the bounded polyhedron (None if the polyhedron is unbounded or empty).
@@ -735,9 +735,9 @@ class Polyhedron(object):
         if self._vertices is not None:
             return self._vertices
 
-    	# check full dimensionality
+        # check full dimensionality
         tol = 1.e-7
-    	if self.radius < tol:
+        if self.radius < tol:
             return None
 
         # check boundedness
@@ -763,17 +763,17 @@ class Polyhedron(object):
 
         # call qhull through scipy
         else:
-	    	halfspaces = np.hstack((A, -b))
-	    	polyhedron = HalfspaceIntersection(halfspaces, center.flatten())
-	    	V = polyhedron.intersections
-	    	self._vertices = [V[i:i+1,:].T for i in range(V.shape[0])]
+            halfspaces = np.hstack((A, -b))
+            polyhedron = HalfspaceIntersection(halfspaces, center.flatten())
+            V = polyhedron.intersections
+            self._vertices = [V[i:i+1,:].T for i in range(V.shape[0])]
 
-	    # go back to the original coordinates in case of equalities
+        # go back to the original coordinates in case of equalities
         if self.C.shape[0] > 0:
             r = np.linalg.inv(self.C.dot(R)).dot(self.d)
             self._vertices = [T.dot(np.vstack((v, r))) for v in self._vertices]
 
-    	return self._vertices
+        return self._vertices
 
     def project_to(self, residual_dimensions):
         """
@@ -802,16 +802,16 @@ class Polyhedron(object):
         A, b, vertices = convex_hull_method(self.A, self.b, residual_dimensions)
         proj = Polyhedron(A, b)
         proj._vertices = vertices
-        
+
         return proj
 
     @staticmethod
     def from_convex_hull(points):
         """
-    	Instantiates the polyhderon given from the conve hull of the given set of points.
-    	It assumes the polyhedron to be bounded.
+        Instantiates the polyhderon given from the conve hull of the given set of points.
+        It assumes the polyhedron to be bounded.
 
-    	Arguments
+        Arguments
         ----------
         points : list of numpy.ndarray
             List of points.
@@ -847,8 +847,8 @@ class Polyhedron(object):
 
         # extract vertices components
         if self.vertices is None:
-        	print('Cannot plot unbounded or empty polyhedra.')
-        	return
+            print('Cannot plot unbounded or empty polyhedra.')
+            return
 
         # call qhull thorugh scipy for the convex hull (needed to order the vertices in counterclockwise order)
         vertices = np.hstack(self.vertices).T[:,residual_dimensions]
@@ -886,7 +886,7 @@ def convex_hull_method(A, b, resiudal_dimensions):
         Right-hand side of the inequalities describing the higher dimensional polytope.
     residual_dimensions : list of int
         Indices of the dimensions onto which the polytope has to be projected.
-    
+
     Returns
     ----------
     E : numpy.ndarray
@@ -943,7 +943,7 @@ def _get_two_vertices(A, b, n):
         Right-hand side of the inequalities describing the higher dimensional polytope.
     n : int
         Dimensionality of the space onto which the polytope has to be projected.
-    
+
     Returns
     ----------
     vertices : list of numpy.ndarray
@@ -989,7 +989,7 @@ def _get_inner_simplex(A, b, vertices, tol=1.e-7):
 
     # initialize LPs
     n = vertices[0].shape[0]
-    
+
     # expand increasing at every iteration the dimension of the space
     X = Polyhedron(A, b)
     lp = LinearProgram(X)

@@ -54,7 +54,7 @@ class MultiParametricQuadraticProgram(object):
         The inactive (primal and dual) constraints define the region of space where the given active set is optimal
         Aui u + Axi x < bi, (primal feasibility),
         pa > 0,             (dual feasibility).
-        
+
 
         Arguments
         ----------
@@ -182,7 +182,7 @@ class MultiParametricQuadraticProgram(object):
         It assumes that the facet-to-facet property holds (i.e. each facet of a critical region is shared with another single critical region).
         The following is a simple home-made algorithm.
         For every critical region, it looks at its non-redundat inequalities and guesses the active set beyond them.
-        It then solves the KKTs for the given active set and check if the guess was right, if not it solves a QP to get the right active set and solves the KKTs again. 
+        It then solves the KKTs for the given active set and check if the guess was right, if not it solves a QP to get the right active set and solves the KKTs again.
 
         Arguments
         ----------
@@ -204,7 +204,7 @@ class MultiParametricQuadraticProgram(object):
         x_buffer = [(x, active_set_guess)]
         crs_found = []
 
-        # loop until the are no points left 
+        # loop until the are no points left
         while len(x_buffer) > 0:
 
             # get critical region for the first point in the buffer
@@ -345,7 +345,7 @@ class CriticalRegion(object):
             )
 
         return facet.center
-        
+
     def u(self, x):
         """
         Numeric value of the primal optimizer at the point x.
