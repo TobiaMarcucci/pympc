@@ -52,7 +52,7 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
     A' y = f,        y >= 0, dual feasibility,
     where y are the Lagrange multipliers and s are slack variables for the residual of primal feasibility.
     (Each equality constraint is reformulated as two inequalities.)
-    
+
     Arguments
     ----------
     f : numpy.ndarray

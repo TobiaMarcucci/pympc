@@ -1,4 +1,5 @@
 # external imports
+from six.moves import range  # behaves like xrange on python2, range on python3
 import unittest
 import numpy as np
 from random import shuffle
@@ -43,7 +44,7 @@ class TestUtils(unittest.TestCase):
         # all linearly independent
         A = np.eye(3)
         li_rows = linearly_independent_rows(A)
-        self.assertTrue(li_rows == range(3))
+        self.assertTrue(li_rows == list(range(3)))
 
     def test_plane_through_points(self):
 
@@ -78,7 +79,7 @@ class TestUtils(unittest.TestCase):
             self.assertTrue(same_rows(A, B))
 
             # check without scaling factors
-            B_order = range(n)
+            B_order = list(range(n))
             shuffle(B_order)
             B = A[B_order, :]
             self.assertTrue(same_rows(A, B, normalize=False))
@@ -99,21 +100,21 @@ class TestUtils(unittest.TestCase):
 
             # check equal lists
             v_list = [np.random.rand(n, 1) for j in range(N)]
-            u_order = range(N)
+            u_order = list(range(N))
             shuffle(u_order)
             u_list = [v_list[j] for j in u_order]
             self.assertTrue(same_vectors(v_list, u_list))
 
         # wrong size (only 2d arrays allowed)
         v_list = [np.random.rand(n) for j in range(N)]
-        u_order = range(N)
+        u_order = list(range(N))
         shuffle(u_order)
         u_list = [v_list[j] for j in u_order]
         self.assertRaises(ValueError, same_vectors, v_list, u_list)
 
         # wrong size (matrices not allowed)
         v_list = [np.random.rand(n,3) for j in range(N)]
-        u_order = range(N)
+        u_order = list(range(N))
         shuffle(u_order)
         u_list = [v_list[j] for j in u_order]
         self.assertRaises(ValueError, same_vectors, v_list, u_list)

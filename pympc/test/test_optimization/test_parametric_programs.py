@@ -54,7 +54,7 @@ class TestMultiParametricQuadraticProgram(unittest.TestCase):
         # implicit solve given point
         sol = mpqp.solve(np.array([[1.5]]))
         self.assertAlmostEqual(sol['min'], .125)
-        self.assertAlmostEqual(sol['argmin'], .5)
+        self.assertTrue(np.allclose(sol['argmin'], 0.5))
         self.assertEqual(sol['active_set'], [1])
 
         # solve

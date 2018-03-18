@@ -90,7 +90,7 @@ def quadratic_program(H, f, A, b, C=None, d=None, **kwargs):
         multiplier_equality : numpy.ndarray
             Lagrange multipliers for the equality constraints (None if the problem is unfeasible or without equality constraints).
     """
-    
+
     # get model
     model = _build_model(H=H, f=f, A=A, b=b, C=C, d=d)
 

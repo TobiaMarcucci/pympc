@@ -13,17 +13,17 @@ class TestPolyhedron(unittest.TestCase):
 
     def test_initialization(self):
 
-    	# 1 or 2d right hand sides
-    	A = np.eye(3)
-    	C = np.eye(2)
-    	b = np.ones((3,1))
-    	b_1d = np.ones(3)
-    	d = np.ones((2,1))
-    	d_1d = np.ones(2)
-    	p = Polyhedron(A, b, C, d)
-    	p_1d = Polyhedron(A, b_1d, C, d_1d)
-    	np.testing.assert_array_equal(p.b, p_1d.b)
-    	np.testing.assert_array_equal(p.d, p_1d.d)
+        # 1 or 2d right hand sides
+        A = np.eye(3)
+        C = np.eye(2)
+        b = np.ones((3,1))
+        b_1d = np.ones(3)
+        d = np.ones((2,1))
+        d_1d = np.ones(2)
+        p = Polyhedron(A, b, C, d)
+        p_1d = Polyhedron(A, b_1d, C, d_1d)
+        np.testing.assert_array_equal(p.b, p_1d.b)
+        np.testing.assert_array_equal(p.d, p_1d.d)
 
         # wrong initializations
         self.assertRaises(ValueError, Polyhedron, A, b, C)
@@ -32,7 +32,7 @@ class TestPolyhedron(unittest.TestCase):
 
     def test_add_functions(self):
 
-    	# add inequalities
+        # add inequalities
         A = np.eye(2)
         b = np.ones(2)
         p = Polyhedron(A, b)
@@ -48,7 +48,7 @@ class TestPolyhedron(unittest.TestCase):
         c = np.ones(2)
         self.assertRaises(ValueError, p.add_inequality, A, c)
 
-    	# add equalities
+        # add equalities
         p.add_equality(A, b)
         self.assertTrue(same_rows(
             np.hstack((A, b)),
@@ -187,7 +187,7 @@ class TestPolyhedron(unittest.TestCase):
             np.hstack((p.C, p.d)),
             normalize=False
             ))
-        
+
     def test_remove_equalities(self):
 
         # contruct polyhedron
@@ -240,7 +240,7 @@ class TestPolyhedron(unittest.TestCase):
         p = Polyhedron(A,b)
         mf = set(p.minimal_facets())
         self.assertTrue(mf == set([1,2,0]) or mf == set([1,2,5]))
-        
+
         # add nasty redundant inequality
         A = np.zeros((1,2))
         b = np.ones((1,1))

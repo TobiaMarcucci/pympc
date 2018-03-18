@@ -525,7 +525,7 @@ class HybridModelPredictiveController(object):
         |bigM[2][1]          0 bigM[2][3] ...|
         |bigM[3][1] bigM[3][2]          0 ...|
         |       ...        ...        ... ...|
-        
+
         Arguments
         ----------
         bigM : list of lists of numpy.ndarray
@@ -655,7 +655,7 @@ class HybridModelPredictiveController(object):
         mode_sequence = []
         for d in d_list:
             mode_sequence.append(np.where(d > .5)[0][0])
-            
+
         return u_list, x_list, mode_sequence, sol['min']
 
     def feedback(self, x):

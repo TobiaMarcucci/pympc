@@ -56,7 +56,7 @@ def zero_order_hold(A, B, c, h):
     c_d = B_d := int_0^h exp(A (h - t)) dt c.
     I holds
          |A B c|      |A_d B_d c_d|
-    exp (|0 0 0| h) = |0   I   0  | 
+    exp (|0 0 0| h) = |0   I   0  |
          |0 0 0|      |0   0   1  |
     where both the matrices are square.
     Proof: apply the definition of exponential and note that int_0^h exp(A (h - t)) dt = sum_{k=1}^inf A^(k-1) h^k/k!.

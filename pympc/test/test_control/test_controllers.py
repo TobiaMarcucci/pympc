@@ -77,7 +77,7 @@ class testModelPredictiveController(unittest.TestCase):
                     self.assertAlmostEqual(V_mpc, V_lqr)
                     for t in range(N):
                         np.testing.assert_array_almost_equal(u_mpc[t], u_lqr[t])
-                
+
                 # if x is outside mcais lqr > mpc
                 elif V_mpc is not None:
                     self.assertTrue(V_mpc > V_lqr)
