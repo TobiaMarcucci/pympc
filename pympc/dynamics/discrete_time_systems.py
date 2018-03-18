@@ -1,4 +1,5 @@
 # external imports
+from __future__ import print_function
 import numpy as np
 from scipy.linalg import block_diag, solve_discrete_are
 
@@ -124,7 +125,7 @@ class LinearSystem(object):
 
         return P, K
 
-    def mcais(self, K, D):
+    def mcais(self, K, D, **kwargs):
         """
         Returns the maximal constraint-admissible invariant set O_inf for the closed-loop system X(t+1) = (A + B K) x(t).
         It holds that x(0) in O_inf <=> (x(t), u(t) = K x(t)) in D for all t >= 0.
@@ -152,7 +153,7 @@ class LinearSystem(object):
             D.A[:,:self.nx] + D.A[:,self.nx:].dot(K),
             D.b
             )
-        O_inf, t = mcais(A_cl, X_cl)
+        O_inf, t = mcais(A_cl, X_cl, **kwargs)
 
         return O_inf, t
 
@@ -490,7 +491,7 @@ class PieceWiseAffineSystem(object):
 
         return True
 
-def mcais(A, X, tol=1.e-9):
+def mcais(A, X, verbose=False):
     """
     Returns the maximal constraint-admissible (positive) invariant set O_inf for the system x(t+1) = A x(t) subject to the constraint x in X.
     O_inf is also known as maximum output admissible set.
@@ -504,8 +505,8 @@ def mcais(A, X, tol=1.e-9):
         State transition matrix.
     X : instance of Polyhedron
         State-space domain of the dynamical system.
-    tol : float
-        Threshold for the checks in the algorithm.
+    verbose : bool
+        If True prints at each iteration the convergence parameters.
 
     Returns:
     ----------
@@ -545,11 +546,25 @@ def mcais(A, X, tol=1.e-9):
             lp.f = - J[i:i+1,:].T
             sol = lp.solve()
             J_sol.append(-sol['min'] - X.b[i])
-        if np.max(J_sol) < tol:
+
+        
+        # print status
+        if verbose:
+            print('Determinedness index: ' + str(t) + '. Convergence index: ' + str(np.max(J_sol)) + '. Number of facets: ' + str(F.shape[0]) + '.          ', end='\r')
+
+        # convergence check
+        if np.max(J_sol) < 0.:
             convergence = True
         else:
             t += 1
+
+    # remove redundant facets
+    if verbose:
+        print('\nMaximal constraint-admissible invariant set found.')
+        print('Removing redundant facets ...'),
     O_inf.remove_redundant_inequalities()
+    if verbose:
+    	print('minimal facets are ' + str(O_inf.A.shape[0]) + '.')
 
     return O_inf, t
 
