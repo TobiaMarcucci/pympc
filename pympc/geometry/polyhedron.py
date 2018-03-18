@@ -736,13 +736,13 @@ class Polyhedron(object):
         if self._vertices is not None:
             return self._vertices
 
-        # check full dimensionality
-        tol = 1.e-7
-        if self.radius is None or self.radius < tol:
-            return None
-
         # check boundedness
         if not self.bounded:
+            return None
+
+        # check full dimensionality
+        tol = 1.e-7
+        if self.radius < tol:
             return None
 
         # handle equalities
