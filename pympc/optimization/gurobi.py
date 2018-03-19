@@ -53,7 +53,7 @@ def linear_program(f, A, b, C=None, d=None, **kwargs):
 
     return sol
 
-def quadratic_program(H, f, A, b, C=None, d=None, **kwargs):
+def quadratic_program(H, f, A, b, C=None, d=None, tol =1.e-5, **kwargs):
     """
     Solves the strictly convex (H > 0) quadratic program min .5 x' H x + f' x s.t. A x <= b, C x  = d.
 
@@ -71,6 +71,8 @@ def quadratic_program(H, f, A, b, C=None, d=None, **kwargs):
         Left-hand side of the equality constraints.
     d : numpy.ndarray
         Right-hand side of the equality constraints.
+    tol : float
+        Maximum value of a multiplier to consider the related constraint inactive.
 
     Returns
     ----------
@@ -94,15 +96,21 @@ def quadratic_program(H, f, A, b, C=None, d=None, **kwargs):
     # get model
     model = _build_model(H=H, f=f, A=A, b=b, C=C, d=d)
 
-    # run the optimization
+    # parameters
     model.setParam('OutputFlag', 0)
+    model.setParam('BarConvTol', 1.e-10) # with the default value (1e-8) inactive multipliers can get values such as 5e-4, setting this to 1e-10 they generally are lower than 2e-6 (note that in the following the active set is retrieved looking at the numeric values of the multipliers!)
+
+    # run the optimization
     for parameter, value in kwargs.items():
         model.setParam(parameter, value)
     model.optimize()
 
     # return result
     sol = _reorganize_solution(model, A, C)
-    sol['active_set'] = _get_active_set_qp(model, sol['multiplier_inequality'])
+
+    # compute active set
+    if model.status == grb.GRB.Status.OPTIMAL:
+        sol['active_set'] = np.where(sol['multiplier_inequality'] > tol)[0].tolist()
 
     return sol
 
@@ -229,38 +237,6 @@ def _get_active_set_lp(model, A):
         constr = model.getConstrByName('ineq_'+str(i))
         if constr.getAttr('CBasis') == -1:
             active_set.append(i)
-
-    return active_set
-
-def _get_active_set_qp(model, ineq_mult, tol=1.e-6):
-    """
-    Checks the multipliers t find active inequalities.
-
-    Arguments
-    ----------
-    model : instance of gurobipy.Model
-        Model of the mathematical program.
-    ineq_mult : numpy.ndarray
-        Lagrange multipliers for the inequality constraints.
-    tol : float
-        Maximum value of a multiplier to consider the related constraint inactive.
-
-    Returns
-    ----------
-    active_set : list of int
-        Indices of the active inequallities {i | A_i argmin = b} (None if the problem is unfeasible).
-    """
-
-    # if unfeasible return None
-    if model.status != grb.GRB.Status.OPTIMAL:
-        return None
-
-    # otherwise check the magnitude of the multipliers
-    if ineq_mult is not None:
-        active_set = []
-        for i, mult in enumerate(ineq_mult.flatten().tolist()):
-            if mult > tol:
-                active_set.append(i)
 
     return active_set
 

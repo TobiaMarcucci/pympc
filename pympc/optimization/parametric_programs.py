@@ -115,7 +115,7 @@ class MultiParametricQuadraticProgram(object):
 
         return CriticalRegion(active_set, u, p, V, cr)
 
-    def explicit_solve_given_point(self, x, active_set_guess=None):
+    def explicit_solve_given_point(self, x, active_set_guess=None, verbose=False):
         """
         Returns the explicit solution of the mpQP at a given point.
         In case a guess for the active set is provided, it first tries it.
@@ -138,11 +138,17 @@ class MultiParametricQuadraticProgram(object):
             cr = self.explicit_solve_given_active_set(active_set_guess)
             if cr is not None and cr.contains(x):
                 return cr
+            elif verbose:
+                print('Wrong active-set guess:'),
 
         # otherwise solve the QP to get the active set
         sol = self.solve(x)
         if sol['active_set'] is None:
+            if verbose:
+                print('unfeasible sample.')
             return None
+        if verbose:
+            print('feasible sample with active set ' + str(sol['active_set']) + '.')
 
         return self.explicit_solve_given_active_set(sol['active_set'])
 
@@ -207,36 +213,34 @@ class MultiParametricQuadraticProgram(object):
         # loop until the are no points left
         while len(x_buffer) > 0:
 
+            # discard points that have been already covered
+            x_buffer = [x for x in x_buffer if not any([cr.contains(x[0]) for cr in crs_found])]
+            if len(x_buffer) == 0:
+                break
+
             # get critical region for the first point in the buffer
-            cr = self.explicit_solve_given_point(*x_buffer[0])
+            cr = self.explicit_solve_given_point(x_buffer[0][0], x_buffer[0][1], verbose)
             del x_buffer[0]
 
             # if feasible
             if cr is not None:
 
-                # clean buffer from the points covered by the new critical region
-                x_buffer = [x for x in x_buffer if not cr.contains(x[0])]
-
                 # step outside each minimal facet
                 for i in cr.minimal_facets():
                     x = cr.facet_center(i) + step_size*cr.A[i:i+1,:].T
 
-                    # check if the new point has been already explored
-                    if not any([cr_found.contains(x) for cr_found in crs_found]):
+                    # guess the active set on the other side of the facet
+                    active_set_guess = set(cr.active_set).symmetric_difference({i})
 
-                        # guess the active set on the other side of the facet
-                        if i in cr.active_set:
-                            active_set_guess = [j for j in cr.active_set if j != i]
-                        else:
-                            active_set_guess = sorted(cr.active_set + [i])
-
-                        # add to the buffes
-                        x_buffer.append((x, active_set_guess))
+                    # add to the buffer
+                    x_buffer.append((x, sorted(list(active_set_guess))))
 
                 # if feasible, add the the list of critical regions
                 crs_found.append(cr)
                 if verbose:
-                    print('Critical region found: ' + str(len(crs_found)) + '.     \r'),
+                    print('CR found, active set: ' + str(cr.active_set) + '.')
+        if verbose:
+            print('Explicit solution found, CRs are: ' + str(len(crs_found)) + '.')
 
         return ExplicitSolution(crs_found)
 
