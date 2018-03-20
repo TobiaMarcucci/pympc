@@ -9,7 +9,7 @@ from matplotlib.path import Path
 import matplotlib.patches as patches
 
 # pympc imports
-from pympc.optimization.convex_programs import LinearProgram
+from pympc.optimization.programs import linear_program, quadratic_program
 from pympc.geometry.utils import nullspace_basis, plane_through_points
 
 class Polyhedron(object):
@@ -388,9 +388,7 @@ class Polyhedron(object):
             f_relaxed = (f + f_relaxation)[minimal_facets];
 
             # solve linear program
-            constraint = Polyhedron(E_minimal, f_relaxed)
-            lp = LinearProgram(constraint, -E[i,:].T)
-            sol = lp.solve()
+            sol = linear_program(-E[i,:].T, E_minimal, f_relaxed)
 
             # remove redundant facets from the list
             if  - sol['min'] - f[i] < tol:
@@ -454,7 +452,7 @@ class Polyhedron(object):
     @property
     def empty(self):
         """
-        Checks if the polyhedron P is empty solving an LP for the x with minimum infinity norm contained in P.
+        Checks if the polyhedron P is empty solving a QP for the x with minimum norm contained in P.
 
         Returns
         ----------
@@ -467,8 +465,9 @@ class Polyhedron(object):
             return self._empty
 
         # if a sultion is found, return False
-        lp = LinearProgram(self)
-        sol = lp.solve_min_norm_inf()
+        H = np.eye(self.A.shape[1])
+        f = np.zeros((self.A.shape[1], 1))
+        sol = quadratic_program(H, f, self.A, self.b, self.C, self.d)
         self._empty = sol['min'] is None
 
         return self._empty
@@ -492,7 +491,7 @@ class Polyhedron(object):
         Returns
         ----------
         bounded : bool
-            True if the polyhedron is bounded, False otherwise.
+            True if the polyhedron is bounded (if the polyhedron is empty also True), False otherwise.
         """
 
         # check if it has been already checked
@@ -512,11 +511,13 @@ class Polyhedron(object):
 
         # check Stiemke's theorem of alternatives
         n, m = A.shape
-        constraint = Polyhedron.from_lower_bound(np.ones((n, 1)))
-        constraint.add_equality(A.T, np.zeros((m, 1)))
-        cost = np.ones((n, 1))
-        lp = LinearProgram(constraint, cost)
-        sol = lp.solve()
+        sol = linear_program(
+            np.ones((n, 1)), # f
+            -np.eye(n),      # A
+            -np.ones((n,1)), # b
+            A.T,             # C
+            np.zeros((m, 1)) # d
+            )
         self._bounded = sol['min'] is not None
 
         return self._bounded
@@ -577,10 +578,9 @@ class Polyhedron(object):
 
         # check inclusion, one facet per time
         included = True
-        lp = LinearProgram(P1)
         for i in range(A2.shape[0]):
-            lp.f = -A2[i:i+1,:].T
-            sol = lp.solve()
+            f = -A2[i:i+1,:].T
+            sol = linear_program(f, P1.A, P1.b)
             penetration = - sol['min'] - b2[i]
             if penetration > tol:
                 included = False
@@ -702,11 +702,9 @@ class Polyhedron(object):
             ))
         A_row_norm = np.reshape(np.linalg.norm(A, axis=1), (A.shape[0], 1))
         A_lp = np.hstack((A, -A_row_norm))
-        X = Polyhedron(A_lp, b)
-        lp = LinearProgram(X, f_lp)
 
         # solve and reshape result
-        sol = lp.solve()
+        sol = linear_program(f_lp, A_lp, b)
         radius = sol['min']
         center = sol['argmin']
         if radius is not None:
@@ -959,10 +957,8 @@ def _get_two_vertices(A, b, n):
 
     # minimize and maximize in the given direction
     vertices = []
-    X = Polyhedron(A, b)
-    lp = LinearProgram(X)
-    for lp.f in [a, -a]:
-        sol = lp.solve()
+    for f in [a, -a]:
+        sol = linear_program(f, A, b)
         vertices.append(sol['argmin'][:n,:])
 
     return vertices
@@ -992,12 +988,10 @@ def _get_inner_simplex(A, b, vertices, tol=1.e-7):
     n = vertices[0].shape[0]
 
     # expand increasing at every iteration the dimension of the space
-    X = Polyhedron(A, b)
-    lp = LinearProgram(X)
     for i in range(2, n+1):
         a, d = plane_through_points([v[:i,:] for v in vertices])
-        lp.f = np.vstack((a, np.zeros((A.shape[1]-i, 1))))
-        sol = lp.solve()
+        f = np.vstack((a, np.zeros((A.shape[1]-i, 1))))
+        sol = linear_program(f, A, b)
 
         # check the length of the expansion wrt to the plane, if zero expand in the opposite direction
         expansion = np.abs(a.T.dot(sol['argmin'][:i, :]) - d) # >= 0
@@ -1032,8 +1026,6 @@ def _expand_simplex(A, b, hull, tol=1.e-7):
     # initialize algorithm's variables
     n = hull.points[0].shape[0]
     a_explored = []
-    X = Polyhedron(A, b)
-    lp = LinearProgram(X)
 
     # start convex-hull method
     convergence = False
@@ -1056,11 +1048,11 @@ def _expand_simplex(A, b, hull, tol=1.e-7):
                 a_explored.append(a)
 
                 # maximize in the direction a
-                lp.f = np.vstack((
+                f = np.vstack((
                     - a,
                     np.zeros((A.shape[1]-n, 1))
                     ))
-                sol = lp.solve()
+                sol = linear_program(f, A, b)
 
                 # check if expansion wrt to the halfplane is greater than zero
                 expansion = - sol['min'] - d # >= 0

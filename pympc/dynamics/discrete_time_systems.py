@@ -1,11 +1,11 @@
 # external imports
-from __future__ import print_function
 import numpy as np
 from scipy.linalg import block_diag, solve_discrete_are
+from copy import copy
 
 # internal imports
 from pympc.geometry.polyhedron import Polyhedron
-from pympc.optimization.convex_programs import LinearProgram
+from pympc.optimization.programs import linear_program
 from pympc.dynamics.discretization_methods import explicit_euler, zero_order_hold
 from pympc.dynamics.utils import check_affine_system
 
@@ -153,9 +153,9 @@ class LinearSystem(object):
             D.A[:,:self.nx] + D.A[:,self.nx:].dot(K),
             D.b
             )
-        O_inf, t = mcais(A_cl, X_cl, **kwargs)
+        O_inf = mcais(A_cl, X_cl, **kwargs)
 
-        return O_inf, t
+        return O_inf
 
     def condense(self, N):
         """
@@ -499,6 +499,22 @@ def mcais(A, X, verbose=False):
     (Implementation of Algorithm 3.2 from: Gilbert, Tan - Linear Systems with State and Control Constraints, The Theory and Application of Maximal Output Admissible Sets.)
     Sufficient conditions for this set to be finitely determined (i.e. defined by a finite number of facets) are: A stable, X bounded and containing the origin.
 
+    Math
+    ----------
+    At each time step t, we want to verify if at the next time step t+1 the system will go outside X.
+    Let's consider X := {x | D_i x <= e_i, i = 1,...,n} and t = 0.
+    In order to ensure that x(1) = A x(0) is inside X, we need to consider one by one all the constraints and for each of them, the worst-case x(0).
+    We can do this solvin an LP
+    V(t=0, i) = max_{x in X} D_i A x - e_i for i = 1,...,n
+    if all these LPs has V < 0 there is no x(0) such that x(1) is outside X.
+    The previous implies that all the time-evolution x(t) will lie in X (see Gilbert and Tan).
+    In case one of the LPs gives a V > 0, we iterate and consider
+    V(t=1, i) = max_{x in X, x in A X} D_i A^2 x - e_i for i = 1,...,n
+    where A X := {x | D A x <= e}.
+    If now all V < 0, then O_inf = X U AX, otherwise we iterate until convergence
+    V(t, i) = max_{x in X, x in A X, ..., x in A^t X} D_i A^(t+1) x - e_i for i = 1,...,n
+    Once at convergence O_Inf = X U A X U ... U A^t X.
+
     Arguments
     ----------
     A : numpy.ndarray
@@ -511,7 +527,7 @@ def mcais(A, X, verbose=False):
     Returns:
     ----------
     O_inf : instance of Polyhedron
-        Maximal constraint-admissible (positive) ivariant.
+        Maximal constraint-admissible (positive) ivariant, the given representation is minimal by construction (i.e. it does not have redundant facets).
     t : int
         Determinedness index.
     """
@@ -526,36 +542,35 @@ def mcais(A, X, verbose=False):
     if not X.bounded:
         raise ValueError('unbounded constraint set, cannot derive maximal constraint-admissible set.')
 
-    # Gilber and Tan algorithm
-    t = 0
+    # initialize mcais
+    O_inf = copy(X)
+
+    # loop over time
+    t = 1
     convergence = False
     while not convergence:
 
-        # cost function gradients for all i
-        J = X.A.dot(np.linalg.matrix_power(A,t+1))
+        # solve one LP per facet
+        J = X.A.dot(np.linalg.matrix_power(A,t))
+        residuals = []
+        for i in range(X.A.shape[0]):
+            sol = linear_program(- J[i,:], O_inf.A, O_inf.b)
+            residuals.append(- sol['min'] - X.b[i,0])
 
-        # constraints to each LP
-        F = np.vstack([X.A.dot(np.linalg.matrix_power(A,k)) for k in range(t+1)])
-        g = np.vstack([X.b for k in range(t+1)])
-        O_inf = Polyhedron(F, g)
-
-        # list of all minima
-        J_sol = []
-        lp = LinearProgram(O_inf)
-        for i in range(nc):
-            lp.f = - J[i:i+1,:].T
-            sol = lp.solve()
-            J_sol.append(-sol['min'] - X.b[i])
-
-        
-        # print status
+        # print status of the algorithm
         if verbose:
-            print('Determinedness index: ' + str(t) + '. Convergence index: ' + str(np.max(J_sol)) + '. Number of facets: ' + str(F.shape[0]) + '.          ', end='\r')
+            print('Time horizon: ' + str(t) + '.'),
+            print('Convergence index: ' + str(max(residuals)) + '.'),
+            print('Number of facets: ' + str(O_inf.A.shape[0]) + '.   \r'),
 
         # convergence check
-        if np.max(J_sol) < 0.:
+        new_facets = [i for i, r in enumerate(residuals) if r > 0.]
+        if len(new_facets) == 0:
             convergence = True
         else:
+
+            # add (only non-redundant!) facets
+            O_inf.add_inequality(J[new_facets,:], X.b[new_facets,:])
             t += 1
 
     # remove redundant facets
@@ -564,9 +579,9 @@ def mcais(A, X, verbose=False):
         print('Removing redundant facets ...'),
     O_inf.remove_redundant_inequalities()
     if verbose:
-    	print('minimal facets are ' + str(O_inf.A.shape[0]) + '.')
+        print('minimal facets are ' + str(O_inf.A.shape[0]) + '.')
 
-    return O_inf, t
+    return O_inf
 
 def condense_pwa_system(affine_systems, mode_sequence):
     """

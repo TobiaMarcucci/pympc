@@ -1,30 +1,17 @@
 # external imports
 import unittest
 import numpy as np
-import pip
 
 # internal inputs
-from pympc.optimization import pnnls
+from pympc.optimization.solvers.pnnls import linear_program as lp_pnnls, quadratic_program as qp_pnnls
+from pympc.optimization.solvers.gurobi import linear_program as lp_gurobi, quadratic_program as qp_gurobi, mixed_integer_quadratic_program as miqp_gurobi
 
-# available solvers
-lp_solvers = [pnnls.linear_program]
-qp_solvers = [pnnls.quadratic_program]
-
-# select avavilable solvers
-packages = [pkg.project_name for pkg in pip.get_installed_distributions()]
-
-# gurobi interface in python
-if 'gurobipy' in packages:
-    from pympc.optimization import gurobi
-    lp_solvers.append(gurobi.linear_program)
-    qp_solvers.append(gurobi.quadratic_program)
-
-class TestPnnls(unittest.TestCase):
+class TestSolvers(unittest.TestCase):
 
     def test_linear_program(self):
 
         # loop over solvers
-        for linear_program in lp_solvers:
+        for linear_program in [lp_pnnls, lp_gurobi]:
 
             # trivial lp with only inequalities
             f = np.ones((2, 1))
@@ -248,7 +235,7 @@ class TestPnnls(unittest.TestCase):
     def test_quadratic_program(self):
 
         # loop over solvers
-        for quadratic_program in qp_solvers:
+        for quadratic_program in [qp_pnnls, qp_gurobi]:
 
             # trivial qp with only inequalities
             H = np.eye(2)
@@ -305,6 +292,47 @@ class TestPnnls(unittest.TestCase):
             sol = quadratic_program(H, f, A, b, C, -d)
             for value in sol.values():
                 self.assertTrue(value is None)
+
+    def test_mixed_integer_quadratic_program(self):
+
+        # loop over solvers
+        for mixed_integer_quadratic_program in [miqp_gurobi]:
+
+            # simple miqp
+            H = np.eye(2)
+            f = np.array([[0.],[-.6]])
+            nc = 1
+            A = np.eye(2)
+            b = 2.*np.ones((2,1))
+            sol = mixed_integer_quadratic_program(nc, H, f, A, b)
+            self.assertAlmostEqual(
+                sol['min'],
+                -.1
+                )
+            np.testing.assert_array_almost_equal(
+                sol['argmin'],
+                np.array([[0.],[1.]])
+                )
+
+            # add equalities
+            C = np.array([[1., -1.]])
+            d = np.zeros((1,1))
+            sol = mixed_integer_quadratic_program(nc, H, f, A, b, C, d)
+            self.assertAlmostEqual(
+                sol['min'],
+                0.
+                )
+            np.testing.assert_array_almost_equal(
+                sol['argmin'],
+                np.zeros((2,1))
+                )
+
+            # unfeasible miqp
+            C = np.ones((1,2))
+            d = 5.*np.ones((1,1))
+            sol = mixed_integer_quadratic_program(nc, H, f, A, b, C, d)
+            self.assertTrue(sol['min'] is None)
+            self.assertTrue(sol['argmin'] is None)
 
 if __name__ == '__main__':
     unittest.main()

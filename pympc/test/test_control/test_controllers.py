@@ -40,7 +40,7 @@ class testModelPredictiveController(unittest.TestCase):
             Q = np.eye(n)
             R = np.eye(m)
             P, K = S.solve_dare(Q, R)
-            X_N = S.mcais(K, D)[0]
+            X_N = S.mcais(K, D)
             controller = ModelPredictiveController(S, N, Q, R, P, D, X_N)
 
             # simulate
@@ -130,7 +130,7 @@ class testModelPredictiveController(unittest.TestCase):
             Q = np.eye(n)
             R = np.eye(m)
             P, K = S.solve_dare(Q, R)
-            X_N = S.mcais(K, D)[0]
+            X_N = S.mcais(K, D)
             controller = ModelPredictiveController(S, N, Q, R, P, D, X_N)
 
             # store explicit solution
@@ -221,7 +221,7 @@ class testHybridModelPredictiveController(unittest.TestCase):
 
         # terminal set and cost
         P, K = S1.solve_dare(Q, R)
-        X_N = S1.mcais(K, D1)[0]
+        X_N = S1.mcais(K, D1)
 
         # hybrid MPC controller
         controller = HybridModelPredictiveController(S, N, Q, R, P, X_N)

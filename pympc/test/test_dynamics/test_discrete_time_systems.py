@@ -115,7 +115,7 @@ class TestLinearSystem(unittest.TestCase):
         d_min = - np.ones((3,1))
         d_max = - d_min
         D = Polyhedron.from_bounds(d_min, d_max)
-        O_inf = S.mcais(K, D)[0]
+        O_inf = S.mcais(K, D)
         self.assertTrue(O_inf.contains(np.zeros((2,1))))
 
     def test_from_continuous(self):
@@ -360,7 +360,7 @@ class TestMCAIS(unittest.TestCase):
                 stable = np.max(np.absolute(np.linalg.eig(A)[0])) < 1.
 
             # get mcais
-            O_inf, _ = mcais(A, X)
+            O_inf = mcais(A, X)
 
             # generate random initial conditions
             for j in range(100):

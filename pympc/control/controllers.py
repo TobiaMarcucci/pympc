@@ -6,7 +6,7 @@ from scipy.linalg import block_diag
 # internal inputs
 from pympc.dynamics.discrete_time_systems import AffineSystem, PieceWiseAffineSystem
 from pympc.optimization.parametric_programs import MultiParametricQuadraticProgram, MultiParametricMixedIntegerQuadraticProgram
-from pympc.optimization.convex_programs import LinearProgram
+from pympc.optimization.programs import linear_program
 
 class ModelPredictiveController(object):
     """
@@ -339,15 +339,14 @@ class HybridModelPredictiveController(object):
             for j, S_j in enumerate(self.S.affine_systems):
                 alpha_ij = []
                 beta_ij = []
-                lp = LinearProgram(self.S.domains[j])
+                D_j = self.S.domains[j]
 
                 # solve two LPs for each component of the state vector
                 for k in range(S_i.nx):
-                    lp.f = A_i[k:k+1,:].T
-                    sol = lp.solve()
+                    f = A_i[k:k+1,:].T
+                    sol = linear_program(f, D_j.A, D_j.b, D_j.C, D_j.d)
                     alpha_ij.append(sol['min'] + S_i.c[k,0])
-                    lp.f = - lp.f
-                    sol = lp.solve()
+                    sol = linear_program(-f, D_j.A, D_j.b, D_j.C, D_j.d)
                     beta_ij.append(- sol['min'] + S_i.c[k,0])
 
                 # close inner loop appending bigMs
@@ -393,12 +392,11 @@ class HybridModelPredictiveController(object):
             # inner loop over the number of affine systems
             for j, D_j in enumerate(self.S.domains):
                 gamma_ij = []
-                lp = LinearProgram(D_j)
 
                 # solve one LP for each inequality of the ith domain
                 for k in range(D_i.A.shape[0]):
-                    lp.f = -D_i.A[k:k+1,:].T
-                    sol = lp.solve()
+                    f = -D_i.A[k:k+1,:].T
+                    sol = linear_program(f, D_j.A, D_j.b, D_j.C, D_j.d)
                     gamma_ij.append(- sol['min'] - D_i.b[k,0])
 
                 # close inner loop appending bigMs

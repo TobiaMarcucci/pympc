@@ -1,11 +1,11 @@
 # external imports
 import numpy as np
+from scipy.linalg import block_diag
 from copy import copy
 
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
-from pympc.optimization.convex_programs import QuadraticProgram
-from pympc.optimization.gurobi import mixed_integer_quadratic_program
+from pympc.optimization.programs import quadratic_program, mixed_integer_quadratic_program
 
 class MultiParametricQuadraticProgram(object):
     """
@@ -165,16 +165,12 @@ class MultiParametricQuadraticProgram(object):
         ----------
         sol : dict
             Dictionary with the solution of the QP (see the documentation of pympc.optimization.pnnls.quadratic_program for the details of the fields of sol).
-
         """
 
-        # fix constraints and cost function
-        D = Polyhedron(self.A['u'], self.b - self.A['x'].dot(x))
+        # fix cost function and constraints
         f = self.H['ux'].dot(x) + self.f['u']
-
-        # solve QP
-        qp = QuadraticProgram(D, self.H['uu'], f)
-        sol = qp.solve()
+        b = self.b - self.A['x'].dot(x)
+        sol = quadratic_program(self.H['uu'], f, self.A['u'], b)
 
         # "lift" optimal value function
         if sol['min'] is not None:
@@ -584,19 +580,46 @@ class MultiParametricMixedIntegerQuadraticProgram(object):
             Dictionary with the solution of the MIQP, keys: 'min', 'u', 'z', 'd'.
         """
 
-        # solve MIQP
-        sol = mixed_integer_quadratic_program(
+        # MIQP dimensions
+        nu = self.A['u'].shape[1]
+        nz = self.A['z'].shape[1]
+        nd = self.A['d'].shape[1]
+        nc = nu + nz
+
+        # put MIQP in standard form
+        H = block_diag(
             self.H['uu'],
             self.H['zz'],
+            np.zeros((nd, nd))
+            )
+        f = np.vstack((
+            np.zeros((nu, 1)),
             self.H['zx'].dot(x),
+            np.zeros((nd, 1))
+            ))
+        A = np.hstack((
             self.A['u'],
             self.A['z'],
-            self.A['d'],
-            self.b - self.A['x'].dot(x)
-            )
+            self.A['d']
+            ))
+        b = self.b - self.A['x'].dot(x)
 
-        # in not unfeasible lift the cost function with the offset term
+        # solve MIQP
+        sol_sf = mixed_integer_quadratic_program(nc, H, f, A, b)
+
+        # reshape solution
+        sol = {
+            'min': sol_sf['min'],
+            'u': None,
+            'z': None,
+            'd': None
+            }
+
+        # if feasible lift the cost function with the offset term
         if sol['min'] is not None:
             sol['min'] += .5*x.T.dot(self.H['xx']).dot(x)[0,0]
+            sol['u'] = sol_sf['argmin'][:nu,:]
+            sol['z'] = sol_sf['argmin'][nu:nu+nz,:]
+            sol['d'] = sol_sf['argmin'][nu+nz:,:]
 
         return sol
