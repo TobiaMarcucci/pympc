@@ -527,7 +527,7 @@ def mcais(A, X, verbose=False):
     Returns:
     ----------
     O_inf : instance of Polyhedron
-        Maximal constraint-admissible (positive) ivariant, the given representation is minimal by construction (i.e. it does not have redundant facets).
+        Maximal constraint-admissible (positive) ivariant.
     t : int
         Determinedness index.
     """

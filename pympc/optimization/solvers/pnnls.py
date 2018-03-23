@@ -89,7 +89,7 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
 
     # check equalities
     if (C is None) != (d is None):
-        raise ValueError("missing C or d.")
+        raise ValueError('missing C or d.')
 
     # problem size
     n_ineq, n_x = A.shape
@@ -97,6 +97,8 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
         n_eq = C.shape[0]
     else:
         n_eq = 0
+
+    # reshape inputs
     if len(f.shape) == 1:
         f = np.reshape(f, (f.shape[0], 1))
     if len(b.shape) == 1:
@@ -197,7 +199,7 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-7):
 
     # check equalities
     if (C is None) != (d is None):
-        raise ValueError("missing C or d.")
+        raise ValueError('missing C or d.')
 
     # problem size
     n_ineq, n_x = A.shape
@@ -205,6 +207,8 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-7):
         n_eq = C.shape[0]
     else:
         n_eq = 0
+
+    # reshape inputs
     if len(f.shape) == 1:
         f = np.reshape(f, (f.shape[0], 1))
     if len(b.shape) == 1:
