@@ -1,311 +1,625 @@
+# external imports
 import numpy as np
-from pympc.optimization.gurobi import linear_program, quadratic_program, linear_expression, quadratic_expression
-from pympc.geometry.polytope import Polytope
-import gurobipy as grb
+from scipy.linalg import block_diag
+from copy import copy
 
+# internal inputs
+from pympc.geometry.polyhedron import Polyhedron
+from pympc.optimization.programs import quadratic_program, mixed_integer_quadratic_program
 
+class MultiParametricQuadraticProgram(object):
+    """
+    mpQP in the form
+                      |u|' |Huu  Hux| |u|   |fu|' |u|
+    V(x) := min_u 1/2 |x|  |Hux' Hxx| |x| + |fx|  |x| + g
+             s.t. Au u + Ax x <= b
+    """
 
-class ParametricLP:
-
-    def __init__(self, F_u, F_x, F, C_u, C_x, C):#, row_sparsity=None, column_sparsity=None):
+    def __init__(self, H, f, g, A, b):
         """
-        LP in the form:
-        min  \sum_i | (F_u u + F_x x + F)_i |
-        s.t. C_u u <= C_x x + C
-        """
-        self.F_u = F_u
-        self.F_x = F_x
-        self.F = F
-        self.C_u = C_u
-        self.C_x = C_x
-        self.C = C
-        # self.row_sparsity = row_sparsity
-        # self.column_sparsity = column_sparsity
-        self.add_slack_variables()
-        return
+        Instantiates the parametric mpQP.
 
-    def add_slack_variables(self):
+        Arguments
+        ----------
+        H : dict of numpy.ndarray
+            Blocks of the quaratic term, keys: 'xx', 'ux', 'xx'.
+        f : dict of numpy.ndarray
+            Blocks of the linear term, keys: 'x', 'u'.
+        g : numpy.ndarray
+            Offset term in the cost function.
+        A : dict of numpy.ndarray
+            Left-hand side of the constraints, keys: 'x', 'u'.
+        b : numpy.ndarray
+            Right-hand side of the constraints.
         """
-        Reformulates the LP as:
-        min f^T z
-        s.t. A z <= B x + c
+        self.H = H
+        self.Huu_inv = np.linalg.inv(self.H['uu'])
+        self.f = f
+        self.g = g
+        self.A = A
+        self.b = b
+
+    def explicit_solve_given_active_set(self, active_set):
         """
-        n_slack = self.F.shape[0]
-        n_u = self.F_u.shape[1]
-        self.f = np.vstack((
-            np.zeros((n_u,1)),
-            np.ones((n_slack,1))
+        Returns the explicit solution of the mpQP for a given active set.
+        The solution turns out to be an affine function of x, i.e. u(x) = ux x + u0, p(x) = px x + p0, where p are the Lagrange multipliers for the inequality constraints.
+
+        Math
+        ----------
+        Given an active set A and a set of multipliers p, the KKT conditions for the mpQP are a set of linear equations that can be solved for u(x) and p(x)
+        Huu u + Hux + fu + Aua' pa = 0, (stationarity of the Lagrangian),
+        Aua u + Axa x = ba,             (primal feasibility),
+        pi = 0,                         (dual feasibility),
+        where the subscripts a and i dentote active and inactive inequalities respectively.
+        The inactive (primal and dual) constraints define the region of space where the given active set is optimal
+        Aui u + Axi x < bi, (primal feasibility),
+        pa > 0,             (dual feasibility).
+
+
+        Arguments
+        ----------
+        active_set : list of int
+            Indices of the active inequalities.
+
+        Reuturns
+        ----------
+        instance of CriticalRegion
+            Critical region for the given active set.
+        """
+
+        # ensure that LICQ will hold
+        Aua = self.A['u'][active_set, :]
+        if len(active_set) > 0  and np.linalg.matrix_rank(Aua) < Aua.shape[0]:
+            return None
+
+        # split active and inactive
+        inactive_set = [i for i in range(self.A['x'].shape[0]) if i not in active_set]
+        Aui = self.A['u'][inactive_set, :]
+        Axa = self.A['x'][active_set, :]
+        Axi = self.A['x'][inactive_set, :]
+        ba = self.b[active_set, :]
+        bi = self.b[inactive_set, :]
+
+        # multipliers
+        M = np.linalg.inv(Aua.dot(self.Huu_inv).dot(Aua.T))
+        pax = M.dot(Axa - Aua.dot(self.Huu_inv).dot(self.H['ux']))
+        pa0 = - M.dot(ba + Aua.dot(self.Huu_inv).dot(self.f['u']))
+        px = np.zeros(self.A['x'].shape)
+        p0 = np.zeros((self.A['x'].shape[0], 1))
+        px[active_set, :] = pax
+        p0[active_set, :] = pa0
+        p = {'x': px, '0':p0}
+
+        # primary variables
+        ux = - self.Huu_inv.dot(self.H['ux'] + Aua.T.dot(pax))
+        u0 = - self.Huu_inv.dot(self.f['u'] + Aua.T.dot(pa0))
+        u = {'x':ux, '0':u0}
+
+        # critical region
+        Acr = np.vstack((
+            - pax,
+            Aui.dot(ux) + Axi
             ))
-        self.A = np.vstack((
-            np.hstack((self.C_u, np.zeros((self.C_u.shape[0], n_slack)))),
-            np.hstack((self.F_u, -np.eye(n_slack))),
-            np.hstack((-self.F_u, -np.eye(n_slack)))
+        bcr = np.vstack((
+            pa0,
+            bi - Aui.dot(u0)
             ))
-        self.B = np.vstack((self.C_x, -self.F_x, self.F_x))
-        self.c = np.vstack((self.C, -self.F, self.F))
-        self.n_var = n_u + n_slack
-        self.n_cons = self.A.shape[0]
-        return
+        cr = Polyhedron(Acr, bcr)
+        cr.normalize()
 
-    def solve(self, x0, u_length=None):
-        x0 = np.reshape(x0, (x0.shape[0], 1))
-        sol = linear_program(self.f, self.A, self.B.dot(x0)+self.c)
-        u_star = sol.argmin[0:self.F_u.shape[1]]
-        if u_length is not None:
-            if not float(u_star.shape[0]/u_length).is_integer():
-                raise ValueError('Uncoherent dimension of the input u_length.')
-            u_star = [u_star[i*u_length:(i+1)*u_length,:] for i in range(u_star.shape[0]/u_length)]
-        return u_star, sol.min
+        # optimal value function V(x) = 1/2 x' Vxx x + Vx' x + V0
+        Vxx = ux.T.dot(self.H['uu']).dot(ux) + 2.*self.H['ux'].T.dot(ux) + self.H['xx']
+        Vx = (ux.T.dot(self.H['uu'].T) + self.H['ux'].T).dot(u0) + ux.T.dot(self.f['u']) + self.f['x']
+        V0 = .5*u0.T.dot(self.H['uu']).dot(u0) + self.f['u'].T.dot(u0) + self.g
+        V = {'xx':Vxx, 'x':Vx, '0':V0}
 
-class ParametricQP:
+        return CriticalRegion(active_set, u, p, V, cr)
 
-    def __init__(self, F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C):
+    def explicit_solve_given_point(self, x, active_set_guess=None, verbose=False):
         """
-        Multiparametric QP in the form:
-        min  .5 u' F_{uu} u + x0' F_{xu} u + F_u' u + .5 x0' F_{xx} x0 + F_x' x0 + F
-        s.t. C_u u <= C_x x + C
+        Returns the explicit solution of the mpQP at a given point.
+        In case a guess for the active set is provided, it first tries it.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the solution.
+        active_set_guess : list of int
+            Indices of the inequalities we guess are active at the given point.
+
+        Reuturns
+        ----------
+        instance of CriticalRegion
+            Critical region that covers the give point (None if the given x is unfeasible).
         """
-        # self.cost_blocks = {'F_uu': F_uu, 'F_xx': F_xx, 'F_xu': F_xu, 'F_u': F_u, 'F_x': F_x, 'F': F}
-        # self.constraint_blocks = {'C_u': C_u, 'C_x': C_x, 'C': C}
-        self.F_uu = F_uu
-        self.F_xx = F_xx
-        self.F_xu = F_xu
-        self.F_u = F_u
-        self.F_x = F_x
-        self.F = F
-        self.C_u = C_u
-        self.C_x = C_x
-        self.C = C
-        self.model, self.quadratic_cost = self.build_model()
-        self.remove_linear_terms()
-        self._feasible_set = None
-        return
 
-    def build_model(self):
+        # first try the guess for the active set
+        if active_set_guess is not None:
+            cr = self.explicit_solve_given_active_set(active_set_guess)
+            if cr is not None and cr.contains(x):
+                return cr
+            elif verbose:
+                print('Wrong active-set guess:'),
 
-        H = np.vstack((
-            np.hstack((self.F_uu, self.F_xu.T)),
-            np.hstack((self.F_xu, self.F_xx)),
-            ))
-        f = np.hstack((self.F_u.T, self.F_x.T))
-        A = np.hstack((self.C_u, -self.C_x))
-        b = self.C
+        # otherwise solve the QP to get the active set
+        sol = self.solve(x)
+        if sol['active_set'] is None:
+            if verbose:
+                print('unfeasible sample.')
+            return None
+        if verbose:
+            print('feasible sample with active set ' + str(sol['active_set']) + '.')
 
-        # initialize model
-        model = grb.Model()
-        n = H.shape[0]
-        ux = model.addVars(n, lb=[- grb.GRB.INFINITY]*n)
-
-        # linear inequalities
-        for i, expr in enumerate(linear_expression(A, b, ux)):
-            model.addConstr(expr <= 0., name='ineq_'+str(i))
-
-        # cost function
-        quadratic_cost = grb.QuadExpr()
-        expr = quadratic_expression(H, ux)
-        quadratic_cost.add(.5*expr)
-        expr = linear_expression(f, np.zeros((1,1)), ux)
-        quadratic_cost.add(expr[0])
-
-        model.setParam('OutputFlag', 0)
-        model.update()
-
-        return model, quadratic_cost
-
-    def is_feasible(self, x):
-        self.set_initial_state(x)
-        self.model.setObjective(0.)
-        self.model.optimize()
-        if self.model.status == grb.GRB.Status.OPTIMAL:
-            return True
-        return False
+        return self.explicit_solve_given_active_set(sol['active_set'])
 
     def solve(self, x):
-        n_u = self.F_uu.shape[0]
-        self.set_initial_state(x)
-        self.model.setObjective(self.quadratic_cost)
-        self.model.optimize()
-        if self.model.status == grb.GRB.Status.OPTIMAL:
-            x = self.model.getVars()
-            cost = self.model.objVal + self.F[0,0]
-            argmin = np.array(self.model.getAttr('x')[:n_u]).reshape(n_u, 1)
-        else:
-            cost = np.nan
-            argmin = np.full((n_u,1), np.nan)
-        return argmin, cost
-
-    def set_initial_state(self, x):
-        n_u = self.F_uu.shape[0]
-        n_x = self.F_xx.shape[0]
-        ux = self.model.getVars()
-        for i in range(n_x):
-            if self.model.getConstrByName('intial_condition_' + str(i)) is not None:
-                self.model.remove(self.model.getConstrByName('intial_condition_' + str(i)))
-            self.model.addConstr(ux[n_u+i] == x[i,0], name='intial_condition_' + str(i))
-        return
-
-    def get_active_set(self, x, u, tol=1.e-6):
-        u = np.vstack(u)
-        return tuple(np.where((self.C_u.dot(u) - self.C - self.C_x.dot(x)) > -tol)[0])
-
-    def remove_linear_terms(self):
         """
-        Applies the change of variables z = u + F_uu^-1 (F_xu' x + F_u')
-        that puts the cost function in the form
-        V = 1/2 z' H z + 1/2 x' F_xx_q x + F_x_q' x + F_q
-        and the constraints in the form:
-        G u <= W + S x
+        Solves the QP at the given point x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the solution.
+
+        Returns
+        ----------
+        sol : dict
+            Dictionary with the solution of the QP (see the documentation of pympc.optimization.pnnls.quadratic_program for the details of the fields of sol).
         """
-        self.H_inv = np.linalg.inv(self.F_uu)
-        self.H = self.F_uu
-        self.F_xx_q = self.F_xx - self.F_xu.dot(self.H_inv).dot(self.F_xu.T)
-        self.F_x_q = self.F_x - self.F_xu.dot(self.H_inv).dot(self.F_u)
-        self.F_q = self.F - .5*self.F_u.T.dot(self.H_inv).dot(self.F_u)
-        self.G = self.C_u
-        self.S = self.C_x + self.C_u.dot(self.H_inv).dot(self.F_xu.T)
-        self.W = self.C + self.C_u.dot(self.H_inv).dot(self.F_u)
-        return
 
-    def save(self, group_name, super_group=None):
+        # fix cost function and constraints
+        f = self.H['ux'].dot(x) + self.f['u']
+        b = self.b - self.A['x'].dot(x)
+        sol = quadratic_program(self.H['uu'], f, self.A['u'], b)
 
-        # open the file
-        if super_group is None:
-            group = h5py.File(group_name + '.hdf5', 'w')
-        else:
-            group = super_group.create_group(group_name)
+        # "lift" optimal value function
+        if sol['min'] is not None:
+            sol['min'] += (.5*x.T.dot(self.H['xx']).dot(x) + self.f['x'].T.dot(x) + self.g)[0,0]
 
-        # write matrices
-        F_uu = group.create_dataset('F_uu', self.F_uu.shape)
-        F_xu = group.create_dataset('F_xu', self.F_xu.shape)
-        F_xx = group.create_dataset('F_xx', self.F_xx.shape)
-        F_u = group.create_dataset('F_u', self.F_u.shape)
-        F_x = group.create_dataset('F_x', self.F_x.shape)
-        F = group.create_dataset('F', self.F.shape)
-        C_u = group.create_dataset('C_u', self.C_u.shape)
-        C_x = group.create_dataset('C_x', self.C_x.shape)
-        C = group.create_dataset('C', self.C.shape)
-        F_uu[...] = self.F_uu
-        F_xu[...] = self.F_xu
-        F_xx[...] = self.F_xx
-        F_u[...] = self.F_u
-        F_x[...] = self.F_x
-        F[...] = self.F
-        C_u[...] = self.C_u
-        C_x[...] = self.C_x
-        C[...] = self.C
+        return sol
 
-        # # sparsity of the Jacobian
-        # row_sparsity = group.create_dataset('row_sparsity', (len(self.row_sparsity),))
-        # column_sparsity = group.create_dataset('column_sparsity', (len(self.column_sparsity),))
-        # row_sparsity[...] = np.array(self.row_sparsity)
-        # column_sparsity[...] = np.array(self.column_sparsity)
+    def explicit_solve(self, step_size=1.e-5, verbose=False):
+        """
+        Returns the explicit solution of the mpQP.
+        It assumes that the facet-to-facet property holds (i.e. each facet of a critical region is shared with another single critical region).
+        The following is a simple home-made algorithm.
+        For every critical region, it looks at its non-redundat inequalities and guesses the active set beyond them.
+        It then solves the KKTs for the given active set and check if the guess was right, if not it solves a QP to get the right active set and solves the KKTs again.
 
-        # close the file and return
-        if super_group is None:
-            group.close()
-            return
-        else:
-            return super_group
+        Arguments
+        ----------
+        step_size : float
+            Size of the step taken to explore a new critical region from the facet of its parent.
+        verbose : bool
+            If True it prints the number active sets found at each iteration of the solver.
+
+        Returns
+        ----------
+        instance of ExplicitSolution
+            Explicit solution of the mpQP.
+
+        """
+
+        # start from the origin and guess its active set
+        x = np.zeros(self.f['x'].shape)
+        active_set_guess = []
+        x_buffer = [(x, active_set_guess)]
+        crs_found = []
+
+        # loop until the are no points left
+        while len(x_buffer) > 0:
+
+            # discard points that have been already covered
+            x_buffer = [x for x in x_buffer if not any([cr.contains(x[0]) for cr in crs_found])]
+            if len(x_buffer) == 0:
+                break
+
+            # get critical region for the first point in the buffer
+            cr = self.explicit_solve_given_point(x_buffer[0][0], x_buffer[0][1], verbose)
+            del x_buffer[0]
+
+            # if feasible
+            if cr is not None:
+
+                # step outside each minimal facet
+                for i in cr.minimal_facets():
+                    x = cr.facet_center(i) + step_size*cr.A[i:i+1,:].T
+
+                    # guess the active set on the other side of the facet
+                    active_set_guess = set(cr.active_set).symmetric_difference({i})
+
+                    # add to the buffer
+                    x_buffer.append((x, sorted(list(active_set_guess))))
+
+                # if feasible, add the the list of critical regions
+                crs_found.append(cr)
+                if verbose:
+                    print('CR found, active set: ' + str(cr.active_set) + '.')
+        if verbose:
+            print('Explicit solution found, CRs are: ' + str(len(crs_found)) + '.')
+
+        return ExplicitSolution(crs_found)
+
+    def get_feasible_set(self):
+        """
+        Returns the feasible set of the mqQP, i.e. {x | exists u: Au u + Ax x <= b}.
+
+        Returns
+        ----------
+        instance of Polyhedron
+            Feasible set.
+        """
+
+        # constraint set
+        C = Polyhedron(
+            np.hstack((self.A['x'], self.A['u'])),
+            self.b
+            )
+
+        # feasible set
+        return C.project_to(range(self.A['x'].shape[1]))
+
+class CriticalRegion(object):
+    """
+    Critical Region (CR) of a multi-parametric quadratic program.
+    A CR is the region of space where a fixed active set is optimal.
+    """
+
+    def __init__(self, active_set, u, p, V, polyhedron):
+        """
+        Instatiates the critical region.
+
+        Arguments
+        ----------
+        active_set : list of int
+            List of the indices of the active inequalities.
+        u : dict
+            Explicit primal solution for the given active set (with keys: 'x' for the linear term, '0' for the offset term).
+        p : dict
+            Explicit dual solution for the given active set (with keys: 'x' for the linear term, '0' for the offset term).
+        V : dict
+            Explicit expression of the optimal value function for the given active set (with keys: 'xx' for the quadratic term, 'x' for the linear term, '0' for the offset term).
+        polyhedron : instance of Polyhedron
+            Region of space where the given active set is actually optimal.
+        """
+
+        self.active_set = active_set
+        self._u = u
+        self._p = p
+        self._V = V
+        self.polyhedron = polyhedron
+
+    def contains(self, x):
+        """
+        Checks if the point x is inside the critical region.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point we want to check.
+
+        Returns
+        ----------
+        bool
+            True if the point is contained in the critical region, False otherwise.
+        """
+        return self.polyhedron.contains(x)
+
+    def minimal_facets(self):
+        """
+        Returns the minimal facets of the critical region.
+
+        Returns
+        ----------
+        list of int
+            List of indices of the non-redundant inequalities.
+        """
+
+        return self.polyhedron.minimal_facets()
+
+    def facet_center(self, i):
+        """
+        Returns the Cebyshec center of the i-th facet.
+        Implementation note: it is necessary to add the facet as an equality constraint, otherwise if we add it as an inequality the radius of the facet is zero and the center ends up in a vertex of the facet itself, and stepping out the facet starting from  vertex will not find the neighbour critical region.
+
+        Arguments
+        ----------
+        i : int
+            Index of the inequality associated with the facet we want to get the center of.
+
+        Returns
+        ----------
+        numpy.ndarray
+            Chebyshev center of the i-th facet.
+        """
+
+        # handle 1-dimensional case
+        if self.polyhedron.A.shape[1] == 1:
+            return np.linalg.inv(self.polyhedron.A[i:i+1, :]).dot(self.polyhedron.b[i:i+1, :])
+
+        # add an equality to the original polyhedron
+        facet = copy(self.polyhedron)
+        facet.add_equality(
+            facet.A[i:i+1, :],
+            facet.b[i:i+1, :]
+            )
+
+        return facet.center
+
+    def u(self, x):
+        """
+        Numeric value of the primal optimizer at the point x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the solution.
+
+        Returns
+        ----------
+        numpy.ndarray
+            Primal optimizer at the given point.
+        """
+
+        return self._u['x'].dot(x) + self._u['0']
+
+    def p(self, x):
+        """
+        Numeric value of the dual optimizer at the point x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the solution.
+
+        Returns
+        ----------
+        numpy.ndarray
+            Dual optimizer at the given point.
+        """
+
+        return self._p['x'].dot(x) + self._p['0']
+
+    def V(self, x):
+        """
+        Numeric value of the optimal value function at the point x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the solution.
+
+        Returns
+        ----------
+        float
+            Optimal value function at the given point.
+        """
+
+        V = .5*x.T.dot(self._V['xx']).dot(x) + self._V['x'].T.dot(x) + self._V['0']
+
+        return V[0,0]
 
     @property
-    def feasible_set(self):
-        if self._feasible_set is None:
-            augmented_polytope = Polytope(np.hstack((- self.C_x, self.C_u)), self.C)
-            augmented_polytope.assemble()
-            if augmented_polytope.empty:
-                return None
-            self._feasible_set = augmented_polytope.orthogonal_projection(range(self.C_x.shape[1]))
-        return self._feasible_set
+    def A(self):
+        """
+        Left hand side of the inequalities describing the critical region.
 
+        Returns
+        ----------
+        numpy.ndarray
+            Left hand side of self.polyhedron.
+        """
+        return self.polyhedron.A
 
-    def get_z_sensitivity(self, active_set):
+    @property
+    def b(self):
+        """
+        Right hand side of the inequalities describing the critical region.
 
-        # clean active set
-        G_A = self.G[active_set,:]
-        if active_set and np.linalg.matrix_rank(G_A) < G_A.shape[0]:
-            lir = linearly_independent_rows(G_A)
-            active_set = [active_set[i] for i in lir]
+        Returns
+        ----------
+        numpy.ndarray
+            Right hand side of self.polyhedron.
+        """
+        return self.polyhedron.b
 
-        # multipliers explicit solution
-        inactive_set = sorted(list(set(range(self.C.shape[0])) - set(active_set)))
-        [G_A, W_A, S_A] = [self.G[active_set,:], self.W[active_set,:], self.S[active_set,:]]
-        [G_I, W_I, S_I] = [self.G[inactive_set,:], self.W[inactive_set,:], self.S[inactive_set,:]]
-        H_A = np.linalg.inv(G_A.dot(self.H_inv).dot(G_A.T))
-        lambda_A_offset = - H_A.dot(W_A)
-        lambda_A_linear = - H_A.dot(S_A)
+class ExplicitSolution(object):
+    """
+    Explicit solution of a multiparametric quadratic program.
+    """
 
-        # primal variables explicit solution
-        z_offset = - self.H_inv.dot(G_A.T.dot(lambda_A_offset))
-        z_linear = - self.H_inv.dot(G_A.T.dot(lambda_A_linear))
-        return z_offset, z_linear
+    def __init__(self, critical_regions):
+        """
+        Stores the set of critical regions.
 
-    def get_u_sensitivity(self, active_set):
-        z_offset, z_linear = self.get_z_sensitivity(active_set)
+        Arguments
+        ----------
+        critical_regions : list of intances of CriticalRegion
+            List of crtical regions for the solution of the mpQP.
+        """
+        self.critical_regions = critical_regions
 
-        # primal original variables explicit solution
-        u_offset = z_offset - self.H_inv.dot(self.F_u)
-        u_linear = z_linear - self.H_inv.dot(self.F_xu.T)
-        return u_offset, u_linear
+    def get_critical_region(self, x):
+        """
+        Returns the critical region that covers the given point.
 
-    def get_cost_sensitivity(self, x_list, active_set):
-        z_offset, z_linear = self.get_z_sensitivity(active_set)
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the critical region.
 
-        # optimal value function explicit solution: V_star = .5 x' V_quadratic x + V_linear x + V_offset
-        V_quadratic = z_linear.T.dot(self.H).dot(z_linear) + self.F_xx_q
-        V_linear = z_offset.T.dot(self.H).dot(z_linear) + self.F_x_q.T
-        V_offset = self.F_q + .5*z_offset.T.dot(self.H).dot(z_offset)
+        Returns
+        ----------
+        instance of CriticalRegion
+            Critical region that covers the given point (None if the point is not covered).
+        """
 
-        # tangent approximation
-        plane_list = []
-        for x in x_list:
-            A = x.T.dot(V_quadratic) + V_linear
-            b = -.5*x.T.dot(V_quadratic).dot(x) + V_offset
-            plane_list.append([A, b])
+        # loop over the critical regions
+        for cr in self.critical_regions:
+            if cr.contains(x):
+                return cr
 
-        return plane_list
+        # return None if not covered
+        return None
 
-    def solve_free_x(self):
-        H = np.vstack((
-            np.hstack((self.F_uu, self.F_xu.T)),
-            np.hstack((self.F_xu, self.F_xx))
+    def u(self, x):
+        """
+        Numeric value of the primal optimizer at the point x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the solution.
+
+        Returns
+        ----------
+        numpy.ndarray
+            Primal optimizer at the given point (None if the point is not covered).
+        """
+
+        # loop over the critical regions
+        cr = self.get_critical_region(x)
+        if cr is not None:
+            return cr.u(x)
+
+        # return None if not covered
+        return None
+
+    def p(self, x):
+        """
+        Numeric value of the dual optimizer at the point x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the solution.
+
+        Returns
+        ----------
+        numpy.ndarray
+            Dual optimizer at the given point (None if the point is not covered).
+        """
+
+        # loop over the critical regions
+        cr = self.get_critical_region(x)
+        if cr is not None:
+            return cr.p(x)
+
+        # return None if not covered
+        return None
+
+    def V(self, x):
+        """
+        Numeric value of the optimal value function at the point x.
+
+        Arguments
+        ----------
+        x : numpy.ndarray
+            Point where we want to get the solution.
+
+        Returns
+        ----------
+        float
+            Optimal value function at the given point (None if the point is not covered).
+        """
+
+        # loop over the critical regions
+        cr = self.get_critical_region(x)
+        if cr is not None:
+            return cr.V(x)
+
+        # return None if not covered
+        return None
+
+class MultiParametricMixedIntegerQuadraticProgram(object):
+    """
+    Multiparametric Mixed Integer Quadratic Program (mpMIQP) in the form that comes out from the MPC problem fro a piecewise affine system, i.e.
+                                |u|' |Huu   0 0   0| |u|
+                                |z|  |  0 Hzz 0 Hzx| |z|
+        V(x) := min_{u,z,d} 1/2 |d|  |        0   0| |d|
+                                |x|  |sym       Hxx| |x|
+                      s.t. Au u + Az z + Ad d + Ax x <= b
+        where:
+        u := (u(0), ..., u(N-1)), continuous,
+        z := (z(0), ..., z(N-1)), continuous,
+        d := (d(0), ..., d(N-1)), binary,
+        while x  is the intial condition.
+    """
+
+    def __init__(self, H, A, b):
+        """
+        Initializes the mpMIQP.
+
+        Arguments
+        -----------
+        H : dict of numpy.ndarry
+            Dictionary with the blocks of the cost function Hessian, keys: 'uu', 'zz', 'xx', 'zx'.
+        A : dict of numpy.ndarry
+            Dictionary with the blocks of the constraint Jacobian, keys: 'u', 'z', 'd', 'x'.
+        b : numpy.ndarray
+            Right-hand side of the constraints.
+        """
+
+        # store matrices
+        self.H = H
+        self.A = A
+        self.b = b
+
+    def solve(self, x):
+        """
+        Solves the mpMIQP for the given value of the parameter x.
+
+        Arguments
+        ----------
+        x : numpy.ndarry
+            Numeric value of the parameter vector.
+
+        Returns
+        ----------
+        sol : dict
+            Dictionary with the solution of the MIQP, keys: 'min', 'u', 'z', 'd'.
+        """
+
+        # MIQP dimensions
+        nu = self.A['u'].shape[1]
+        nz = self.A['z'].shape[1]
+        nd = self.A['d'].shape[1]
+        nc = nu + nz
+
+        # put MIQP in standard form
+        H = block_diag(
+            self.H['uu'],
+            self.H['zz'],
+            np.zeros((nd, nd))
+            )
+        f = np.vstack((
+            np.zeros((nu, 1)),
+            self.H['zx'].dot(x),
+            np.zeros((nd, 1))
             ))
-        f = np.vstack((self.F_u, self.F_x))
-        A = np.hstack((self.C_u, -self.C_x))
-        b = self.C
-        z_star, cost = quadratic_program(H, f, A, b)
-        u_star = z_star[0:self.F_uu.shape[0],:]
-        x_star = z_star[self.F_uu.shape[0]:,:]
-        return u_star, x_star, cost
+        A = np.hstack((
+            self.A['u'],
+            self.A['z'],
+            self.A['d']
+            ))
+        b = self.b - self.A['x'].dot(x)
 
+        # solve MIQP
+        sol_sf = mixed_integer_quadratic_program(nc, H, f, A, b)
 
-def upload_ParametricQP(group_name, super_group=None):
-    """
-    Reads the file group_name.hdf5 and generates a ParametricQP from the data therein.
-    If a super_group is provided, reads the sub group named group_name which belongs to the super_group.
-    """
+        # reshape solution
+        sol = {
+            'min': sol_sf['min'],
+            'u': None,
+            'z': None,
+            'd': None
+            }
 
-    # open the file
-    if super_group is None:
-        qp = h5py.File(group_name + '.hdf5', 'r')
-    else:
-        qp = super_group[group_name]
+        # if feasible lift the cost function with the offset term
+        if sol['min'] is not None:
+            sol['min'] += .5*x.T.dot(self.H['xx']).dot(x)[0,0]
+            sol['u'] = sol_sf['argmin'][:nu,:]
+            sol['z'] = sol_sf['argmin'][nu:nu+nz,:]
+            sol['d'] = sol_sf['argmin'][nu+nz:,:]
 
-    # read matrices
-    F_uu = np.array(qp['F_uu'])
-    F_xu = np.array(qp['F_xu'])
-    F_xx = np.array(qp['F_xx'])
-    F_u = np.array(qp['F_u'])
-    F_x = np.array(qp['F_x'])
-    F = np.array(qp['F'])
-    C_u = np.array(qp['C_u'])
-    C_x = np.array(qp['C_x'])
-    C = np.array(qp['C'])
-
-    # # read sparsity pattern Jacobian
-    # row_sparsity = [int(i) for i in qp['row_sparsity']]
-    # column_sparsity = [int(i) for i in qp['column_sparsity']]
-
-    # close the file and return
-    if super_group is None:
-        qp.close()
-    return ParametricQP(F_uu, F_xu, F_xx, F_u, F_x, F, C_u, C_x, C)#, row_sparsity, column_sparsity)
+        return sol
