@@ -5,6 +5,7 @@ import numpy as np
 # internal inputs
 from pympc.optimization.solvers.pnnls import linear_program as lp_pnnls, quadratic_program as qp_pnnls
 from pympc.optimization.solvers.gurobi import linear_program as lp_gurobi, quadratic_program as qp_gurobi, mixed_integer_quadratic_program as miqp_gurobi
+#from pympc.optimization.solvers.drake import linear_program as lp_drake, quadratic_program as qp_drake, mixed_integer_quadratic_program as miqp_drake
 
 class TestSolvers(unittest.TestCase):
 
@@ -232,6 +233,31 @@ class TestSolvers(unittest.TestCase):
                 sol['multiplier_equality'] is None
                 )
 
+            # lower dimensional domain because of the inequalities (in this case one cannot get the active set just looking at the residuals of the inequalities)
+            f = np.array([[1.],[0.]])
+            A = np.array([[1., 0.],[-1., 0.]])
+            b = np.zeros((2,1))
+            sol = linear_program(f, A, b)
+            self.assertAlmostEqual(
+                sol['min'],
+                0.
+                )
+            self.assertAlmostEqual(
+                sol['argmin'][0,0],
+                0.
+                )
+            self.assertEqual(
+                sol['active_set'],
+                [1]
+                )
+            np.testing.assert_array_almost_equal(
+                sol['multiplier_inequality'],
+                np.array([[0.],[1.]])
+                )
+            self.assertTrue(
+                sol['multiplier_equality'] is None
+                )
+
     def test_quadratic_program(self):
 
         # loop over solvers
@@ -292,6 +318,32 @@ class TestSolvers(unittest.TestCase):
             sol = quadratic_program(H, f, A, b, C, -d)
             for value in sol.values():
                 self.assertTrue(value is None)
+
+            # lower dimensional domain because of the inequalities (in this case one cannot get the active set just looking at the residuals of the inequalities)
+            H = np.eye(2)
+            f = np.zeros((2,1))
+            A = np.array([[1., 0.],[-1., 0.]])
+            b = np.array([[1.],[-1.]])
+            sol = quadratic_program(H, f, A, b)
+            self.assertAlmostEqual(
+                sol['min'],
+                .5
+                )
+            self.assertAlmostEqual(
+                sol['argmin'][0,0],
+                1.
+                )
+            self.assertEqual(
+                sol['active_set'],
+                [1]
+                )
+            np.testing.assert_array_almost_equal(
+                sol['multiplier_inequality'],
+                np.array([[0.],[1.]])
+                )
+            self.assertTrue(
+                sol['multiplier_equality'] is None
+                )
 
     def test_mixed_integer_quadratic_program(self):
 

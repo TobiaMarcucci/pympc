@@ -215,7 +215,7 @@ class Polyhedron(object):
         if indices is not None and n is None:
             raise ValueError("specify the length of x to instantiate the polyhedron.")
 
-        # construct the polyhderon
+        # construct the polyhedron
         if n is None:
             n = x_min.shape[0]
         A = np.zeros((0, n))
@@ -246,7 +246,7 @@ class Polyhedron(object):
         if indices is not None and n is None:
             raise ValueError("specify the length of x to instantiate the polyhedron.")
 
-        # construct the polyhderon
+        # construct the polyhedron
         if n is None:
             n = x_max.shape[0]
         A = np.zeros((0, n))
@@ -283,7 +283,7 @@ class Polyhedron(object):
         if x_min.shape[0] != x_max.shape[0]:
             raise ValueError("bounds must have the same size.")
 
-        # construct the polyhderon
+        # construct the polyhedron
         if n is None:
             n = x_min.shape[0]
         A = np.zeros((0, n))
@@ -558,8 +558,8 @@ class Polyhedron(object):
 
         Arguments
         ----------
-        P2 : instance of Polyhderon
-            Polyhderon within which we want to check if this polyhedron is contained.
+        P2 : instance of Polyhedron
+            Polyhedron within which we want to check if this polyhedron is contained.
         tol : float
             Maximum distance of a point from P2 to be considered an internal point.
 
@@ -590,16 +590,16 @@ class Polyhedron(object):
 
     def intersection(self, P2):
         """
-        Returns the intersection between this instance of Polyhderon (P1) and the polyhedron P2.
+        Returns the intersection between this instance of Polyhedron (P1) and the polyhedron P2.
 
         Arguments
         ----------
-        P2 : instance of Polyhderon
-            Polyhderon with which we want to intersect this polyhedron.
+        P2 : instance of Polyhedron
+            Polyhedron with which we want to intersect this polyhedron.
 
         Returns
         ----------
-        P3 : instance of Polyhderon
+        P3 : instance of Polyhedron
             Intersection of the two polyhedra.
         """
 
@@ -612,16 +612,16 @@ class Polyhedron(object):
 
     def cartesian_product(self, P2):
         """
-        Returns the Cartesian product between this instance of Polyhderon (P1) and the polyhedron P2.
+        Returns the Cartesian product between this instance of Polyhedron (P1) and the polyhedron P2.
 
         Arguments
         ----------
-        P2 : instance of Polyhderon
-            Polyhderon with which we want to multiply this polyhedron.
+        P2 : instance of Polyhedron
+            Polyhedron with which we want to multiply this polyhedron.
 
         Returns
         ----------
-        P3 : instance of Polyhderon
+        P3 : instance of Polyhedron
             Cartesian product of the two polyhedra.
         """
 
@@ -807,7 +807,7 @@ class Polyhedron(object):
     @staticmethod
     def from_convex_hull(points):
         """
-        Instantiates the polyhderon given from the conve hull of the given set of points.
+        Instantiates the polyhedron given from the conve hull of the given set of points.
         It assumes the polyhedron to be bounded.
 
         Arguments
@@ -875,7 +875,7 @@ def convex_hull_method(A, b, resiudal_dimensions):
     Dividing the space in the residual dimensions y and the dropped dimensions z, we have proj_y(P) := {y | exists z s.t. A_y y + A_z z < b}.
     The projection is returned in both the halfspace representation {x | E x <= f} and the vertices representation {x in conv(vertices)}.
     This is an implementation of the Convex Hull Method for orthogonal projections of polytopes, see, e.g., http://www.ece.drexel.edu/walsh/JayantCHM.pdf.
-    The polyhderon is assumed to be bounded and full dimensional.
+    The polyhedron is assumed to be bounded and full dimensional.
 
     Arguments
     ----------

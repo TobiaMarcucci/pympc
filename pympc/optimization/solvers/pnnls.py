@@ -144,11 +144,10 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
 
     # fill solution if residual is almost zero
     if r < tol:
-        r_ineq = ys[n_ineq+2*n_eq:2*n_ineq+2*n_eq,:]
-        sol['min'] = f.T.dot(x)[0,0]
         sol['argmin'] = x
-        sol['active_set'] = sorted(list(np.where(r_ineq < tol)[0]))
+        sol['min'] = f.T.dot(sol['argmin'])[0,0]
         sol['multiplier_inequality'] = ys[:n_ineq,:]
+        sol['active_set'] = sorted(list(np.where(sol['multiplier_inequality'] > tol)[0]))
         if n_eq > 0:
             mul_eq_pos = ys[n_ineq:n_ineq+n_eq, :]
             mul_eq_neg = - ys[n_ineq+n_eq:n_ineq+2*n_eq, :]
@@ -253,11 +252,10 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-7):
     # if feasibile
     if r > tol:
         lam = y/(gamma + m.T.dot(y))
-        sol['argmin'] = -H_inv.dot(f + AC.T.dot(lam))
-        sol['min'] = (.5 * sol['argmin'].T.dot(H).dot(sol['argmin']) + f.T.dot(sol['argmin']))[0,0]
-        r_ineq = np.linalg.norm(A.dot(sol['argmin']) - b, axis=1)
-        sol['active_set'] = sorted(list(np.where(r_ineq < tol)[0]))
         sol['multiplier_inequality'] = lam[:n_ineq,:]
+        sol['argmin'] = - H_inv.dot(f + AC.T.dot(lam))
+        sol['min'] = (.5 * sol['argmin'].T.dot(H).dot(sol['argmin']) + f.T.dot(sol['argmin']))[0,0]
+        sol['active_set'] = sorted(list(np.where(sol['multiplier_inequality'] > tol)[0]))
         if n_eq > 0:
             mul_eq_pos = lam[n_ineq:n_ineq+n_eq, :]
             mul_eq_neg = - lam[n_ineq+n_eq:n_ineq+2*n_eq, :]
