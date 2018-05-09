@@ -209,7 +209,7 @@ class ModelPredictiveController(object):
             if print_active_set:
                 plt.text(cr.polyhedron.center[0], cr.polyhedron.center[1], str(cr.active_set))
 
-    def plot_optimal_value_function(self, resolution=100., **kwargs):
+    def plot_optimal_value_function(self, resolution=100, **kwargs):
         """
         Plots the level sets of the optimal value function V*(x).
 
@@ -235,8 +235,8 @@ class ModelPredictiveController(object):
         y_min = min([v[1,0] for v in feasible_set.vertices])
 
         # create grid
-        x = np.arange(x_min, x_max, (x_max-x_min)/resolution)
-        y = np.arange(y_min, y_max, (y_max-y_min)/resolution)
+        x = np.linspace(x_min, x_max, resolution)
+        y = np.linspace(y_min, y_max, resolution)
         X, Y = np.meshgrid(x, y)
 
         # evaluate grid
