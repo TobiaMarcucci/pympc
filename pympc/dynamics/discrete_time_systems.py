@@ -328,9 +328,6 @@ class AffineSystem(object):
         # check inputs
         check_affine_system(A, B, c, h)
 
-        # construct affine system
-        c = np.zeros((A.shape[0], 1))
-
         # discretize
         if method == 'zero_order_hold':
             A_d, B_d, c_d = zero_order_hold(A, B, c, h)
