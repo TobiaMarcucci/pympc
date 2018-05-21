@@ -225,8 +225,9 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-7):
 
     # build and solve pnnls problem
     L = np.linalg.cholesky(H)
-    M = AC.dot(np.linalg.inv(L.T))
-    H_inv = np.linalg.inv(H)
+    L_inv = np.linalg.inv(L)
+    H_inv = L_inv.T.dot(L_inv)
+    M = AC.dot(L_inv.T)
     m = bd + AC.dot(H_inv).dot(f)
     gamma = 1
     A_nnls = np.vstack((
