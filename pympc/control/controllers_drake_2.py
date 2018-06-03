@@ -4,6 +4,7 @@ import numpy as np
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
 from pympc.optimization.programs import linear_program
+from pympc.optimization.solvers.branch_and_bound import Tree
 
 # pydrake imports
 from pydrake.all import MathematicalProgram, SolutionResult
@@ -12,7 +13,7 @@ from pydrake.solvers.mosek import MosekSolver
 
 class HybridModelPredictiveController(object):
 
-    def __init__(self, S, N, Q, R, P, X_N):
+    def __init__(self, S, N, Q, R, P, X_N, method='big_m'):
 
         # store inputs
         self.S = S
@@ -23,7 +24,8 @@ class HybridModelPredictiveController(object):
         self.X_N = X_N
 
         # mpMIQP
-        self.prog = None
+        self.prog, self.objective, self.variables, self.initial_condition, self.binaries_lower_bound = self.build_mpmiqp(method)
+        self.fixed_mode_sequence = []
 
         # get bigMs
         self._alpha, self._beta = self._get_bigM_dynamics()
@@ -176,160 +178,166 @@ class HybridModelPredictiveController(object):
         d_list = [[prog.GetSolution(d[t][i]) for i in range(self.S.nm)] for t in range(self.N)]
         mode_sequence = [d_list[t].index(max(d_list[t])) for t in range(self.N)]
         cost  = .5 * sum([u.T.dot(self.R).dot(u) for u in u_list])
-        cost += .5 * sum([x.T.dot(self.Q).dot(x) for x in x_list])
+        cost += .5 * sum([x.T.dot(self.Q).dot(x) for x in x_list[:self.N]])
         cost += .5 * x_list[self.N].T.dot(self.P).dot(x_list[self.N])
 
         return u_list, x_list, mode_sequence, cost[0,0]
 
-    # def set_initial_state(self, x0):
-    # 	self.initial_state_constraint.UpdateCoefficients(rhs=x0)
+    def build_mpmiqp(self, method):
 
-    # def update_mode_sequence(self, new_ms):
-    # 	for t in range(self.N):
-    # 	    if t < len(new_ms) and t < len(self.current_ms):
-    # 	    	if new_ms[t] != self.current_ms[t]:
-    # 	    		self.binary_constraints[t][self.current_ms[t]].UpdateCoefficients(rhs=0.)
-    # 	    		self.binary_constraints[t][new_ms[t]].UpdateCoefficients(rhs=1.)
-    # 	    elif t >= len(new_ms) and t < len(self.current_ms):
-    # 	    	self.binary_constraints[t][self.current_ms[t]].UpdateCoefficients(rhs=0.)
-    # 	    elif t < len(new_ms) and t >= len(self.current_ms):
-    # 	    	self.binary_constraints[t][new_ms[t]].UpdateCoefficients(rhs=1.)
-
-
-	    for t, mode in enumerate(new_ms):
-	    	if t >= len(self.current_ms):
-	    		cons_t = self.prog.AddLinearConstraint(d[t][mode] >= 1.)
-	    		self.ms_constraints.append(cons_t)
-		    elif mode != self.current_ms[t]:
-		    	self.prog.EraseLinearConstraint(self.ms_constraints[t])
-		    	cons_t = self.prog.AddLinearConstraint(self.d[t][mode] >= 1.)
-		    	self.ms_constraints[t] = cons_t
-		self.current_ms = new_ms
-		
-    def feedforward(self, x0, ms, method='big_m'):
-
+        # express the constrained dynamics as a list of polytopes in the (x,u,x+)-space
         P = get_graph_representation(self.S)
+
+        # get big-Ms for some of the solution methods
         m, mi = get_big_m(P)
 
-        # initialize program and cost function
+        # initialize program
         prog = MathematicalProgram()
-        obj = 0.
 
         # state and input variables
         u = [prog.NewContinuousVariables(self.S.nu) for t in range(self.N)]
         x = [prog.NewContinuousVariables(self.S.nx) for t in range(self.N+1)]
 
-        # auxiliary continuous variables
+        # auxiliary continuous variables (y auxiliary for x, v auxiliary for u, y_next auxiliary for x+)
         if method == 'convex_hull':
-            y = [[prog.NewContinuousVariables(self.S.nx) for i in range(self.S.nm)] for t in range(self.N-len(ms))]
-            v = [[prog.NewContinuousVariables(self.S.nu) for i in range(self.S.nm)] for t in range(self.N-len(ms))]
-            y_next = [[prog.NewContinuousVariables(self.S.nx) for i in range(self.S.nm)] for t in range(self.N-len(ms))]
+            y = [[prog.NewContinuousVariables(self.S.nx) for i in range(self.S.nm)] for t in range(self.N)]
+            v = [[prog.NewContinuousVariables(self.S.nu) for i in range(self.S.nm)] for t in range(self.N)]
+            y_next = [[prog.NewContinuousVariables(self.S.nx) for i in range(self.S.nm)] for t in range(self.N)]
 
         # auxiliary binary variables
-        d = [[prog.NewContinuousVariables(1)[0] for i in range(self.S.nm)] for t in range(self.N-len(ms))]
-        for dt in d:
-            for dti in dt:
-                prog.AddLinearConstraint(dti >= 0.)
+        d = [[prog.NewContinuousVariables(1)[0] for i in range(self.S.nm)] for t in range(self.N)]
 
-        # initial conditions
+        # lower bounds on the binary variables (stored for the branch and bound)
+        binaries_lower_bound = []
+        for dt in d:
+            blb_t = []
+            for dti in dt:
+                blb_t.append(prog.AddLinearConstraint(dti >= 0.).evaluator())
+            binaries_lower_bound.append(blb_t)
+
+        # initial conditions (set arbitrarily to zero in the building phase)
+        initial_condition = []
         for k in range(self.S.nx):
-            prog.AddLinearConstraint(x[0][k] == x0[k])
+            initial_condition.append(prog.AddLinearConstraint(x[0][k] == 0.).evaluator())
+
+        # set quadratic cost function
+        objective = prog.AddQuadraticCost(
+            .5*sum([xt.dot(self.Q).dot(xt) for xt in x[:self.N]]) +
+            .5*sum([ut.dot(self.R).dot(ut) for ut in u]) +
+            .5*x[self.N].dot(self.P).dot(x[self.N])
+            )
 
         # loop over time
         for t in range(self.N):
 
-            # add stage cost
-            obj += .5*x[t].dot(self.Q).dot(x[t])
-            obj += .5*u[t].dot(self.R).dot(u[t])
+            # one mode per time
+            prog.AddLinearConstraint(sum(d[t]) == 1.)
 
-            # scheduled horizon
-            if t < len(ms):
-                St = self.S.affine_systems[ms[t]]
-                Dt = self.S.domains[ms[t]]
-                xut = np.concatenate((x[t], u[t]))
-                for k in range(St.nx):
-                    prog.AddLinearConstraint(x[t+1][k] == St.A[k].dot(x[t]) + St.B[k].dot(u[t]) + St.c[k,0])
-                for k in range(Dt.A.shape[0]):
-                    prog.AddLinearConstraint(Dt.A[k].dot(xut) <= Dt.b[k,0])
+            # big-m methods
+            if method in ['big_m', 'improved_big_m']:
 
-            # unscheduled horizon
-            else:
+                # enforce constrained dynamics
+                xux = np.concatenate((x[t], u[t], x[t+1]))
+                for i in range(self.S.nm):
+                    for k in range(P[i].A.shape[0]):
+                        if method == 'big_m':
+                            prog.AddLinearConstraint(P[i].A[k].dot(xux) <= P[i].b[k,0] + mi[i][k,0] * (1. - d[t][i]))
+                        if method == 'improved_big_m':
+                            sum_mik = sum(m[i][j][k,0] * d[t][j] for j in range(self.S.nm) if j != i)
+                            prog.AddLinearConstraint(P[i].A[k].dot(xux) <= P[i].b[k,0] + sum_mik)
 
-                # one mode per time
-                prog.AddLinearConstraint(sum(d[t-len(ms)]) == 1.)
+            # convex hull method
+            if method == 'convex_hull':
 
-                # standard big-m
-                if method in ['big_m', 'improved_big_m']:
+                # enforce constrained dynamics
+                for i in range(self.S.nm):
+                    yvyi = np.concatenate((y[t][i], v[t][i], y_next[t][i]))
+                    for k in range(P[i].A.shape[0]):
+                        prog.AddLinearConstraint(P[i].A[k].dot(yvyi) <= P[i].b[k,0] * d[t][i])
 
-                    # add mode constraints and dynamics
-                    xux = np.concatenate((x[t], u[t], x[t+1]))
-                    for i in range(self.S.nm):
-                        for k in range(P[i].A.shape[0]):
-                            if method == 'big_m':
-                                prog.AddLinearConstraint(P[i].A[k].dot(xux) <= P[i].b[k,0] + mi[i][k,0] * (1. - d[t-len(ms)][i]))
-                            if method == 'improved_big_m':
-                                sum_mik = sum(m[i][j][k,0] * d[t-len(ms)][j] for j in range(self.S.nm) if j != i)
-                                prog.AddLinearConstraint(P[i].A[k].dot(xux) <= P[i].b[k,0] + sum_mik)
-
-                # convex hull method
-                if method == 'convex_hull':
-
-                    # recompose the state and input
-                    for k in range(self.S.nx):
-                        prog.AddLinearConstraint(x[t][k] == sum(y[t-len(ms)])[k])
-                        prog.AddLinearConstraint(x[t+1][k] == sum(y_next[t-len(ms)])[k])
-                    for k in range(self.S.nu):
-                        prog.AddLinearConstraint(u[t][k] == sum(v[t-len(ms)])[k])
-
-                    # add mode constraints and dynamics
-                    for i in range(self.S.nm):
-                        yvyi = np.concatenate((y[t-len(ms)][i], v[t-len(ms)][i], y_next[t-len(ms)][i]))
-                        for k in range(P[i].A.shape[0]):
-                            prog.AddLinearConstraint(P[i].A[k].dot(yvyi) <= P[i].b[k,0] * d[t-len(ms)][i])
+                # recompose the state and input
+                for k in range(self.S.nx):
+                    prog.AddLinearConstraint(x[t][k] == sum(y[t])[k])
+                    prog.AddLinearConstraint(x[t+1][k] == sum(y_next[t])[k])
+                for k in range(self.S.nu):
+                    prog.AddLinearConstraint(u[t][k] == sum(v[t])[k])
 
         # terminal constraint
         for k in range(self.X_N.A.shape[0]):
             prog.AddLinearConstraint(self.X_N.A[k].dot(x[self.N]) <= self.X_N.b[k,0])
 
-        # terminal cost
-        obj += .5*x[self.N].dot(self.P).dot(x[self.N])
-        prog.AddQuadraticCost(obj)
+        return prog, objective, {'x':x, 'u':u, 'd':d}, initial_condition, binaries_lower_bound
 
-        # set solver
-        #solver = MosekSolver()
-        solver = GurobiSolver()
-        #prog.SetSolverOption(solver.solver_type(), 'OutputFlag', 1) # prints on the terminal!
-        #prog.SetSolverOption(solver.solver_type(), 'Heuristics', 0.)
+    def set_initial_condition(self, x0):
+        for k, c in enumerate(self.initial_condition):
+            c.UpdateLowerBound(x0[k])
+            c.UpdateUpperBound(x0[k])
+
+    def update_mode_sequence(self, ms):
+        for t in range(self.N):
+            if t < len(ms) and t < len(self.fixed_mode_sequence):
+                if ms[t] != self.fixed_mode_sequence[t]:
+                    self.binaries_lower_bound[t][self.fixed_mode_sequence[t]].UpdateLowerBound([0.])
+                    self.binaries_lower_bound[t][ms[t]].UpdateLowerBound([1.])
+            elif t >= len(ms) and t < len(self.fixed_mode_sequence):
+                self.binaries_lower_bound[t][self.fixed_mode_sequence[t]].UpdateLowerBound([0.])
+            elif t < len(ms) and t >= len(self.fixed_mode_sequence):
+                self.binaries_lower_bound[t][ms[t]].UpdateLowerBound([1.])
+        self.fixed_mode_sequence = ms
+
+
+    def solve_relaxation(self, ms):
+
+        # fix part of the mode sequence
+        self.update_mode_sequence(ms)
 
         # solve MIQP
-        result = solver.Solve(prog)
+        solver = GurobiSolver()
+        result = solver.Solve(self.prog)
 
+        # check feasibility
         if result != SolutionResult.kSolutionFound:
-            others = {'u': None, 'x': None, 'ms': None}
-            return None, None, None, others
+            return None, None, None, None
 
-        # from vector to list of vectors
-        u_list = [prog.GetSolution(ut).reshape(self.S.nu,1) for ut in u]
-        x_list = [prog.GetSolution(xt).reshape(self.S.nx,1) for xt in x]
-        d_list = [[prog.GetSolution(dti) for dti in dt] for dt in d]
-        mode_sequence = ms + [dt.index(max(dt)) for dt in d_list]
-        if len(d_list) > 0:
-            d0 = d_list[0]
-            next_mode_order = list(reversed(np.argsort(d_list[0]).tolist()))
-        else:
-            d0 = None
-            next_mode_order = None
-        cost  = .5 * sum([u.T.dot(self.R).dot(u) for u in u_list])
-        cost += .5 * sum([x.T.dot(self.Q).dot(x) for x in x_list])
-        cost += .5 * x_list[self.N].T.dot(self.P).dot(x_list[self.N])
+        # get cost
+        objective = self.prog.EvalBindingAtSolution(self.objective)[0]
 
+        # store argmin in list of vectors
+        u_list = [self.prog.GetSolution(ut).reshape(self.S.nu,1) for ut in self.variables['u']]
+        x_list = [self.prog.GetSolution(xt).reshape(self.S.nx,1) for xt in self.variables['x']]
+        d_list = [[self.prog.GetSolution(dti) for dti in dt] for dt in self.variables['d']]
+
+        # retrieve mode sequence and check integer feasibility
+        mode_sequence = [dt.index(max(dt)) for dt in d_list]
         is_integer = all([np.allclose(sorted(dt), [0.]*(len(dt)-1)+[1.]) for dt in d_list])
 
-        others = {'u': u_list, 'x': x_list, 'ms': mode_sequence, 'binaries':d0}
+        # best guess for the mode at the first relaxed time step
+        if len(ms) < self.N:
+            next_mode_order = list(reversed(np.argsort(d_list[len(ms)]).tolist()))
+        else:
+            next_mode_order = None
 
-        return cost[0,0], is_integer, next_mode_order, others
+        return objective, is_integer, next_mode_order, {'u': u_list, 'x': x_list, 'ms': mode_sequence}
 
-# def feedforward_rverse_time ??
+    def feedforward(self, x0):
+
+        # overwrite initial condition
+        self.set_initial_condition(x0)
+
+        # call branch and bound algorithm
+        tree = Tree(self.solve_relaxation)
+        tree.explore()
+
+        # output
+        if tree.incumbent is None:
+            return None, None, None, None
+        else:
+            return(
+                tree.incumbent.others['u'],
+                tree.incumbent.others['x'],
+                tree.incumbent.others['ms'],
+                tree.incumbent.cost
+                )
 
 def get_graph_representation(S):
     P = []
