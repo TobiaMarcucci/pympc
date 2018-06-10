@@ -329,7 +329,7 @@ def quadratic_expression(H, x, tol=1.e-7):
 
     Returns
     ----------
-    expr : gurobipy.LinExpr
+    expr : gurobipy.QuadExpr
         Quadratic expressions.
     """
 

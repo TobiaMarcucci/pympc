@@ -4,7 +4,7 @@ import numpy as np
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
 from pympc.optimization.programs import linear_program
-from pympc.optimization.solvers.branch_and_bound import Tree
+from pympc.optimization.solvers.branch_and_bound import Tree, draw_tree
 
 # pydrake imports
 from pydrake.all import MathematicalProgram, SolutionResult
@@ -24,7 +24,7 @@ class HybridModelPredictiveController(object):
         self.X_N = X_N
 
         # mpMIQP
-        self.prog, self.objective, self.variables, self.initial_condition, self.binaries_lower_bound = self.build_mpmiqp(method)
+        self.build_mpmiqp(method) # adds the variables: prog, objective, u, x, d, initial_condition, binaries_lower_bound
         self.fixed_mode_sequence = []
 
         # get bigMs
@@ -150,7 +150,6 @@ class HybridModelPredictiveController(object):
                 for k in range(Ai.shape[0]):
                     prog.AddLinearConstraint(Ai[k].dot(np.concatenate((x[t], u[t]))) <= bi[k,0] + gamma[i][k]*(1.-d[t][i]))
 
-
         # terminal constraint
         for k in range(self.X_N.A.shape[0]):
             prog.AddLinearConstraint(self.X_N.A[k].dot(x[self.N]) <= self.X_N.b[k,0])
@@ -192,81 +191,83 @@ class HybridModelPredictiveController(object):
         m, mi = get_big_m(P)
 
         # initialize program
-        prog = MathematicalProgram()
+        self.prog = MathematicalProgram()
+        self.x = []
+        self.u = []
+        self.d = []
+        obj = 0.
+        self.binaries_lower_bound = []
 
-        # state and input variables
-        u = [prog.NewContinuousVariables(self.S.nu) for t in range(self.N)]
-        x = [prog.NewContinuousVariables(self.S.nx) for t in range(self.N+1)]
-
-        # auxiliary continuous variables (y auxiliary for x, v auxiliary for u, y_next auxiliary for x+)
+        # auxiliary continuous variables (y auxiliary for x, v auxiliary for u, z auxiliary for x+)
         if method == 'convex_hull':
-            y = [[prog.NewContinuousVariables(self.S.nx) for i in range(self.S.nm)] for t in range(self.N)]
-            v = [[prog.NewContinuousVariables(self.S.nu) for i in range(self.S.nm)] for t in range(self.N)]
-            y_next = [[prog.NewContinuousVariables(self.S.nx) for i in range(self.S.nm)] for t in range(self.N)]
-
-        # auxiliary binary variables
-        d = [[prog.NewContinuousVariables(1)[0] for i in range(self.S.nm)] for t in range(self.N)]
-
-        # lower bounds on the binary variables (stored for the branch and bound)
-        binaries_lower_bound = []
-        for dt in d:
-            blb_t = []
-            for dti in dt:
-                blb_t.append(prog.AddLinearConstraint(dti >= 0.).evaluator())
-            binaries_lower_bound.append(blb_t)
+            y = []
+            v = []
+            z = []
 
         # initial conditions (set arbitrarily to zero in the building phase)
-        initial_condition = []
+        self.x.append(self.prog.NewContinuousVariables(self.S.nx)) # x(0)
+        self.initial_condition = []
         for k in range(self.S.nx):
-            initial_condition.append(prog.AddLinearConstraint(x[0][k] == 0.).evaluator())
-
-        # set quadratic cost function
-        objective = prog.AddQuadraticCost(
-            .5*sum([xt.dot(self.Q).dot(xt) for xt in x[:self.N]]) +
-            .5*sum([ut.dot(self.R).dot(ut) for ut in u]) +
-            .5*x[self.N].dot(self.P).dot(x[self.N])
-            )
+            self.initial_condition.append(self.prog.AddLinearConstraint(self.x[0][k] == 0.).evaluator())
 
         # loop over time
         for t in range(self.N):
 
-            # one mode per time
-            prog.AddLinearConstraint(sum(d[t]) == 1.)
+            # create variables
+            self.u.append(self.prog.NewContinuousVariables(self.S.nu)) # u(t)
+            self.d.append([self.prog.NewContinuousVariables(1)[0] for i in range(self.S.nm)]) # d_i(t)
+            self.x.append(self.prog.NewContinuousVariables(self.S.nx)) # x(t+1)
+            
+            # auxiliary continuous variables for the convex-hull method
+            if method == 'convex_hull':
+                y.append([self.prog.NewContinuousVariables(self.S.nx) for i in range(self.S.nm)])
+                v.append([self.prog.NewContinuousVariables(self.S.nu) for i in range(self.S.nm)])
+                z.append([self.prog.NewContinuousVariables(self.S.nx) for i in range(self.S.nm)])
 
-            # big-m methods
+            # enforce constrained dynamics (big-m methods)
             if method in ['big_m', 'improved_big_m']:
-
-                # enforce constrained dynamics
-                xux = np.concatenate((x[t], u[t], x[t+1]))
+                xux = np.concatenate((self.x[t], self.u[t], self.x[t+1]))
                 for i in range(self.S.nm):
                     for k in range(P[i].A.shape[0]):
                         if method == 'big_m':
-                            prog.AddLinearConstraint(P[i].A[k].dot(xux) <= P[i].b[k,0] + mi[i][k,0] * (1. - d[t][i]))
+                            self.prog.AddLinearConstraint(P[i].A[k].dot(xux) <= P[i].b[k,0] + mi[i][k,0] * (1. - self.d[t][i]))
                         if method == 'improved_big_m':
-                            sum_mik = sum(m[i][j][k,0] * d[t][j] for j in range(self.S.nm) if j != i)
-                            prog.AddLinearConstraint(P[i].A[k].dot(xux) <= P[i].b[k,0] + sum_mik)
+                            sum_mik = sum(m[i][j][k,0] * self.d[t][j] for j in range(self.S.nm) if j != i)
+                            self.prog.AddLinearConstraint(P[i].A[k].dot(xux) <= P[i].b[k,0] + sum_mik)
 
-            # convex hull method
-            if method == 'convex_hull':
-
-                # enforce constrained dynamics
+            # enforce constrained dynamics (convex hull method)
+            elif method == 'convex_hull':
                 for i in range(self.S.nm):
-                    yvyi = np.concatenate((y[t][i], v[t][i], y_next[t][i]))
+                    yvyi = np.concatenate((y[t][i], v[t][i], z[t][i]))
                     for k in range(P[i].A.shape[0]):
-                        prog.AddLinearConstraint(P[i].A[k].dot(yvyi) <= P[i].b[k,0] * d[t][i])
+                        self.prog.AddLinearConstraint(P[i].A[k].dot(yvyi) <= P[i].b[k,0] * self.d[t][i])
 
-                # recompose the state and input
+                # recompose the state and input (convex hull method)
                 for k in range(self.S.nx):
-                    prog.AddLinearConstraint(x[t][k] == sum(y[t])[k])
-                    prog.AddLinearConstraint(x[t+1][k] == sum(y_next[t])[k])
+                    self.prog.AddLinearConstraint(self.x[t][k] == sum(y[t])[k])
+                    self.prog.AddLinearConstraint(self.x[t+1][k] == sum(z[t])[k])
                 for k in range(self.S.nu):
-                    prog.AddLinearConstraint(u[t][k] == sum(v[t])[k])
+                    self.prog.AddLinearConstraint(self.u[t][k] == sum(v[t])[k])
+
+            # raise error for unknown method
+            else:
+                raise ValueError('unknown method ' + method + '.')
+
+            # constraints on the binaries
+            self.binaries_lower_bound.append([self.prog.AddLinearConstraint(dti >= 0.).evaluator() for dti in self.d[t]])
+            self.prog.AddLinearConstraint(sum(self.d[t]) == 1.)
+
+            # stage cost to the objective
+            obj += .5 * self.u[t].dot(self.R).dot(self.u[t])
+            obj += .5 * self.x[t].dot(self.Q).dot(self.x[t])
 
         # terminal constraint
         for k in range(self.X_N.A.shape[0]):
-            prog.AddLinearConstraint(self.X_N.A[k].dot(x[self.N]) <= self.X_N.b[k,0])
+            self.prog.AddLinearConstraint(self.X_N.A[k].dot(self.x[self.N]) <= self.X_N.b[k,0])
 
-        return prog, objective, {'x':x, 'u':u, 'd':d}, initial_condition, binaries_lower_bound
+        # terminal cost
+        obj += .5 * self.x[self.N].dot(self.P).dot(self.x[self.N])
+        self.objective = self.prog.AddQuadraticCost(obj)
 
     def set_initial_condition(self, x0):
         for k, c in enumerate(self.initial_condition):
@@ -285,15 +286,18 @@ class HybridModelPredictiveController(object):
                 self.binaries_lower_bound[t][ms[t]].UpdateLowerBound([1.])
         self.fixed_mode_sequence = ms
 
-
     def solve_relaxation(self, ms):
 
         # fix part of the mode sequence
         self.update_mode_sequence(ms)
 
         # solve MIQP
+        #solver = MosekSolver()
         solver = GurobiSolver()
+        self.prog.SetSolverOption(solver.solver_type(), 'Method', 0) # -1 default, 0 primal simplex, 1 dual simplex, 2 barrier
+        # self.prog.SetSolverOption(solver.solver_type(), 'OutputFlag', 1)
         result = solver.Solve(self.prog)
+        #result = self.prog.Solve()
 
         # check feasibility
         if result != SolutionResult.kSolutionFound:
@@ -303,23 +307,23 @@ class HybridModelPredictiveController(object):
         objective = self.prog.EvalBindingAtSolution(self.objective)[0]
 
         # store argmin in list of vectors
-        u_list = [self.prog.GetSolution(ut).reshape(self.S.nu,1) for ut in self.variables['u']]
-        x_list = [self.prog.GetSolution(xt).reshape(self.S.nx,1) for xt in self.variables['x']]
-        d_list = [[self.prog.GetSolution(dti) for dti in dt] for dt in self.variables['d']]
+        u_list = [self.prog.GetSolution(ut).reshape(self.S.nu,1) for ut in self.u]
+        x_list = [self.prog.GetSolution(xt).reshape(self.S.nx,1) for xt in self.x]
+        d_list = [[self.prog.GetSolution(dti) for dti in dt] for dt in self.d]
 
         # retrieve mode sequence and check integer feasibility
         mode_sequence = [dt.index(max(dt)) for dt in d_list]
-        is_integer = all([np.allclose(sorted(dt), [0.]*(len(dt)-1)+[1.]) for dt in d_list])
+        integer_feasible = all([np.allclose(sorted(dt), [0.]*(len(dt)-1)+[1.]) for dt in d_list])
 
         # best guess for the mode at the first relaxed time step
         if len(ms) < self.N:
-            next_mode_order = list(reversed(np.argsort(d_list[len(ms)]).tolist()))
+            mode_score = d_list[len(ms)]
         else:
-            next_mode_order = None
+            mode_score = None
 
-        return objective, is_integer, next_mode_order, {'u': u_list, 'x': x_list, 'ms': mode_sequence}
+        return objective, integer_feasible, mode_score, {'u': u_list, 'x': x_list, 'ms': mode_sequence}
 
-    def feedforward(self, x0):
+    def feedforward(self, x0, draw_solution=False):
 
         # overwrite initial condition
         self.set_initial_condition(x0)
@@ -327,6 +331,10 @@ class HybridModelPredictiveController(object):
         # call branch and bound algorithm
         tree = Tree(self.solve_relaxation)
         tree.explore()
+
+        # draw the tree
+        if draw_solution:
+            draw_tree(tree)
 
         # output
         if tree.incumbent is None:
