@@ -1,7 +1,5 @@
 import os
 import time
-from numpy import argsort
-from numpy import inf
 from pygraphviz import AGraph
 from subprocess import call
 
@@ -9,158 +7,184 @@ class Tree(object):
 
     def __init__(self, get_cost):
 
+        # stor data
         self.get_cost = get_cost
+        self.root_node = None
         self.incumbent = None
-        self.root_node = Node(None, None, get_cost, self.get_upper_bound())
 
     def explore(self):
-        if self.root_node.feasible and self.root_node.result['integer_feasible']:
+
+        # check root node
+        self.root_node = Node(self.get_cost)
+        if not self.root_node.result['feasible']:
+            return
+        if self.root_node.result['integer_feasible']:
             self.incumbent = self.root_node
             return
-        if not self.root_node.feasible:
-            return
+
+        # explore the tree until convergence
         parent = self.root_node
         while True:
-            child = parent.get_child(self.get_cost, self.get_upper_bound())
-            while child is None or not child.feasible or child.pruned: # is there something better ?
-                parent = parent.parent
-                if parent is None:
+
+            # get the first not cutoff and feasible child
+            child = parent.get_child(self.get_cost, self.get_cutoff())
+
+            # if there is not such a child, go one level up
+            while child is None:
+
+                # if back to the root node, proved global optimality
+                if parent.index is None:
                     return
-                child = parent.get_child(self.get_cost, self.get_upper_bound())
-            if child.result['integer_feasible']: # here a child is always feasible and never pruned
+
+                # get next child at the upper level
+                parent = parent.parent
+                child = parent.get_child(self.get_cost, self.get_cutoff())
+
+            # here a child is never cutoff and always feasible, if integer feasible then new incumbent
+            if child.result['integer_feasible']:
                 self.incumbent = child
+
+            # go one level down
             else:
                 parent = child
 
     def get_solve_time(self):
         return self.root_node.subtree_solve_time()
 
-    def get_upper_bound(self):
+    def get_cutoff(self):
         if self.incumbent is None:
             return None
         else:
             return self.incumbent.result['cost']
 
+    def draw(self, file_name='branch_and_bound'):
+
+        # initilize tree
+        graph = AGraph(directed=True, strict=True, filled=True)
+
+        # parameters of rthe nodes
+        graph.node_attr['style'] = 'filled'
+        graph.node_attr['fillcolor'] = 'white'
+
+        # add every node to the grapf
+        self.root_node.draw(graph)
+        self.root_node.draw_children(graph)
+        explore_nodes = graph.number_of_nodes() # draw_optimal_path can add non-explored nodes to the graph
+        self.draw_optimal_path(graph)
+
+        # get total solve time and number of nodes
+        graph.graph_attr['label'] = 'Cumulative solve time: %.2e' % self.get_solve_time() + ' s\n'
+        graph.graph_attr['label'] += 'Explored nodes: %d' % explore_nodes
+
+        # save .dot and .pdf file
+        directory = os.getcwd() + '/' + file_name
+        graph.write(directory + '.dot')
+        graph = AGraph(directory + '.dot')
+        graph.layout(prog='dot')
+        graph.draw(directory + '.pdf')
+
+        # open .pdf file
+        call(('open', directory + '.pdf'))
+
+    def draw_optimal_path(self, graph):
+
+        # iterate over the subpaths of the incumbent path
+        if self.incumbent is not None:
+            ms = self.incumbent.result['mode_sequence']
+            for path in [ms[:i] for i in range(len(ms)+1)]:
+
+                # if already in the tree fill with green
+                if len(path) <= len(self.incumbent.get_path()):
+                    graph.get_node(str(path)).attr['fillcolor'] = 'green'
+
+                # if not, draw the node and fill with green
+                else:
+                    graph.add_node(str(path), fillcolor='green', label='Index: '+str(path[-1]))
+                    graph.add_edge(str(path[:-1]), str(path))
+
 class Node(object):
 
-    def __init__(self, parent, index, get_cost, upper_bound):
+    def __init__(self, get_cost, parent=None, index=None, cutoff=None):
+
+        # store data
         self.parent = parent
         self.index = index
-        if parent is None:
-            self.result = get_cost(self.path())
-        else:
-            self.result = get_cost(
-                self.path(),
-                parent.result['variable_basis'],
-                parent.result['constraint_basis'],
-                upper_bound
-                )
-        self.feasible = self.result['feasible']
-        self.pruned = self.result['cutoff']
-        self.childern_order = self.get_children_order()
         self.children = []
 
-    # def is_pruned(self, upper_bound):
-    #     pruned = False
-    #     if self.feasible and upper_bound is not None:
-    #             pruned = self.result['cost'] > upper_bound
-    #     return pruned
-
-    def get_children_order(self):
-        if self.feasible and self.result['children_score'] is not None:
-            childern_order = argsort(self.result['children_score'])[::-1].tolist()
-            if self.index is not None:
-                childern_order.insert(0, childern_order.pop(childern_order.index(self.index)))
+        # get warm start
+        if parent is not None:
+            warm_start = parent.result
         else:
-            childern_order = None
-        return childern_order
+            warm_start = None
 
-    def path(self):
+        # solve problem for this node
+        self.result = get_cost(self.get_path(), cutoff, warm_start)
+
+    def get_path(self):
         if self.parent is None:
             return []
-        return self.parent.path() + [self.index]
+        return self.parent.get_path() + [self.index]
 
-    def get_child(self, get_cost, upper_bound):
-        for index in self.childern_order[len(self.children):]:
-            child = Node(self, index, get_cost, upper_bound)
+    def get_child(self, get_cost, cutoff):
+        '''
+        Continues to populate the list self.children until a child that is not cutoff nor infesible is found.
+        Returns that child or None if there is no child that satisfies the above conditions.
+        The search is performed by the order of self.result['children_order'].
+        '''
+        for index in self.result['children_order'][len(self.children):]:
+            child = Node(get_cost, self, index, cutoff)
             self.children.append(child)
-            if child.feasible and not child.pruned:
+            if not child.result['cutoff'] and child.result['feasible']:
                 return child
         return None
 
+    def draw(self, graph):
+
+        # initilization
+        label = ''
+        color = 'black'
+
+        # if not root node, draw index and score
+        if self.parent is not None:
+            label += 'Index: '+ str(self.index) + '\n'
+            label += 'Score: %.3f' % max(self.parent.result['children_score'][self.index], 0.) + '\n'
+
+        # if blue node for cutoff, red for infeasible
+        if self.result['cutoff']:
+            color = 'blue'
+        elif not self.result['feasible']:
+            color = 'red'
+
+        # if not cutoff and feasible, draw cost
+        else:
+            label += 'Cost: %.3f' % self.result['cost'] + '\n'
+
+        # draw solve time
+        label += 'Solve time: %.2e' % self.result['solve_time'] + ' s'
+
+        # add node to the pygraphviz tree
+        graph.add_node(str(self.get_path()), color=color, label=label)
+
+        # add edge to the pygraphviz tree
+        if self.parent is not None:
+            graph.add_edge(str(self.parent.get_path()), str(self.get_path()))
+
+    def draw_children(self, graph):
+        for child in self.children:
+            child.draw(graph)
+            child.draw_children(graph)
+
     def subtree_solve_time(self, solve_time=None):
+
+        # initialize the count with the solve time of this node
         if solve_time is None:
             solve_time = self.result['solve_time']
+
+        # add solve time of the children
         for child in self.children:
             solve_time += child.result['solve_time']
+
+            # add solve time of the gran-children (do not add the solve time of the children twice!)
             solve_time += child.subtree_solve_time(0.)
+
         return solve_time
-
-def draw_tree(tree, file_name='branch_and_bound'):
-    graph = AGraph(
-        directed=True,
-        strict=True,
-        filled=True
-        )
-    graph.node_attr['style'] = 'filled'
-    graph.node_attr['fillcolor'] = 'white'
-    graph.graph_attr['label'] = 'Cumulative solve time: %.3f' % tree.get_solve_time()
-    draw_node(tree.root_node, graph)
-    draw_children(tree.root_node, graph)
-    draw_optimal_path(tree.incumbent, graph)
-    directory = os.getcwd() + '/' + file_name
-    graph.write(directory + '.dot')
-    graph = AGraph(directory + '.dot')
-    graph.layout(prog='dot')
-    graph.draw(directory + '.pdf')
-    call(('open', directory + '.pdf'))
-    print 'Number of nodes explore:', graph.number_of_nodes()
-
-def draw_optimal_path(incumbent, graph):
-    if incumbent is not None:
-        parent = incumbent
-        while parent is not None:
-            node = graph.get_node(str(parent.path()))
-            node.attr['fillcolor'] = 'green'
-            parent = parent.parent
-        for path in [incumbent.result['mode_sequence'][:i] for i in range(len(incumbent.path())+1, len(incumbent.result['mode_sequence']))]:
-            graph.add_node(
-                str(path),
-                fillcolor='green',
-                label=str(path[-1])
-                )
-            graph.add_edge(
-                str(path[:-1]),
-                str(path)
-                )
-
-def draw_children(node, graph):
-    for child in node.children:
-        draw_node(child, graph)
-        draw_children(child, graph)
-
-def draw_node(node, graph):
-    if not node.feasible:
-        color = 'red'
-    elif node.pruned:
-        color = 'blue'
-    else:
-        color = 'black'
-    label = ''
-    if node.index is not None:
-        label += 'Index: '+ str(node.index) + '\n'
-    if node.parent is not None:
-        label += 'Score: %.3f' % max(node.parent.result['children_score'][node.index], 0.) + '\n' # abs because sometimes I get -0
-    if node.feasible and not node.pruned:
-        label += 'Cost: %.3f' % node.result['cost'] + '\n'
-    label += 'Solve time: %.4f' % node.result['solve_time']
-    graph.add_node(
-        str(node.path()),
-        color=color,
-        label=label
-        )
-    if node.parent is not None:
-        graph.add_edge(
-            str(node.parent.path()),
-            str(node.path())
-            )

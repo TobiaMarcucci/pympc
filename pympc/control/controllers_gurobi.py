@@ -6,7 +6,7 @@ from collections import OrderedDict
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
 from pympc.optimization.programs import linear_program
-from pympc.optimization.solvers.branch_and_bound import Tree, draw_tree
+from pympc.optimization.solvers.branch_and_bound import Tree
 from pympc.optimization.solvers.gurobi import linear_expression, quadratic_expression
 
 class HybridModelPredictiveController(object):
@@ -23,7 +23,7 @@ class HybridModelPredictiveController(object):
 
         # mpMIQP
         self.prog = self.build_mpmiqp(method) # adds the variables: prog, objective, u, x, d, initial_condition
-        self.fixed_mode_sequence = []
+        self.partial_mode_sequence = []
 
     def build_mpmiqp(self, method):
 
@@ -121,91 +121,97 @@ class HybridModelPredictiveController(object):
             self.prog.getVarByName('x0[%d]'%k).LB = x0[k,0]
             self.prog.getVarByName('x0[%d]'%k).UB = x0[k,0]
 
-    def update_mode_sequence(self, ms):
-        for t in range(self.N):
-            if t < len(ms) and t < len(self.fixed_mode_sequence):
-                if ms[t] != self.fixed_mode_sequence[t]:
-                    self.prog.getVarByName('d%d[%d]'%(t,self.fixed_mode_sequence[t])).LB = 0.
-                    self.prog.getVarByName('d%d[%d]'%(t,ms[t])).LB = 1.
-            elif t >= len(ms) and t < len(self.fixed_mode_sequence):
-                self.prog.getVarByName('d%d[%d]'%(t,self.fixed_mode_sequence[t])).LB = 0.
-            elif t < len(ms) and t >= len(self.fixed_mode_sequence):
-                self.prog.getVarByName('d%d[%d]'%(t,ms[t])).LB = 1.
-        self.fixed_mode_sequence = ms
+    def update_mode_sequence(self, partial_mode_sequence):
 
-    def solve_relaxation(self, ms, variable_basis=None, constraint_basis=None, upper_bound=None):
+        # loop over the time horizon
+        for t in range(self.N):
+
+            # write and erase
+            if t < len(partial_mode_sequence) and t < len(self.partial_mode_sequence):
+                if partial_mode_sequence[t] != self.partial_mode_sequence[t]:
+                    self.prog.getVarByName('d%d[%d]'%(t,self.partial_mode_sequence[t])).LB = 0.
+                    self.prog.getVarByName('d%d[%d]'%(t,partial_mode_sequence[t])).LB = 1.
+
+            # erase only
+            elif t >= len(partial_mode_sequence) and t < len(self.partial_mode_sequence):
+                self.prog.getVarByName('d%d[%d]'%(t,self.partial_mode_sequence[t])).LB = 0.
+
+            # write only
+            elif t < len(partial_mode_sequence) and t >= len(self.partial_mode_sequence):
+                self.prog.getVarByName('d%d[%d]'%(t,partial_mode_sequence[t])).LB = 1.
+
+        # update partial mode sequence
+        self.partial_mode_sequence = partial_mode_sequence
+
+    def solve_relaxation(self, partial_mode_sequence, cutoff_value=None, warm_start=None):
 
         # self.prog.reset()
 
         # warm start for active set method
-        if variable_basis is not None:
+        if warm_start is not None:
             for i, v in enumerate(self.prog.getVars()):
-                v.VBasis = variable_basis[i]
-        if constraint_basis is not None:
+                v.VBasis = warm_start['variable_basis'][i]
             for i, c in enumerate(self.prog.getConstrs()):
-                c.CBasis = constraint_basis[i]
+                c.CBasis = warm_start['constraint_basis'][i]
         self.prog.update()
 
         # set cut off from best upper bound
-        if upper_bound is not None:
-            self.prog.setParam('Cutoff', upper_bound)
+        if cutoff_value is not None:
+            self.prog.setParam('Cutoff', cutoff_value)
 
         # fix part of the mode sequence
-        self.update_mode_sequence(ms)
+        self.update_mode_sequence(partial_mode_sequence)
 
         # run the optimization
         self.prog.optimize()
+        result = dict()
+        result['solve_time'] = self.prog.Runtime
 
         # check status
-        print read_gurobi_status(self.prog.status)
+        result['cutoff'] = read_gurobi_status(self.prog.status) == 'cutoff'
+        if result['cutoff']:
+        	result['feasible'] = None
+        else:
+        	result['feasible'] = read_gurobi_status(self.prog.status) == 'optimal'
 
-
-
-
-
-        if self.prog.status != 2: # optimal
-            return {
-                'feasible': self.prog.status == 6,
-                'cost': None,
-                'integer_feasible': None,
-                'children_score': None,
-                'solve_time': self.prog.Runtime,
-                'mode_sequence': None,
-                'variable_basis': None,
-                'constraint_basis': None,
-                'cutoff': self.prog.status == 6, # 2: optimal, 3: infeasible, 4: infeasible or unbounded, 6: cutoff
-                'u': None,
-                'x': None,
-                }
+        # return if cutoff or unfeasible
+        if result['cutoff'] or not result['feasible']:
+        	return result
 
         # store argmin in list of vectors
-        x_list = [[self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)] for t in range(self.N+1)]
-        u_list = [[self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)] for t in range(self.N)]
-        d_list = [[self.prog.getVarByName('d%d[%d]'%(t,k)).x for k in range(self.S.nm)] for t in range(self.N)]
+        result['x'] = [[self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)] for t in range(self.N+1)]
+        result['u'] = [[self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)] for t in range(self.N)]
+        d = [[self.prog.getVarByName('d%d[%d]'%(t,k)).x for k in range(self.S.nm)] for t in range(self.N)]
 
         # retrieve mode sequence and check integer feasibility
-        mode_sequence = [dt.index(max(dt)) for dt in d_list]
-        integer_feasible = all([np.allclose(sorted(dt), [0.]*(len(dt)-1)+[1.]) for dt in d_list])
+        result['mode_sequence'] = [dt.index(max(dt)) for dt in d]
+        result['integer_feasible'] = all([np.allclose(sorted(dt), [0.]*(len(dt)-1)+[1.]) for dt in d])
 
-        # best guess for the mode at the first relaxed time step
-        if len(ms) < self.N:
-            children_score = d_list[len(ms)]
+        # heuristic to guess the optimal mode at the first relaxed time step
+        if len(partial_mode_sequence) < self.N:
+            result['children_order'], result['children_score'] = self.mode_heuristic(d)
         else:
-            children_score = None
+            result['children_order'] = None
+            result['children_score'] = None
 
-        return {
-            'feasible': True,
-            'cost': self.prog.objVal,
-            'integer_feasible': integer_feasible,
-            'children_score': children_score,
-            'solve_time': self.prog.Runtime,
-            'mode_sequence': mode_sequence,
-            'variable_basis': [v.VBasis for v in self.prog.getVars()],
-            'constraint_basis': [c.CBasis for c in self.prog.getConstrs()],
-            'cutoff': False, # 2: optimal, 3: infeasible, 4: infeasible or unbounded, 6: cutoff
-            'u': u_list,
-            'x': x_list,
-            }
+        # other solver outputs
+        result['cost'] = self.prog.objVal
+        result['variable_basis'] = [v.VBasis for v in self.prog.getVars()]
+        result['constraint_basis'] = [c.CBasis for c in self.prog.getConstrs()]
+
+        return result
+
+    def mode_heuristic(self, d):
+
+        # order by the value of the relaxed binaries
+        children_score = d[len(self.partial_mode_sequence)]
+        children_order = np.argsort(children_score)[::-1].tolist()
+
+        # put in fron the mode of the parent node
+        if len(self.partial_mode_sequence) > 0:
+            children_order.insert(0, children_order.pop(children_order.index(self.partial_mode_sequence[-1])))
+
+        return children_order, children_score
 
     def feedforward(self, x0, draw_solution=False):
 
@@ -218,37 +224,41 @@ class HybridModelPredictiveController(object):
 
         # draw the tree
         if draw_solution:
-            draw_tree(tree)
+            tree.draw()
 
         # output
         if tree.incumbent is None:
-            return None, None, None, None
+            return [None]*4
         else:
-            return(
-                tree.incumbent.result['u'],
-                tree.incumbent.result['x'],
-                tree.incumbent.result['mode_sequence'],
-                tree.incumbent.result['cost']
-                )
+            return [tree.incumbent.result[key] for key in ['u', 'x', 'mode_sequence', 'cost']]
 
-def read_gurobi_status(status):
-	return {
-		1: 'loaded', # Model is loaded, but no solution information is available.'
-		2: 'optimal',	# Model was solved to optimality (subject to tolerances), and an optimal solution is available.
-		3: 'infeasible', # Model was proven to be infeasible.
-		4: 'inf_or_unbd', # Model was proven to be either infeasible or unbounded. To obtain a more definitive conclusion, set the DualReductions parameter to 0 and reoptimize.
-		5: 'unbounded', # Model was proven to be unbounded. Important note: an unbounded status indicates the presence of an unbounded ray that allows the objective to improve without limit. It says nothing about whether the model has a feasible solution. If you require information on feasibility, you should set the objective to zero and reoptimize.
-		6: 'cutoff', # Optimal objective for model was proven to be worse than the value specified in the Cutoff parameter. No solution information is available. Problem might also be infeasible.
-		7: 'iteration_limit', # Optimization terminated because the total number of simplex iterations performed exceeded the value specified in the IterationLimit parameter, or because the total number of barrier iterations exceeded the value specified in the BarIterLimit parameter.
-		8: 'node_limit', # Optimization terminated because the total number of branch-and-cut nodes explored exceeded the value specified in the NodeLimit parameter.
-		9: 'time_limit', # Optimization terminated because the time expended exceeded the value specified in the TimeLimit parameter.
-		10: 'solution_limit', # Optimization terminated because the number of solutions found reached the value specified in the SolutionLimit parameter.
-		11: 'interrupted', # Optimization was terminated by the user.
-		12: 'numeric', # Optimization was terminated due to unrecoverable numerical difficulties.
-		13: 'suboptimal', # Unable to satisfy optimality tolerances; a sub-optimal solution is available.
-		14: 'in_progress', # An asynchronous optimization call was made, but the associated optimization run is not yet complete.
-		15: 'user_obj_limit' # User specified an objective limit (a bound on either the best objective or the best bound), and that limit has been reached.
-		}[status]
+    def feedforward_gurobi(self, x0):
+
+        # set up miqp
+        self.set_d_type('B')
+        self.update_mode_sequence([])
+        self.set_initial_condition(x0)
+
+        # run the optimization
+        self.prog.setParam('OutputFlag', 1)
+        self.prog.optimize()
+        self.set_d_type('C')
+
+        # output
+        if read_gurobi_status(self.prog.status) == 'optimal':
+            x = [[self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)] for t in range(self.N+1)]
+            u = [[self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)] for t in range(self.N)]
+            d = [[self.prog.getVarByName('d%d[%d]'%(t,k)).x for k in range(self.S.nm)] for t in range(self.N)]
+            ms = [dt.index(max(dt)) for dt in d]
+            cost = self.prog.objVal
+            return u, x, ms, cost
+        else:
+            return [None]*4
+
+    def set_d_type(self, d_type):
+        for t in range(self.N):
+            for i in range(self.S.nm):
+                self.prog.getVarByName('d%d[%d]'%(t,i)).VType = d_type
 
 def get_graph_representation(S):
     P = []
@@ -281,3 +291,22 @@ def get_big_m(P_list, tol=1.e-6):
         m.append(mi)
     mi = [np.maximum.reduce([mij for mij in mi]) for mi in m]
     return m, mi
+
+def read_gurobi_status(status):
+	return {
+		1: 'loaded', # Model is loaded, but no solution information is available.'
+		2: 'optimal',	# Model was solved to optimality (subject to tolerances), and an optimal solution is available.
+		3: 'infeasible', # Model was proven to be infeasible.
+		4: 'inf_or_unbd', # Model was proven to be either infeasible or unbounded. To obtain a more definitive conclusion, set the DualReductions parameter to 0 and reoptimize.
+		5: 'unbounded', # Model was proven to be unbounded. Important note: an unbounded status indicates the presence of an unbounded ray that allows the objective to improve without limit. It says nothing about whether the model has a feasible solution. If you require information on feasibility, you should set the objective to zero and reoptimize.
+		6: 'cutoff', # Optimal objective for model was proven to be worse than the value specified in the Cutoff parameter. No solution information is available. (Note: problem might also be infeasible.)
+		7: 'iteration_limit', # Optimization terminated because the total number of simplex iterations performed exceeded the value specified in the IterationLimit parameter, or because the total number of barrier iterations exceeded the value specified in the BarIterLimit parameter.
+		8: 'node_limit', # Optimization terminated because the total number of branch-and-cut nodes explored exceeded the value specified in the NodeLimit parameter.
+		9: 'time_limit', # Optimization terminated because the time expended exceeded the value specified in the TimeLimit parameter.
+		10: 'solution_limit', # Optimization terminated because the number of solutions found reached the value specified in the SolutionLimit parameter.
+		11: 'interrupted', # Optimization was terminated by the user.
+		12: 'numeric', # Optimization was terminated due to unrecoverable numerical difficulties.
+		13: 'suboptimal', # Unable to satisfy optimality tolerances; a sub-optimal solution is available.
+		14: 'in_progress', # An asynchronous optimization call was made, but the associated optimization run is not yet complete.
+		15: 'user_obj_limit' # User specified an objective limit (a bound on either the best objective or the best bound), and that limit has been reached.
+		}[status]
