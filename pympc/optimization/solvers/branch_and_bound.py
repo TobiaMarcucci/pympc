@@ -147,7 +147,7 @@ class Node(object):
         # if not root node, draw index and score
         if self.parent is not None:
             label += 'Index: '+ str(self.index) + '\n'
-            label += 'Score: %.3f' % max(self.parent.result['children_score'][self.index], 0.) + '\n'
+            # label += 'Score: %.3f' % max(self.parent.result['children_score'][self.index], 0.) + '\n'
 
         # if blue node for cutoff, red for infeasible
         if self.result['cutoff']:
@@ -160,7 +160,7 @@ class Node(object):
             label += 'Cost: %.3f' % self.result['cost'] + '\n'
 
         # draw solve time
-        label += 'Solve time: %.2e' % self.result['solve_time'] + ' s'
+        label += 'Sol. time: %.2e' % self.result['solve_time'] + ' s'
 
         # add node to the pygraphviz tree
         graph.add_node(str(self.get_path()), color=color, label=label)

@@ -996,8 +996,7 @@ def _get_inner_simplex(A, b, vertices, tol=1.e-7):
         # check the length of the expansion wrt to the plane, if zero expand in the opposite direction
         expansion = np.abs(a.T.dot(sol['argmin'][:i, :]) - d) # >= 0
         if expansion < tol:
-            lp.f = - lp.f
-            sol = lp.solve()
+            sol = linear_program(-f, A, b)
         vertices.append(sol['argmin'][:n,:])
 
     return vertices

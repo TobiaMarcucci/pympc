@@ -1,13 +1,12 @@
 # external imports
 import numpy as np
 import gurobipy as grb
-from collections import OrderedDict
+import scipy as sp
 
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
-from pympc.optimization.programs import linear_program
+from pympc.optimization.programs import linear_program, quadratic_program
 from pympc.optimization.solvers.branch_and_bound import Tree
-from pympc.optimization.solvers.gurobi import linear_expression, quadratic_expression
 
 class HybridModelPredictiveController(object):
 
@@ -20,10 +19,53 @@ class HybridModelPredictiveController(object):
         self.R = R
         self.P = P
         self.X_N = X_N
+        self.transition_costs, self.transition_map = self.get_transition_costs()
 
         # mpMIQP
         self.prog = self.build_mpmiqp(method) # adds the variables: prog, objective, u, x, d, initial_condition
         self.partial_mode_sequence = []
+
+    def get_transition_costs(self):
+        nx = self.S.nx
+        nu = self.S.nu
+        transition_costs = []
+        for i in range(self.S.nm):
+            Si = self.S.affine_systems[i]
+            Di = self.S.domains[i]
+            transition_costs_i = []
+            for j in range(self.S.nm):
+                Dj = self.S.domains[j]
+                prog = grb.Model()
+                x = np.array([prog.addVars(nx, lb=[-grb.GRB.INFINITY]*nx)[k] for k in range(nx)])
+                u = np.array([prog.addVars(nu, lb=[-grb.GRB.INFINITY]*nu)[k] for k in range(nu)])
+                x_next = np.array([prog.addVars(nx, lb=[-grb.GRB.INFINITY]*nx)[k] for k in range(nx)])
+                u_next = np.array([prog.addVars(nu, lb=[-grb.GRB.INFINITY]*nu)[k] for k in range(nu)])
+                prog.update()
+                xu = np.concatenate((x, u))
+                xu_next = np.concatenate((x_next, u_next))
+                prog.setObjective(
+                    .5*(
+                        x.dot(self.Q).dot(x) +
+                        u.dot(self.R).dot(u) +
+                        x_next.dot(self.Q).dot(x_next) +
+                        u_next.dot(self.R).dot(u_next)
+                        )
+                    )
+                for k in range(nx):
+                    prog.addConstr(x_next[k] == Si.A[k].dot(x) + Si.B[k].dot(u) + Si.c[k,0])
+                for k in range(Di.A.shape[0]):
+                    prog.addConstr(Di.A[k].dot(xu) <= Di.b[k,0])
+                for k in range(Dj.A.shape[0]):
+                    prog.addConstr(Dj.A[k].dot(xu_next) <= Dj.b[k,0])
+                prog.setParam('OutputFlag', 0)
+                prog.optimize()
+                if read_gurobi_status(prog.status) == 'optimal':
+                    transition_costs_i.append(prog.objVal)
+                else:
+                    transition_costs_i.append(None)
+            transition_costs.append(transition_costs_i)
+        transition_map = [[i for i in np.argsort(transition_costs[m]) if transition_costs[m][i] is not None] for m in range(self.S.nm)]
+        return transition_costs, transition_map
 
     def build_mpmiqp(self, method):
 
@@ -39,10 +81,6 @@ class HybridModelPredictiveController(object):
         # initialize program
         prog = grb.Model()
         obj = 0.
-
-        # parameters
-        prog.setParam('OutputFlag', 0)
-        prog.setParam('Method', 0)
 
         # loop over time
         for t in range(self.N):
@@ -145,7 +183,8 @@ class HybridModelPredictiveController(object):
 
     def solve_relaxation(self, partial_mode_sequence, cutoff_value=None, warm_start=None):
 
-        # self.prog.reset()
+        # reset program
+        self.prog.reset()
 
         # warm start for active set method
         if warm_start is not None:
@@ -155,8 +194,14 @@ class HybridModelPredictiveController(object):
                 c.CBasis = warm_start['constraint_basis'][i]
         self.prog.update()
 
+        # parameters
+        self.prog.setParam('OutputFlag', 0)
+        self.prog.setParam('Method', 0)
+
         # set cut off from best upper bound
-        if cutoff_value is not None:
+        if cutoff_value is None:
+            self.prog.setParam('Cutoff', grb.GRB.INFINITY)
+        else:
             self.prog.setParam('Cutoff', cutoff_value)
 
         # fix part of the mode sequence
@@ -179,8 +224,8 @@ class HybridModelPredictiveController(object):
         	return result
 
         # store argmin in list of vectors
-        result['x'] = [[self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)] for t in range(self.N+1)]
-        result['u'] = [[self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)] for t in range(self.N)]
+        result['x'] = [np.vstack([self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)]) for t in range(self.N+1)]
+        result['u'] = [np.vstack([self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)]) for t in range(self.N)]
         d = [[self.prog.getVarByName('d%d[%d]'%(t,k)).x for k in range(self.S.nm)] for t in range(self.N)]
 
         # retrieve mode sequence and check integer feasibility
@@ -188,8 +233,17 @@ class HybridModelPredictiveController(object):
         result['integer_feasible'] = all([np.allclose(sorted(dt), [0.]*(len(dt)-1)+[1.]) for dt in d])
 
         # heuristic to guess the optimal mode at the first relaxed time step
-        if len(partial_mode_sequence) < self.N:
-            result['children_order'], result['children_score'] = self.mode_heuristic(d)
+        # if len(partial_mode_sequence) < self.N:
+        #     result['children_order'], result['children_score'] = self.mode_heuristic(d)
+        # else:
+        #     result['children_order'] = None
+        #     result['children_score'] = None
+        if len(partial_mode_sequence) == 0.:
+            result['children_order'] = self.transition_map[2]
+            result['children_score'] = self.transition_costs[2]
+        elif len(partial_mode_sequence) < self.N:
+            result['children_order'] = self.transition_map[partial_mode_sequence[-1]]
+            result['children_score'] = self.transition_costs[partial_mode_sequence[-1]]
         else:
             result['children_order'] = None
             result['children_score'] = None
@@ -207,7 +261,7 @@ class HybridModelPredictiveController(object):
         children_score = d[len(self.partial_mode_sequence)]
         children_order = np.argsort(children_score)[::-1].tolist()
 
-        # put in fron the mode of the parent node
+        # put in front the mode of the parent node
         if len(self.partial_mode_sequence) > 0:
             children_order.insert(0, children_order.pop(children_order.index(self.partial_mode_sequence[-1])))
 
@@ -215,12 +269,17 @@ class HybridModelPredictiveController(object):
 
     def feedforward(self, x0, draw_solution=False):
 
+        # reset program
+        self.prog.reset()
+
         # overwrite initial condition
+        self.prog.reset()
         self.set_initial_condition(x0)
 
         # call branch and bound algorithm
         tree = Tree(self.solve_relaxation)
         tree.explore()
+        print tree.get_solve_time()
 
         # draw the tree
         if draw_solution:
@@ -234,20 +293,27 @@ class HybridModelPredictiveController(object):
 
     def feedforward_gurobi(self, x0):
 
+        # reset program
+        self.prog.reset()
+
         # set up miqp
         self.set_d_type('B')
         self.update_mode_sequence([])
         self.set_initial_condition(x0)
 
+        # parameters
+        self.prog.setParam('OutputFlag', 0)
+        self.prog.setParam('Threads', 0)
+
         # run the optimization
-        self.prog.setParam('OutputFlag', 1)
         self.prog.optimize()
+        print self.prog.Runtime
         self.set_d_type('C')
 
         # output
         if read_gurobi_status(self.prog.status) == 'optimal':
-            x = [[self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)] for t in range(self.N+1)]
-            u = [[self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)] for t in range(self.N)]
+            x = [np.vstack([self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)]) for t in range(self.N+1)]
+            u = [np.vstack([self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)]) for t in range(self.N)]
             d = [[self.prog.getVarByName('d%d[%d]'%(t,k)).x for k in range(self.S.nm)] for t in range(self.N)]
             ms = [dt.index(max(dt)) for dt in d]
             cost = self.prog.objVal
