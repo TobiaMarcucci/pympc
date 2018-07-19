@@ -51,7 +51,7 @@ def plot_state_space_trajectory(x, dim=[0,1], text=False, label=None, **kwargs):
     plt.xlabel(r'$x_{' + str(dim[0]+1) + '}$')
     plt.ylabel(r'$x_{' + str(dim[1]+1) + '}$')
 
-def plot_input_sequence(u, h, u_bounds=None):
+def plot_input_sequence(u, h, u_bounds=None, legend=True):
     """
     Plots the input sequence and its bounds as functions of time.
 
@@ -71,6 +71,7 @@ def plot_input_sequence(u, h, u_bounds=None):
     # time axis
     N = len(u)
     t = np.linspace(0, N*h, N+1)
+    # t = range(N+1)
 
     # plot each input element separately
     for i in range(nu):
@@ -83,27 +84,29 @@ def plot_input_sequence(u, h, u_bounds=None):
         # plot bounds if provided
         if u_bounds is not None:
             for bound in u_bounds:
-                bound_plot, = plt.step(t, bound[i,0]*np.ones(t.shape), 'r')
+                bound_plot, = plt.step(t, bound[i,0]*np.ones(len(t)), 'r')
 
         # miscellaneous
         plt.ylabel(r'$u_{' + str(i+1) + '}$')
-        plt.xlim((0., N*h))
-        if i == 0:
+        plt.xlim((0., np.max(t)))
+        if legend and i == 0:
             if u_bounds is not None:
                 plt.legend(
                     [input_plot, bound_plot],
-                    ['Optimal control', 'Control bounds'],
+                    ['Control input', 'Control bounds'],
                     loc=1
                     )
             else:
                 plt.legend(
                     [input_plot],
-                    ['Optimal control'],
+                    ['Control input'],
                     loc=1
                     )
+        if i < nu-1:
+            plt.tick_params(axis='x', labelbottom=False)
     plt.xlabel(r'$t$')
 
-def plot_state_trajectory(x, h, x_bounds=None):
+def plot_state_trajectory(x, h, x_bounds=None, legend=True):
     """
     Plots the state trajectory and its bounds as functions of time.
 
@@ -123,6 +126,7 @@ def plot_state_trajectory(x, h, x_bounds=None):
     # time axis
     N = len(x) - 1
     t = np.linspace(0, N*h, N+1)
+    # t = range(N+1)
 
     # plot each state element separately
     for i in range(nx):
@@ -135,24 +139,26 @@ def plot_state_trajectory(x, h, x_bounds=None):
         # plot bounds if provided
         if x_bounds is not None:
             for bound in x_bounds:
-                bound_plot, = plt.step(t, bound[i,0]*np.ones(t.shape),'r')
+                bound_plot, = plt.step(t, bound[i,0]*np.ones(len(t)),'r')
 
         # miscellaneous
         plt.ylabel(r'$x_{' + str(i+1) + '}$')
-        plt.xlim((0., N*h))
-        if i == 0:
+        plt.xlim((0., np.max(t)))
+        if legend and i == 0:
             if x_bounds is not None:
                 plt.legend(
                     [state_plot, bound_plot],
-                    ['Optimal trajectory', 'State bounds'],
+                    ['State trajectory', 'State bounds'],
                     loc=1
                     )
             else:
                 plt.legend(
                     [state_plot],
-                    ['Optimal trajectory'],
+                    ['Sate trajectory'],
                     loc=1
                     )
+        if i < nx-1:
+            plt.tick_params(axis='x', labelbottom=False)
     plt.xlabel(r'$t$')
 
 def plot_output_trajectory(C, x, h, y_bounds=None):

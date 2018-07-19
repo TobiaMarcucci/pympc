@@ -52,9 +52,9 @@ class Polyhedron(object):
         self._center = None
         self._vertices = None
 
-    def add_inequality(self, A, b):
+    def add_inequality(self, A, b, indices=None):
         """
-        Adds the inequality A x <= b to the existing polyhedron.
+        Adds the inequality A x[indices] <= b to the existing polyhedron.
 
         Arguments
         ----------
@@ -62,10 +62,13 @@ class Polyhedron(object):
             Left-hand side of the inequalities.
         b : numpy.ndarray
             Right-hand side of the inequalities.
+        indices : list of int
+            Set of indices of elements of x to which the inequality applies.
         """
 
         # check inequalities
-        A, b = self._check_input_matices(A, b)
+        S = self._selection_matrix(indices)
+        A, b = self._check_input_matices(A.dot(S), b)
 
         # reset attributes to None
         self._delete_attributes()
@@ -74,7 +77,7 @@ class Polyhedron(object):
         self.A = np.vstack((self.A, A))
         self.b = np.vstack((self.b, b))
 
-    def add_equality(self, C, d):
+    def add_equality(self, C, d, indices=None):
         """
         Adds the equality C x = d to the existing polyhedron.
 
@@ -84,10 +87,13 @@ class Polyhedron(object):
             Left-hand side of the equalities.
         d : numpy.ndarray
             Right-hand side of the equalities.
+        indices : list of int
+            Set of indices of elements of x to which the equality applies.
         """
 
         # check equalities
-        C, d = self._check_input_matices(C, d)
+        S = self._selection_matrix(indices)
+        C, d = self._check_input_matices(C.dot(S), d)
 
         # reset attributes to None
         self._delete_attributes()
