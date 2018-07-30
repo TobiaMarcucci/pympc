@@ -57,6 +57,38 @@ def big_m(P_list, tol=1.e-6):
     mi = [np.maximum.reduce([mij for mij in mi]) for mi in m]
     return m, mi
 
+def big_m_relaxation(P_list):
+    nx = P_list[0].A.shape[1]
+    m, _ = big_m(P_list)
+    M = [np.hstack(m[i][:i] + [np.zeros((P_list[i].A.shape[0],1))] + m[i][i+1:]) for i in range(len(P_list))]
+    A = np.vstack([np.hstack([Pi.A, -M[i]]) for i, Pi in enumerate(P_list)])
+    b = np.vstack([Pi.b for Pi in P_list])
+    R = Polyhedron(A, b)
+    a = np.hstack([np.zeros((1,nx)), np.ones((1,len(P_list)))])
+    R.add_inequality(a, np.ones((1,1)))
+    R.add_inequality(-a, -np.ones((1,1)))
+    R.add_lower_bound(
+        np.zeros((len(P_list),1)),
+        range(nx, nx+len(P_list))
+    )
+    return R
+
+def big_m_loose_relaxation(P_list):
+    nx = P_list[0].A.shape[1]
+    _, mi = big_m(P_list)
+    M = [np.hstack([np.zeros((P_list[i].A.shape[0],i)), mi[i], np.zeros((P_list[i].A.shape[0],len(P_list)-i-1))] ) for i in range(len(P_list))]
+    A = np.vstack([np.hstack([Pi.A, M[i]]) for i, Pi in enumerate(P_list)])
+    b = np.vstack([Pi.b + mi[i] for i, Pi in enumerate(P_list)])
+    R = Polyhedron(A, b)
+    a = np.hstack([np.zeros((1,nx)), np.ones((1,len(P_list)))])
+    R.add_inequality(a, np.ones((1,1)))
+    R.add_inequality(-a, -np.ones((1,1)))
+    R.add_lower_bound(
+        np.zeros((len(P_list),1)),
+        range(nx, nx+len(P_list))
+    )
+    return R
+
 def add_vars(prog, n, lb=None, **kwargs):
     if lb is None:
         lb=[-grb.GRB.INFINITY] * n
