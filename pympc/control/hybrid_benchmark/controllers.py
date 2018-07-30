@@ -11,7 +11,7 @@ from pympc.optimization.programs import linear_program
 
 class HybridModelPredictiveController(object):
 
-    def __init__(self, S, N, Q, R, P, X_N, method='big_m'):
+    def __init__(self, S, N, Q, R, P, X_N, method='Big-M'):
 
         # store inputs
         self.S = S
@@ -26,15 +26,15 @@ class HybridModelPredictiveController(object):
         self.partial_mode_sequence = []
 
     def build_mpmiqp(self, method):
-        if method == 'MLD equivalent':
+        if method == 'Traditional formulation':
             return self.bild_miqp_bemporad_morari()
-        if method == 'Traditional big-M':
-            return self.bild_miqp_bigm()
         if method == 'Big-M':
+            return self.bild_miqp_bigm()
+        if method == 'Stronger big-M':
             return self.bild_miqp_improved_bigm()
         if method == 'Convex hull':
             return self.bild_miqp_convex_hull()
-        if method == 'Convex hull lifted constraints':
+        if method == 'Convex hull, lifted constraints':
             return self.build_miqp_improved_convex_hull()
         else:
             raise ValueError('unknown method ' + method + '.')
@@ -518,7 +518,7 @@ class HybridModelPredictiveController(object):
                     v.VType = d_type
 
     def organize_result(self):
-        if self.prog.status in [2, 11]: # optimal or interrupted
+        if self.prog.status in [2, 9, 11] and self.prog.SolCount > 0: # optimal or interrupted or time limit
             x = [np.vstack([self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)]) for t in range(self.N+1)]
             u = [np.vstack([self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)]) for t in range(self.N)]
             d = []
