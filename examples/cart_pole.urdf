@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+
+<robot name="CartPole">
+
+  <link name="ground">
+    <visual>
+      <geometry>
+        <box size="10 0 .5" />
+      </geometry>
+      <material name="green">
+        <color rgba="0 1 0 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="cart">
+    <inertial>
+      <origin xyz="0 0 .5" rpy="0 0 0" />
+      <mass value="1" />
+    </inertial>
+    <visual name="box">
+      <origin xyz="0 0 .7" rpy="0 0 0" />
+      <geometry>
+        <box size="1 0 .5" />
+      </geometry>
+      <material name="blue">
+        <color rgba="0 0 1 1" />
+      </material>
+    </visual>
+    <visual name="left_wheel">
+      <origin xyz="-.4 0 .35" rpy="0 0 0" />
+      <geometry>
+        <sphere radius=".1" />
+      </geometry>
+      <material name="gray">
+        <color rgba="0 0 0 .5" />
+      </material>
+    </visual>
+    <visual name="right_wheel">
+      <origin xyz=".4 0 .35" rpy="0 0 0" />
+      <geometry>
+        <sphere radius=".1" />
+      </geometry>
+      <material name="gray">
+        <color rgba="0 0 0 .5" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="pole">
+    <inertial>
+      <origin xyz="0 0 1" rpy="0 0 0" />
+      <mass value="1" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 1" rpy="0 0 0" />
+      <geometry>
+         <cylinder length="2" radius=".05" />
+      </geometry>
+      <material name="red">
+        <color rgba="1 0 0 1" />
+      </material>
+    </visual>
+  </link>
+  
+  <joint name="track" type="prismatic">
+    <parent link="ground" />
+    <child link="cart" />
+    <origin xyz="0 0 0" />
+    <axis xyz="-1 0 0" />
+    <dynamics damping="0" />
+  </joint>
+
+  <joint name="shoulder" type="continuous">
+    <parent link="cart" />
+    <child link="pole" />
+    <origin xyz="0 0 .7" rpy="0 0 0"/>
+    <axis xyz="0 1 0" />
+    <dynamics damping="0" />
+  </joint>
+
+  <transmission type="SimpleTransmission" name="track_trans">
+    <actuator name="track_motor" />
+    <joint name="track" />
+    <mechanicalReduction>1</mechanicalReduction>
+  </transmission>
+
+</robot>
