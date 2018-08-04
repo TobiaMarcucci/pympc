@@ -39,8 +39,11 @@ class TestPolyhedron(unittest.TestCase):
         A = np.ones((1, 2))
         b = np.ones((1, 1))
         p.add_inequality(A, b)
-        A = np.array([[1., 0.], [0., 1.], [1., 1.]])
-        b = np.ones((3, 1))
+        A = np.ones((1, 1))
+        b = 3.*np.ones((1, 1))
+        p.add_inequality(A, b, [1])
+        A = np.array([[1., 0.], [0., 1.], [1., 1.], [0., 1.]])
+        b = np.array([[1.], [1.], [1.], [3.]])
         self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.A, p.b))
@@ -49,7 +52,14 @@ class TestPolyhedron(unittest.TestCase):
         self.assertRaises(ValueError, p.add_inequality, A, c)
 
         # add equalities
+        A = np.eye(2)
+        b = np.ones(2)
         p.add_equality(A, b)
+        A = 3.*np.ones((1, 1))
+        b = np.ones((1, 1))
+        p.add_equality(A, b, [0])
+        A = np.array([[1., 0.], [0., 1.], [3., 0.]])
+        b = np.array([[1.], [1.], [1.]])
         self.assertTrue(same_rows(
             np.hstack((A, b)),
             np.hstack((p.C, p.d))
