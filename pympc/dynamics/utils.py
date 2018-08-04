@@ -27,9 +27,9 @@ def check_affine_system(A, B, c=None, h=None):
 
     # check c
     if c is not None:
-        if c.ndim != 2:
-            raise ValueError('c must be a 2-dimensional array.')
-        if A.shape[0] != c.shape[0]:
+        if c.ndim > 1:
+            raise ValueError('c must be a 1-dimensional array.')
+        if A.shape[0] != c.size:
             raise ValueError('A and c must have the same number of rows.')
 
     # check h

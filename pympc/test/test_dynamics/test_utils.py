@@ -20,11 +20,15 @@ class TestUtils(unittest.TestCase):
 
         # uncoherent c and A
         B = np.ones((3,1))
-        c = np.ones((1, 1))
+        c = np.ones(1)
+        self.assertRaises(ValueError, check_affine_system, A, B, c)
+
+        # 2-dimensional c
+        c = np.ones((3,1))
         self.assertRaises(ValueError, check_affine_system, A, B, c)
 
         # negative h
-        c = np.ones((3, 1))
+        c = np.ones(3)
         h = -.1
         self.assertRaises(ValueError, check_affine_system, A, B, c, h)
 

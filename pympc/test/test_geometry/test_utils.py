@@ -50,18 +50,18 @@ class TestUtils(unittest.TestCase):
 
         # n-dimensional case
         for n in range(2,10):
-            points = [p.reshape(n,1) for p in np.eye(n)]
+            points = [p for p in np.eye(n)]
             a, d = plane_through_points(points)
             np.testing.assert_array_almost_equal(
                 a,
-                np.ones((n,1))/np.sqrt(n)
+                np.ones(n)/np.sqrt(n)
                 )
             self.assertAlmostEqual(d, 1./np.sqrt(n))
 
         # 2d case through origin
-        points = [np.array([[1.],[-1.]]), np.array([[-1.],[1.]])]
+        points = [np.array([1.,-1.]), np.array([-1.,1.])]
         a, d = plane_through_points(points)
-        self.assertAlmostEqual(a[0,0]/a[1,0], 1.)
+        self.assertAlmostEqual(a[0]/a[1], 1.)
         self.assertAlmostEqual(d, 0.)
 
     def test_same_rows(self):
@@ -99,21 +99,14 @@ class TestUtils(unittest.TestCase):
         for i in range(10):
 
             # check equal lists
-            v_list = [np.random.rand(n, 1) for j in range(N)]
+            v_list = [np.random.rand(n) for j in range(N)]
             u_order = list(range(N))
             shuffle(u_order)
             u_list = [v_list[j] for j in u_order]
             self.assertTrue(same_vectors(v_list, u_list))
 
-        # wrong size (only 2d arrays allowed)
-        v_list = [np.random.rand(n) for j in range(N)]
-        u_order = list(range(N))
-        shuffle(u_order)
-        u_list = [v_list[j] for j in u_order]
-        self.assertRaises(ValueError, same_vectors, v_list, u_list)
-
-        # wrong size (matrices not allowed)
-        v_list = [np.random.rand(n,3) for j in range(N)]
+        # wrong size (only 1d arrays allowed)
+        v_list = [np.random.rand(n, 1) for j in range(N)]
         u_order = list(range(N))
         shuffle(u_order)
         u_list = [v_list[j] for j in u_order]

@@ -175,7 +175,7 @@ class LinearSystem(object):
         """
 
         # construct fake affine system
-        c = np.zeros((self.A.shape[0], 1))
+        c = np.zeros(self.A.shape[0])
         S = AffineSystem(self.A, self.B, c)
 
         # condense as if it was a pwa systems
@@ -218,7 +218,7 @@ class LinearSystem(object):
         check_affine_system(A, B, None, h)
 
         # construct affine system
-        c = np.zeros((A.shape[0], 1))
+        c = np.zeros(A.shape[0])
 
         # discretize
         if method == 'zero_order_hold':
@@ -383,7 +383,7 @@ class PieceWiseAffineSystem(object):
         # make instances of LinearSystem instances of AffineSystem
         for i, S in enumerate(affine_systems):
             if isinstance(S, LinearSystem):
-                c = np.zeros((self.nx, 1))
+                c = np.zeros(self.nx)
                 affine_systems[i] = AffineSystem(S.A, S.B, c)
 
         # store inputs
@@ -427,7 +427,7 @@ class PieceWiseAffineSystem(object):
 
             # if outside the domain, raise value error
             if mode is None:
-                raise ValueError('simulation reached an unfeasible point x = ' + str(x[t].flatten()) + ', u = ' + str(u[t].flatten()) + '.')
+                raise ValueError('simulation reached an unfeasible point x = ' + str(x[t]) + ', u = ' + str(u[t]) + '.')
 
             # compute next state and append values
             else:
@@ -455,7 +455,7 @@ class PieceWiseAffineSystem(object):
         """
 
         # loop over the domains
-        xu = np.vstack((x, u))
+        xu = np.concatenate((x, u))
         for i, D in enumerate(self.domains):
             if D.contains(xu):
                 return i
@@ -551,8 +551,8 @@ def mcais(A, X, verbose=False):
         J = X.A.dot(np.linalg.matrix_power(A,t))
         residuals = []
         for i in range(X.A.shape[0]):
-            sol = linear_program(- J[i,:], O_inf.A, O_inf.b)
-            residuals.append(- sol['min'] - X.b[i,0])
+            sol = linear_program(- J[i], O_inf.A, O_inf.b)
+            residuals.append(- sol['min'] - X.b[i])
 
         # print status of the algorithm
         if verbose:
@@ -567,7 +567,7 @@ def mcais(A, X, verbose=False):
         else:
 
             # add (only non-redundant!) facets
-            O_inf.add_inequality(J[new_facets,:], X.b[new_facets,:])
+            O_inf.add_inequality(J[new_facets], X.b[new_facets])
             t += 1
 
     # remove redundant facets
@@ -583,7 +583,7 @@ def mcais(A, X, verbose=False):
 def condense_pwa_system(affine_systems, mode_sequence):
     """
     For the PWA system
-    x(t+1) = A_i x(t) + B_i u(t) + c_i    if    (x(t), u(t)) \in D_i,
+    x(t+1) = A_i x(t) + B_i u(t) + c_i    if    (x(t), u(t)) in D_i,
     given the mode sequence z = (z(0), ... , z(N-1)), returns the matrices A_bar, B_bar, c_bar such that
     x_bar = A_bar x(0) + B_bar u_bar + c_bar
     with x_bar = (x(0), ... , x(N)) and u_bar = (u(0), ... , u(N-1)).
@@ -628,10 +628,10 @@ def condense_pwa_system(affine_systems, mode_sequence):
     B_bar = np.vstack((np.zeros((nx, nu*N)), B_bar))
 
     # evolution related to the offset term
-    c_bar = np.vstack((np.zeros((nx,1)), c_sequence[0]))
+    c_bar = np.concatenate((np.zeros(nx), c_sequence[0]))
     for i in range(1, N):
         offset_i = sum([productory(A_sequence[i:j:-1]).dot(c_sequence[j]) for j in range(i)]) + c_sequence[i]
-        c_bar = np.vstack((c_bar, offset_i))
+        c_bar = np.concatenate((c_bar, offset_i))
 
     return A_bar, B_bar, c_bar
 

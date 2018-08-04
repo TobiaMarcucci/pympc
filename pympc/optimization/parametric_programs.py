@@ -68,26 +68,26 @@ class MultiParametricQuadraticProgram(object):
         """
 
         # ensure that LICQ will hold
-        Aua = self.A['u'][active_set, :]
+        Aua = self.A['u'][active_set]
         if len(active_set) > 0  and np.linalg.matrix_rank(Aua) < Aua.shape[0]:
             return None
 
         # split active and inactive
         inactive_set = [i for i in range(self.A['x'].shape[0]) if i not in active_set]
-        Aui = self.A['u'][inactive_set, :]
-        Axa = self.A['x'][active_set, :]
-        Axi = self.A['x'][inactive_set, :]
-        ba = self.b[active_set, :]
-        bi = self.b[inactive_set, :]
+        Aui = self.A['u'][inactive_set]
+        Axa = self.A['x'][active_set]
+        Axi = self.A['x'][inactive_set]
+        ba = self.b[active_set]
+        bi = self.b[inactive_set]
 
         # multipliers
         M = np.linalg.inv(Aua.dot(self.Huu_inv).dot(Aua.T))
         pax = M.dot(Axa - Aua.dot(self.Huu_inv).dot(self.H['ux']))
         pa0 = - M.dot(ba + Aua.dot(self.Huu_inv).dot(self.f['u']))
         px = np.zeros(self.A['x'].shape)
-        p0 = np.zeros((self.A['x'].shape[0], 1))
-        px[active_set, :] = pax
-        p0[active_set, :] = pa0
+        p0 = np.zeros(self.A['x'].shape[0])
+        px[active_set] = pax
+        p0[active_set] = pa0
         p = {'x': px, '0':p0}
 
         # primary variables
@@ -100,7 +100,7 @@ class MultiParametricQuadraticProgram(object):
             - pax,
             Aui.dot(ux) + Axi
             ))
-        bcr = np.vstack((
+        bcr = np.concatenate((
             pa0,
             bi - Aui.dot(u0)
             ))
@@ -110,7 +110,7 @@ class MultiParametricQuadraticProgram(object):
         # optimal value function V(x) = 1/2 x' Vxx x + Vx' x + V0
         Vxx = ux.T.dot(self.H['uu']).dot(ux) + 2.*self.H['ux'].T.dot(ux) + self.H['xx']
         Vx = (ux.T.dot(self.H['uu'].T) + self.H['ux'].T).dot(u0) + ux.T.dot(self.f['u']) + self.f['x']
-        V0 = .5*u0.T.dot(self.H['uu']).dot(u0) + self.f['u'].T.dot(u0) + self.g
+        V0 = .5*u0.dot(self.H['uu']).dot(u0) + self.f['u'].dot(u0) + self.g
         V = {'xx':Vxx, 'x':Vx, '0':V0}
 
         return CriticalRegion(active_set, u, p, V, cr)
@@ -174,7 +174,7 @@ class MultiParametricQuadraticProgram(object):
 
         # "lift" optimal value function
         if sol['min'] is not None:
-            sol['min'] += (.5*x.T.dot(self.H['xx']).dot(x) + self.f['x'].T.dot(x) + self.g)[0,0]
+            sol['min'] += .5 * x.dot(self.H['xx']).dot(x) + self.f['x'].dot(x) + self.g
 
         return sol
 
@@ -201,7 +201,7 @@ class MultiParametricQuadraticProgram(object):
         """
 
         # start from the origin and guess its active set
-        x = np.zeros(self.f['x'].shape)
+        x = np.zeros(self.f['x'].size)
         active_set_guess = []
         x_buffer = [(x, active_set_guess)]
         crs_found = []
@@ -223,7 +223,7 @@ class MultiParametricQuadraticProgram(object):
 
                 # step outside each minimal facet
                 for i in cr.minimal_facets():
-                    x = cr.facet_center(i) + step_size*cr.A[i:i+1,:].T
+                    x = cr.facet_center(i) + step_size * cr.A[i]
 
                     # guess the active set on the other side of the facet
                     active_set_guess = set(cr.active_set).symmetric_difference({i})
@@ -335,13 +335,13 @@ class CriticalRegion(object):
 
         # handle 1-dimensional case
         if self.polyhedron.A.shape[1] == 1:
-            return np.linalg.inv(self.polyhedron.A[i:i+1, :]).dot(self.polyhedron.b[i:i+1, :])
+            return self.polyhedron.b.flatten()[i] / self.polyhedron.A[i][0]
 
         # add an equality to the original polyhedron
         facet = copy(self.polyhedron)
         facet.add_equality(
             facet.A[i:i+1, :],
-            facet.b[i:i+1, :]
+            facet.b[i:i+1]
             )
 
         return facet.center
@@ -395,9 +395,9 @@ class CriticalRegion(object):
             Optimal value function at the given point.
         """
 
-        V = .5*x.T.dot(self._V['xx']).dot(x) + self._V['x'].T.dot(x) + self._V['0']
+        V = .5*x.dot(self._V['xx']).dot(x) + self._V['x'].dot(x) + self._V['0']
 
-        return V[0,0]
+        return V
 
     @property
     def A(self):
@@ -533,7 +533,7 @@ class ExplicitSolution(object):
 
 class MultiParametricMixedIntegerQuadraticProgram(object):
     """
-    Multiparametric Mixed Integer Quadratic Program (mpMIQP) in the form that comes out from the MPC problem fro a piecewise affine system, i.e.
+    Multiparametric Mixed Integer Quadratic Program (mpMIQP) in the form that comes out from the MPC problem for a piecewise affine system, i.e.
                                 |u|' |Huu   0 0   0| |u|
                                 |z|  |  0 Hzz 0 Hzx| |z|
         V(x) := min_{u,z,d} 1/2 |d|  |        0   0| |d|
@@ -592,10 +592,10 @@ class MultiParametricMixedIntegerQuadraticProgram(object):
             self.H['zz'],
             np.zeros((nd, nd))
             )
-        f = np.vstack((
-            np.zeros((nu, 1)),
+        f = np.concatenate((
+            np.zeros(nu),
             self.H['zx'].dot(x),
-            np.zeros((nd, 1))
+            np.zeros(nd)
             ))
         A = np.hstack((
             self.A['u'],
@@ -617,9 +617,9 @@ class MultiParametricMixedIntegerQuadraticProgram(object):
 
         # if feasible lift the cost function with the offset term
         if sol['min'] is not None:
-            sol['min'] += .5*x.T.dot(self.H['xx']).dot(x)[0,0]
-            sol['u'] = sol_sf['argmin'][:nu,:]
-            sol['z'] = sol_sf['argmin'][nu:nu+nz,:]
-            sol['d'] = sol_sf['argmin'][nu+nz:,:]
+            sol['min'] += .5*x.dot(self.H['xx']).dot(x)
+            sol['u'] = sol_sf['argmin'][:nu]
+            sol['z'] = sol_sf['argmin'][nu:nu+nz]
+            sol['d'] = sol_sf['argmin'][nu+nz:]
 
         return sol

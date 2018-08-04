@@ -25,8 +25,8 @@ class TestLinearSystem(unittest.TestCase):
             n = np.random.randint(1, 10)
             m = np.random.randint(1, 10)
             N = np.random.randint(10, 50)
-            x0 = np.random.rand(n, 1)
-            u = [np.random.rand(m, 1)/10. for j in range(N)]
+            x0 = np.random.rand(n)
+            u = [np.random.rand(m)/10. for j in range(N)]
             A = np.random.rand(n,n)/10.
             B = np.random.rand(n,m)/10.
             S = LinearSystem(A, B)
@@ -35,8 +35,8 @@ class TestLinearSystem(unittest.TestCase):
             x = S.simulate(x0, u)
             A_bar, B_bar = S.condense(N)
             np.testing.assert_array_almost_equal(
-                np.vstack(x),
-                A_bar.dot(x0) + B_bar.dot(np.vstack(u))
+                np.concatenate(x),
+                A_bar.dot(x0) + B_bar.dot(np.concatenate(u))
                 )
 
     def test_controllable(self):
@@ -80,21 +80,21 @@ class TestLinearSystem(unittest.TestCase):
 
             # simulate in closed-loop and check that x' P x is a Lyapunov function
             N = 10
-            x0 = np.random.rand(n,1)
+            x0 = np.random.rand(n)
             x_list = S.simulate_closed_loop(x0, N, K)
-            V_list = [x.T.dot(P).dot(x)[0,0] for x in x_list]
+            V_list = [x.dot(P).dot(x) for x in x_list]
             dV_list = [V_list[i] - V_list[i+1] for i in range(len(V_list)-1)]
             self.assertTrue(min(dV_list) > 0.)
 
             # simulate in closed-loop and check that 1/2 x' P x is exactly the cost to go
             A_cl = A + B.dot(K)
-            x0 = np.random.rand(n,1)
-            infinite_horizon_V = .5*x0.T.dot(P).dot(x0)
+            x0 = np.random.rand(n)
+            infinite_horizon_V = .5*x0.dot(P).dot(x0)
             finite_horizon_V = 0.
             max_iter = 1000
             t = 0
             while not np.isclose(infinite_horizon_V, finite_horizon_V):
-                finite_horizon_V += .5*(x0.T.dot(Q).dot(x0) + (K.dot(x0)).T.dot(R).dot(K).dot(x0))
+                finite_horizon_V += .5*(x0.dot(Q).dot(x0) + (K.dot(x0)).dot(R).dot(K).dot(x0))
                 x0 = A_cl.dot(x0)
                 t += 1
                 if t == max_iter:
@@ -112,11 +112,11 @@ class TestLinearSystem(unittest.TestCase):
         h = .1
         S = LinearSystem.from_continuous(A, B, h)
         K = S.solve_dare(np.eye(2), np.eye(1))[1]
-        d_min = - np.ones((3,1))
+        d_min = - np.ones(3)
         d_max = - d_min
         D = Polyhedron.from_bounds(d_min, d_max)
         O_inf = S.mcais(K, D)
-        self.assertTrue(O_inf.contains(np.zeros((2,1))))
+        self.assertTrue(O_inf.contains(np.zeros(2)))
 
     def test_from_continuous(self):
 
@@ -147,12 +147,12 @@ class TestAffineSystem(unittest.TestCase):
         # wrong initializations
         A = np.ones((3,3))
         B = np.ones((4,1))
-        c = np.ones((4,1))
+        c = np.ones(4)
         self.assertRaises(ValueError, AffineSystem, A, B, c)
         A = np.ones((4,5))
         self.assertRaises(ValueError, AffineSystem, A, B, c)
         A = np.ones((4,4))
-        c = np.ones((5,1))
+        c = np.ones(5)
         self.assertRaises(ValueError, AffineSystem, A, B, c)
 
 
@@ -163,19 +163,19 @@ class TestAffineSystem(unittest.TestCase):
             n = np.random.randint(1, 10)
             m = np.random.randint(1, 10)
             N = np.random.randint(10, 50)
-            x0 = np.random.rand(n, 1)
-            u = [np.random.rand(m, 1)/10. for j in range(N)]
+            x0 = np.random.rand(n)
+            u = [np.random.rand(m)/10. for j in range(N)]
             A = np.random.rand(n,n)/10.
             B = np.random.rand(n,m)/10.
-            c = np.random.rand(n,1)/10.
+            c = np.random.rand(n)/10.
             S = AffineSystem(A, B, c)
 
             # simulate vs condense
             x = S.simulate(x0, u)
             A_bar, B_bar, c_bar = S.condense(N)
             np.testing.assert_array_almost_equal(
-                np.vstack(x),
-                A_bar.dot(x0) + B_bar.dot(np.vstack(u)) + c_bar
+                np.concatenate(x),
+                A_bar.dot(x0) + B_bar.dot(np.concatenate(u)) + c_bar
                 )
 
     def test_from_continuous(self):
@@ -186,7 +186,7 @@ class TestAffineSystem(unittest.TestCase):
             m = np.random.randint(1, 10)
             A = np.random.rand(n,n)
             B = np.random.rand(n,m)
-            c = np.random.rand(n,1)
+            c = np.random.rand(n)
 
             # reduce discretization step until the two method are almost equivalent
             h = .01
@@ -208,11 +208,11 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
         # different number of systems and domains
         A = np.ones((3,3))
         B = np.ones((3,2))
-        c = np.ones((3,1))
+        c = np.ones(3)
         S = AffineSystem(A, B, c)
         affine_systems = [S]*5
         F = np.ones((9,5))
-        g = np.ones((9,1))
+        g = np.ones(9)
         D = Polyhedron(F, g)
         domains = [D]*4
         self.assertRaises(ValueError, PieceWiseAffineSystem, affine_systems, domains)
@@ -221,7 +221,7 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
         domains += [D, D]
         A = np.ones((2,2))
         B = np.ones((2,2))
-        c = np.ones((2,1))
+        c = np.ones(2)
         affine_systems.append(AffineSystem(A, B, c))
         self.assertRaises(ValueError, PieceWiseAffineSystem, affine_systems, domains)
 
@@ -229,7 +229,7 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
         del affine_systems[-1]
         A = np.ones((3,3))
         B = np.ones((3,1))
-        c = np.ones((3,1))
+        c = np.ones(3)
         affine_systems.append(AffineSystem(A, B, c))
         self.assertRaises(ValueError, PieceWiseAffineSystem, affine_systems, domains)
 
@@ -237,13 +237,13 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
         del affine_systems[-1]
         affine_systems += [S, S]
         F = np.ones((9,4))
-        g = np.ones((9,1))
+        g = np.ones(9)
         domains.append(Polyhedron(F, g))
         self.assertRaises(ValueError, PieceWiseAffineSystem, affine_systems, domains)
 
         # different dimensinality of the domains and the systems
         F = np.ones((9,4))
-        g = np.ones((9,1))
+        g = np.ones(9)
         D = Polyhedron(F, g)
         domains = [D]*7
         self.assertRaises(ValueError, PieceWiseAffineSystem, affine_systems, domains)
@@ -260,12 +260,12 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
             N = np.random.randint(10, 50)
 
             # initial state
-            x0 = np.random.rand(n, 1)
+            x0 = np.random.rand(n)
 
             # initialize loop variables
             x_t = x0
             x = x0
-            u = np.zeros((0,1))
+            u = np.zeros(0)
             u_list = []
             affine_systems = []
             domains = []
@@ -276,19 +276,19 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
                 # generate random dynamics
                 A_t = np.random.rand(n,n)/10.
                 B_t = np.random.rand(n,m)/10.
-                c_t = np.random.rand(n,1)/10.
+                c_t = np.random.rand(n)/10.
 
                 # simulate with random input
-                u_t = np.random.rand(m,1)/10.
-                u = np.vstack((u, u_t))
+                u_t = np.random.rand(m)/10.
+                u = np.concatenate((u, u_t))
                 u_list.append(u_t)
                 x_tp1 = A_t.dot(x_t) + B_t.dot(u_t) + c_t
-                x = np.vstack((x, x_tp1))
+                x = np.concatenate((x, x_tp1))
 
                 # create a domain that contains x and u (it has to be super-tight so that the pwa system is well posed!)
                 D = Polyhedron.from_bounds(
-                    np.vstack((x_t/1.01, u_t/1.01)),
-                    np.vstack((x_t*1.01, u_t*1.01))
+                    np.concatenate((x_t/1.01, u_t/1.01)),
+                    np.concatenate((x_t*1.01, u_t*1.01))
                     )
                 domains.append(D)
                 affine_systems.append(AffineSystem(A_t, B_t, c_t))
@@ -309,7 +309,7 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
 
             # test simulate
             x_list, mode_sequence = S.simulate(x0, u_list)
-            np.testing.assert_array_almost_equal(x, np.vstack(x_list))
+            np.testing.assert_array_almost_equal(x, np.concatenate(x_list))
 
             # test get mode
             for t in range(N):
@@ -318,14 +318,14 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
     def test_is_well_posed(self):
 
         # domains
-        D0 = Polyhedron.from_bounds(-np.ones((3,1)), np.ones((3,1)))
-        D1 = Polyhedron.from_bounds(np.zeros((3,1)), 2.*np.ones((3,1)))
+        D0 = Polyhedron.from_bounds(-np.ones(3), np.ones(3))
+        D1 = Polyhedron.from_bounds(np.zeros(3), 2.*np.ones(3))
         domains = [D0, D1]
 
         # pwa system
         A = np.ones((2,2))
         B = np.ones((2,1))
-        c = np.ones((2,1))
+        c = np.ones(2)
         S = AffineSystem(A, B, c)
         affine_systems = [S]*2
         S_pwa = PieceWiseAffineSystem(affine_systems, domains)
@@ -334,8 +334,8 @@ class TestPieceWiseAffineSystem(unittest.TestCase):
         self.assertFalse(S_pwa.is_well_posed())
 
         # make it well posed
-        D1.add_lower_bound(np.ones((3,1)))
-        D2 = Polyhedron.from_bounds(2.*np.ones((3,1)), 3.*np.ones((3,1)))
+        D1.add_lower_bound(np.ones(3))
+        D2 = Polyhedron.from_bounds(2.*np.ones(3), 3.*np.ones(3))
         domains = [D0, D1, D2]
         affine_systems = [S]*3
         S_pwa = PieceWiseAffineSystem(affine_systems, domains)
@@ -348,7 +348,7 @@ class TestMCAIS(unittest.TestCase):
 
         # domain
         nx = 2
-        x_min = - np.ones((nx, 1))
+        x_min = - np.ones(nx)
         x_max = - x_min
         X = Polyhedron.from_bounds(x_min, x_max)
 
@@ -364,7 +364,7 @@ class TestMCAIS(unittest.TestCase):
 
             # generate random initial conditions
             for j in range(100):
-                x = 3.*np.random.rand(nx, 1) - 1.5
+                x = 3.*np.random.rand(nx) - 1.5
 
                 # if inside stays inside X, if outside sooner or later will leave X
                 if O_inf.contains(x):
