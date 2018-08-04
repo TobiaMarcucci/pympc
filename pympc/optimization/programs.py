@@ -6,7 +6,7 @@ from pympc.optimization.solvers.pnnls import linear_program as lp_pnnls, quadrat
 from pympc.optimization.solvers.gurobi import linear_program as lp_gurobi, quadratic_program as qp_gurobi, mixed_integer_quadratic_program as miqp_gurobi
 from pympc.optimization.solvers.drake import linear_program as lp_drake, quadratic_program as qp_drake, mixed_integer_quadratic_program as miqp_drake
 
-def linear_program(f, A, b, C=None, d=None, solver='pnnls'):
+def linear_program(f, A, b, C=None, d=None, solver='gurobi'):
     """
     Calls the desired solver to solve the linear program min_x f^T x s.t. A x <= b, C x = d.
 

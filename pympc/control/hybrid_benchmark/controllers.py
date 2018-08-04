@@ -493,7 +493,7 @@ class HybridModelPredictiveController(object):
     def feedforward(self, x0):
 
         # reset program
-        self.prog.reset()
+        # self.prog.reset()
 
         # set up miqp
         self.set_type_auxliaries('B')
@@ -501,7 +501,7 @@ class HybridModelPredictiveController(object):
         self.set_initial_condition(x0)
 
         # parameters
-        # self.prog.setParam('OutputFlag', 1)
+        self.prog.setParam('OutputFlag', 0)
         self.prog.setParam('Threads', 0)
 
         # run the optimization
@@ -509,6 +509,15 @@ class HybridModelPredictiveController(object):
         # print self.prog.Runtime
 
         return self.organize_result()
+
+    def feedback(self, x):
+
+        # get feedforward and extract first input
+        u_feedforward = self.feedforward(x)[0]
+        if u_feedforward is None:
+            return None
+
+        return u_feedforward[0]
 
     def set_type_auxliaries(self, d_type):
         for t in range(self.N):
@@ -521,6 +530,8 @@ class HybridModelPredictiveController(object):
         if self.prog.status in [2, 9, 11] and self.prog.SolCount > 0: # optimal or interrupted or time limit
             x = [np.vstack([self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)]) for t in range(self.N+1)]
             u = [np.vstack([self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)]) for t in range(self.N)]
+
+            # with the big-M method at the terminal stage it might be that from some of the domains it is not possible to reach the terminal set, hence I need to check if the d's are None.
             d = []
             for t in range(self.N):
                 dt = []
@@ -534,6 +545,6 @@ class HybridModelPredictiveController(object):
             # d = [[self.prog.getVarByName('d%d[%d]'%(t,k)).x for k in range(self.S.nm)] for t in range(self.N)]
             ms = [dt.index(max(dt)) for dt in d]
             cost = self.prog.objVal
-            return u, x, ms, cost
+            return u, x, ms, cost, d
         else:
-            return [None]*4
+            return [None]*5
