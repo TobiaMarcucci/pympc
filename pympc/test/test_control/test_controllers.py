@@ -7,7 +7,6 @@ from copy import copy
 from pympc.geometry.polyhedron import Polyhedron
 from pympc.dynamics.discrete_time_systems import LinearSystem, AffineSystem, PieceWiseAffineSystem
 from pympc.control.controllers import ModelPredictiveController, HybridModelPredictiveController
-from pympc.control.prova import HybridModelPredictiveController as hmpcont
 
 class testModelPredictiveController(unittest.TestCase):
 
@@ -257,12 +256,12 @@ class testHybridModelPredictiveController(unittest.TestCase):
         x_lmpc = S1.simulate(x0, u_lmpc)
         u_hmpc, x_hmpc, ms_hmpc, V_hmpc = controller.feedforward(x0)
         np.testing.assert_array_almost_equal(
-            np.vstack((u_lmpc)),
-            np.vstack((u_hmpc))
+            np.concatenate((u_lmpc)),
+            np.concatenate((u_hmpc))
             )
         np.testing.assert_array_almost_equal(
-            np.vstack((x_lmpc)),
-            np.vstack((x_hmpc))
+            np.concatenate((x_lmpc)),
+            np.concatenate((x_hmpc))
             )
         self.assertAlmostEqual(V_lmpc, V_hmpc)
         self.assertTrue(all([m == 0 for m in ms_hmpc]))
@@ -277,17 +276,18 @@ class testHybridModelPredictiveController(unittest.TestCase):
             )
         self.assertAlmostEqual(V_lmpc, sol['min'])
 
-        # # with change of the mode sequence
-        # x0 = np.array([.08,.8])
-        # u_hmpc, x_hmpc, ms_hmpc, V_hmpc = controller.feedforward(x0)
-        # self.assertTrue(sum(ms_hmpc) >= 1)
-        # mpqp = controller.get_mpqp(ms_hmpc)
-        # sol = mpqp.solve(x0)
-        # np.testing.assert_array_almost_equal(
-        #     np.vstack((u_hmpc)),
-        #     sol['argmin']
-        #     )
-        # self.assertAlmostEqual(V_hmpc, sol['min'])
+        # with change of the mode sequence
+        x0 = np.array([.09, .2])
+        u_hmpc, x_hmpc, ms_hmpc, V_hmpc = controller.feedforward(x0)
+        self.assertTrue(sum(ms_hmpc) >= 1)
+        mpqp = controller.get_mpqp(ms_hmpc)
+        sol = mpqp.solve(x0)
+        print np.concatenate((u_hmpc)), sol['argmin']
+        np.testing.assert_array_almost_equal(
+            np.concatenate((u_hmpc)),
+            sol['argmin']
+            )
+        self.assertAlmostEqual(V_hmpc, sol['min'])
 
 if __name__ == '__main__':
     unittest.main()
