@@ -728,7 +728,7 @@ def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
     f = dict()
     f['u'] = B_bar.T.dot(Q_bar).dot(c_bar)
     f['x'] = A_bar.T.dot(Q_bar).dot(c_bar)
-    g = c_bar.dot(Q_bar).dot(c_bar)
+    g = .5 * c_bar.dot(Q_bar).dot(c_bar)
 
     # stack constraint matrices
     D_sequence = [S.domains[m]for m in mode_sequence]

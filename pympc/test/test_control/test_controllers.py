@@ -282,7 +282,6 @@ class testHybridModelPredictiveController(unittest.TestCase):
         self.assertTrue(sum(ms_hmpc) >= 1)
         mpqp = controller.get_mpqp(ms_hmpc)
         sol = mpqp.solve(x0)
-        print np.concatenate((u_hmpc)), sol['argmin']
         np.testing.assert_array_almost_equal(
             np.concatenate((u_hmpc)),
             sol['argmin']

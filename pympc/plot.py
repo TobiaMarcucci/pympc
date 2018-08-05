@@ -192,7 +192,7 @@ def plot_output_trajectory(C, x, h, y_bounds=None):
         # plot bounds if provided
         if y_bounds is not None:
             for bound in y_bounds:
-                bound_plot, = plt.step(t, bound[i,0]*np.ones(t.shape),'r')
+                bound_plot, = plt.step(t, bound[i]*np.ones(t.shape),'r')
 
         # miscellaneous options
         plt.ylabel(r'$y_{' + str(i+1) + '}$')
