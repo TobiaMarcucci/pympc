@@ -34,16 +34,24 @@ class Polyhedron(object):
         """
 
         # check and store inequalities
-        self.A, self.b = self._check_input_matices(A, b)
+        if len(b.shape) > 1:
+            raise ValueError('b must be a one dimensional array.')
+        self._same_number_rows(A, b)
+        self.A = A
+        self.b = b
 
         # check and store equalities
         if (C is None) != (d is None):
-            raise ValueError("missing C or d.")
+            raise ValueError('missing C or d.')
         if C is None:
             self.C = np.zeros((0, A.shape[1]))
-            self.d = np.zeros((0, 1))
+            self.d = np.zeros(0)
         else:
-            self.C, self.d = self._check_input_matices(C, d)
+            if len(d.shape) > 1:
+                raise ValueError('b must be a one dimensional array.')
+            self._same_number_rows(C, d)
+            self.C = C
+            self.d = d
 
         # initializes the attributes to None
         self._empty = None
@@ -67,15 +75,15 @@ class Polyhedron(object):
         """
 
         # check inequalities
-        S = self._selection_matrix(indices)
-        A, b = self._check_input_matices(A.dot(S), b)
-
+        self._same_number_rows(A, b)
+    
         # reset attributes to None
         self._delete_attributes()
 
         # add inequalities
-        self.A = np.vstack((self.A, A))
-        self.b = np.vstack((self.b, b))
+        S = self._selection_matrix(indices)
+        self.A = np.vstack((self.A, A.dot(S)))
+        self.b = np.concatenate((self.b, b))
 
     def add_equality(self, C, d, indices=None):
         """
@@ -92,15 +100,15 @@ class Polyhedron(object):
         """
 
         # check equalities
-        S = self._selection_matrix(indices)
-        C, d = self._check_input_matices(C.dot(S), d)
+        self._same_number_rows(C, d)
 
         # reset attributes to None
         self._delete_attributes()
 
         # add equalities
-        self.C = np.vstack((self.C, C))
-        self.d = np.vstack((self.d, d))
+        S = self._selection_matrix(indices)
+        self.C = np.vstack((self.C, C.dot(S)))
+        self.d = np.concatenate((self.d, d))
 
     def add_lower_bound(self, x_min, indices=None):
         """
@@ -115,9 +123,9 @@ class Polyhedron(object):
             Set of indices of elements of x to which the inequality applies.
         """
 
-        # if x_min is a float make it a 2d array
+        # if x_min is a float make it an array
         if isinstance(x_min, float):
-            x_min = np.array([[x_min]])
+            x_min = np.array([x_min])
 
         # add the constraint - S x <= - x_min, with S selection matrix
         S = self._selection_matrix(indices)
@@ -138,7 +146,7 @@ class Polyhedron(object):
 
         # if x_max is a float make it a 2d array
         if isinstance(x_max, float):
-            x_max = np.array([[x_max]])
+            x_max = np.array([x_max])
 
         # add the constraint S x <= x_max, with S selection matrix
         S = self._selection_matrix(indices)
@@ -174,7 +182,7 @@ class Polyhedron(object):
         self._center = None
         self._vertices = None
 
-    def _selection_matrix(self, indices):
+    def _selection_matrix(self, indices=None):
         """
         Returns a selection matrix S such that S x = x[indices].
 
@@ -223,9 +231,9 @@ class Polyhedron(object):
 
         # construct the polyhedron
         if n is None:
-            n = x_min.shape[0]
+            n = x_min.size
         A = np.zeros((0, n))
-        b = np.zeros((0, 1))
+        b = np.zeros(0)
         p = Polyhedron(A, b)
         p.add_lower_bound(x_min, indices)
 
@@ -254,9 +262,9 @@ class Polyhedron(object):
 
         # construct the polyhedron
         if n is None:
-            n = x_max.shape[0]
+            n = x_max.size
         A = np.zeros((0, n))
-        b = np.zeros((0, 1))
+        b = np.zeros(0)
         p = Polyhedron(A, b)
         p.add_upper_bound(x_max, indices)
 
@@ -286,23 +294,23 @@ class Polyhedron(object):
             raise ValueError("specify the length of x to instantiate the polyhedron.")
 
         # check size of the bounds
-        if x_min.shape[0] != x_max.shape[0]:
+        if x_min.size != x_max.size:
             raise ValueError("bounds must have the same size.")
 
         # construct the polyhedron
         if n is None:
-            n = x_min.shape[0]
+            n = x_min.size
         A = np.zeros((0, n))
-        b = np.zeros((0, 1))
+        b = np.zeros(0)
         p = Polyhedron(A, b)
         p.add_bounds(x_min, x_max, indices)
 
         return p
 
     @staticmethod
-    def _check_input_matices(E, f):
+    def _same_number_rows(E, f):
         """
-        Reshapes the right hand side f in a 2d vector and checks that E and f have the same number of rows.
+        Checks that E and f have the same number of rows.
 
         Arguments
         ----------
@@ -310,24 +318,11 @@ class Polyhedron(object):
             Left-hand side of the (in)equalities.
         f : numpy.ndarray
             Right-hand side of the (in)equalities.
-
-        Returns
-        ----------
-        E : numpy.ndarray
-            Left-hand side of the (in)equalities.
-        f : numpy.ndarray
-            Right-hand side of the (in)equalities.
         """
 
-        # make f a 2d matrix
-        if f.ndim == 1:
-            f = np.reshape(f, (f.shape[0], 1))
-
         # check nomber of rows
-        if E.shape[0] != f.shape[0]:
+        if E.shape[0] != f.size:
             raise ValueError("incoherent size of the inputs.")
-
-        return E, f
 
     def normalize(self, tol=1.e-7):
         """
@@ -341,17 +336,17 @@ class Polyhedron(object):
 
         # inequalities
         for i in range(self.A.shape[0]):
-            r = np.linalg.norm(self.A[i,:])
+            r = np.linalg.norm(self.A[i])
             if r > tol:
-                self.A[i,:] = self.A[i,:]/r
-                self.b[i,:] = self.b[i,:]/r
+                self.A[i] = self.A[i]/r
+                self.b[i] = self.b[i]/r
 
         # equalities
         for i in range(self.C.shape[0]):
-            r = np.linalg.norm(self.C[i,:])
+            r = np.linalg.norm(self.C[i])
             if r > tol:
-                self.C[i,:] = self.C[i,:]/r
-                self.d[i,:] = self.d[i,:]/r
+                self.C[i] = self.C[i]/r
+                self.d[i] = self.d[i]/r
 
     def minimal_facets(self, tol=1.e-7):
         """
@@ -388,13 +383,13 @@ class Polyhedron(object):
         for i in range(E.shape[0]):
 
             # remove redundant facets and relax ith inequality
-            E_minimal = E[minimal_facets,:]
-            f_relaxation = np.zeros(np.shape(f))
+            E_minimal = E[minimal_facets]
+            f_relaxation = np.zeros(f.size)
             f_relaxation[i] += 1.
-            f_relaxed = (f + f_relaxation)[minimal_facets];
+            f_relaxed = (f + f_relaxation)[minimal_facets]
 
             # solve linear program
-            sol = linear_program(-E[i,:].T, E_minimal, f_relaxed)
+            sol = linear_program(-E[i], E_minimal, f_relaxed)
 
             # remove redundant facets from the list
             if  - sol['min'] - f[i] < tol:
@@ -415,7 +410,7 @@ class Polyhedron(object):
             raise ValueError('empty polyhedron, cannot remove redundant inequalities.')
 
         # remove redundancy
-        self.A = self.A[minimal_facets,:]
+        self.A = self.A[minimal_facets]
         self.b = self.b[minimal_facets]
 
     def _remove_equalities(self):
@@ -472,7 +467,7 @@ class Polyhedron(object):
 
         # if a sultion is found, return False
         H = np.eye(self.A.shape[1])
-        f = np.zeros((self.A.shape[1], 1))
+        f = np.zeros(self.A.shape[1])
         sol = quadratic_program(H, f, self.A, self.b, self.C, self.d)
         self._empty = sol['min'] is None
 
@@ -518,11 +513,11 @@ class Polyhedron(object):
         # check Stiemke's theorem of alternatives
         n, m = A.shape
         sol = linear_program(
-            np.ones((n, 1)), # f
+            np.ones(n), # f
             -np.eye(n),      # A
-            -np.ones((n,1)), # b
+            -np.ones(n), # b
             A.T,             # C
-            np.zeros((m, 1)) # d
+            np.zeros(m) # d
             )
         self._bounded = sol['min'] is not None
 
@@ -577,16 +572,15 @@ class Polyhedron(object):
 
         # augment inequalities with equalities
         A1 = np.vstack((self.A, self.C, -self.C))
-        b1 = np.vstack((self.b, self.d, -self.d))
+        b1 = np.concatenate((self.b, self.d, -self.d))
         P1 = Polyhedron(A1, b1)
         A2 = np.vstack((P2.A, P2.C, -P2.C))
-        b2 = np.vstack((P2.b, P2.d, -P2.d))
+        b2 = np.concatenate((P2.b, P2.d, -P2.d))
 
         # check inclusion, one facet per time
         included = True
         for i in range(A2.shape[0]):
-            f = -A2[i:i+1,:].T
-            sol = linear_program(f, P1.A, P1.b)
+            sol = linear_program(-A2[i], P1.A, P1.b)
             penetration = - sol['min'] - b2[i]
             if penetration > tol:
                 included = False
@@ -633,9 +627,9 @@ class Polyhedron(object):
 
         return Polyhedron(
             block_diag(self.A, P2.A),
-            np.vstack((self.b, P2.b)),
+            np.concatenate((self.b, P2.b)),
             block_diag(self.C, P2.C),
-            np.vstack((self.d, P2.d)),
+            np.concatenate((self.d, P2.d)),
             )
 
     @property
@@ -702,10 +696,7 @@ class Polyhedron(object):
             b = self.b
 
         # assemble linear program
-        f_lp = np.vstack((
-            np.zeros((A.shape[1], 1)),
-            np.ones((1, 1))
-            ))
+        f_lp = np.concatenate((np.zeros(A.shape[1]), np.ones(1)))
         A_row_norm = np.reshape(np.linalg.norm(A, axis=1), (A.shape[0], 1))
         A_lp = np.hstack((A, -A_row_norm))
 
@@ -720,7 +711,7 @@ class Polyhedron(object):
         # go back to the original coordinates in case of equalities
         if self.C.shape[0] > 0:
             r = np.linalg.inv(self.C.dot(R)).dot(self.d)
-            center = np.hstack((N, R)).dot(np.vstack((center, r)))
+            center = np.hstack((N, R)).dot(np.concatenate((center, r)))
 
         return radius, center
 
@@ -754,7 +745,7 @@ class Polyhedron(object):
             A, b, N, R = self._remove_equalities()
             T = np.hstack((N, R))
             center = np.linalg.inv(T).dot(self.center)
-            center = center[:N.shape[1], :]
+            center = center[:N.shape[1]]
         else:
             A = self.A
             b = self.b
@@ -764,19 +755,19 @@ class Polyhedron(object):
         if A.shape[1] == 1:
             p = Polyhedron(A, b)
             p.remove_redundant_inequalities()
-            self._vertices = [np.array([[p.b[i,0]/p.A[i,0]]]) for i in [0,1]]
+            self._vertices = [np.array([p.b[i] / p.A[i,0]]) for i in [0,1]]
 
         # call qhull through scipy
         else:
-            halfspaces = np.hstack((A, -b))
-            polyhedron = HalfspaceIntersection(halfspaces, center.flatten())
+            halfspaces = np.column_stack((A, -b))
+            polyhedron = HalfspaceIntersection(halfspaces, center)
             V = polyhedron.intersections
-            self._vertices = [V[i:i+1,:].T for i in range(V.shape[0])]
+            self._vertices = [V[i] for i in range(V.shape[0])]
 
         # go back to the original coordinates in case of equalities
         if self.C.shape[0] > 0:
             r = np.linalg.inv(self.C.dot(R)).dot(self.d)
-            self._vertices = [T.dot(np.vstack((v, r))) for v in self._vertices]
+            self._vertices = [T.dot(np.concatenate((v, r))) for v in self._vertices]
 
         return self._vertices
 
@@ -823,11 +814,11 @@ class Polyhedron(object):
         """
 
         # call qhull thorugh scipy for the convex hull
-        hull = ConvexHull(np.hstack(points).T)
+        hull = ConvexHull(np.vstack(points))
 
         # create polyhedron
         A = hull.equations[:, :-1]
-        b = - hull.equations[:, -1:]
+        b = - hull.equations[:, -1:].flatten()
         p = Polyhedron(A, b)
 
         return p
@@ -856,7 +847,7 @@ class Polyhedron(object):
             return
 
         # call qhull thorugh scipy for the convex hull (needed to order the vertices in counterclockwise order)
-        vertices = np.hstack(self.vertices).T[:,residual_dimensions]
+        vertices = np.vstack(self.vertices)[:,residual_dimensions]
         hull = ConvexHull(vertices)
         vertices = [hull.points[i].tolist() for i in hull.vertices]
         vertices += [vertices[0]]
@@ -915,15 +906,15 @@ def convex_hull_method(A, b, resiudal_dimensions):
     if n == 1:
         E = np.array([[1.],[-1.]])
         f = np.array([
-            [max(v[0,0] for v in vertices)],
-            [- min(v[0,0] for v in vertices)]
+            max(v[0] for v in vertices),
+            - min(v[0] for v in vertices)
             ])
         return E, f, vertices
     vertices = _get_inner_simplex(A, b, vertices)
 
     # expand facets
     hull = ConvexHull(
-        np.hstack(vertices).T,
+        np.vstack(vertices),
         incremental=True
         )
     hull = _expand_simplex(A, b, hull)
@@ -931,8 +922,8 @@ def convex_hull_method(A, b, resiudal_dimensions):
 
     # get outputs
     E = hull.equations[:, :-1]
-    f = - hull.equations[:, -1:]
-    vertices = [np.reshape(v, (v.shape[0], 1)) for v in hull.points]
+    f = - hull.equations[:, -1:].flatten()
+    vertices = hull.points
 
     return E, f, vertices
 
@@ -956,16 +947,16 @@ def _get_two_vertices(A, b, n):
     """
 
     # select any direction to explore (it has to belong to the projected space, i.e. a_i = 0 for all i > n)
-    a = np.vstack((
-        np.ones((1,1)),
-        np.zeros((A.shape[1]-1, 1))
+    a = np.concatenate((
+        np.ones(1),
+        np.zeros(A.shape[1]-1)
         ))
 
     # minimize and maximize in the given direction
     vertices = []
     for f in [a, -a]:
         sol = linear_program(f, A, b)
-        vertices.append(sol['argmin'][:n,:])
+        vertices.append(sol['argmin'][:n])
 
     return vertices
 
@@ -991,19 +982,19 @@ def _get_inner_simplex(A, b, vertices, tol=1.e-7):
     """
 
     # initialize LPs
-    n = vertices[0].shape[0]
+    n = vertices[0].size
 
     # expand increasing at every iteration the dimension of the space
     for i in range(2, n+1):
-        a, d = plane_through_points([v[:i,:] for v in vertices])
-        f = np.vstack((a, np.zeros((A.shape[1]-i, 1))))
+        a, d = plane_through_points([v[:i] for v in vertices])
+        f = np.concatenate((a, np.zeros(A.shape[1]-i)))
         sol = linear_program(f, A, b)
 
         # check the length of the expansion wrt to the plane, if zero expand in the opposite direction
-        expansion = np.abs(a.T.dot(sol['argmin'][:i, :]) - d) # >= 0
+        expansion = np.abs(a.dot(sol['argmin'][:i]) - d) # >= 0
         if expansion < tol:
             sol = linear_program(-f, A, b)
-        vertices.append(sol['argmin'][:n,:])
+        vertices.append(sol['argmin'][:n])
 
     return vertices
 
@@ -1029,7 +1020,7 @@ def _expand_simplex(A, b, hull, tol=1.e-7):
     """
 
     # initialize algorithm's variables
-    n = hull.points[0].shape[0]
+    n = hull.points[0].size
     a_explored = []
 
     # start convex-hull method
@@ -1041,21 +1032,21 @@ def _expand_simplex(A, b, hull, tol=1.e-7):
         for i in range(hull.equations.shape[0]):
 
             # get normalized halfplane {x | a' x <= d} of the ith facet
-            a = hull.equations[i:i+1, :-1].T
+            a = hull.equations[i, :-1]
             d = - hull.equations[i, -1]
             a_norm = np.linalg.norm(a)
             a /= a_norm
             b /= a_norm
 
-            # check it the direction a has been explored so far
+            # check if the direction a has been explored so far
             is_explored = any((np.allclose(a, a2) for a2 in a_explored))
             if not is_explored:
                 a_explored.append(a)
 
                 # maximize in the direction a
-                f = np.vstack((
+                f = np.concatenate((
                     - a,
-                    np.zeros((A.shape[1]-n, 1))
+                    np.zeros(A.shape[1]-n)
                     ))
                 sol = linear_program(f, A, b)
 
@@ -1063,7 +1054,7 @@ def _expand_simplex(A, b, hull, tol=1.e-7):
                 expansion = - sol['min'] - d # >= 0
                 if expansion > tol:
                     convergence = False
-                    hull.add_points(sol['argmin'][:n,:].T)
+                    hull.add_points(sol['argmin'][:n].reshape(1,n))
                     break
 
     return hull

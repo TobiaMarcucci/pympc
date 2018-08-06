@@ -13,7 +13,7 @@ class TestDiscretizationMethods(unittest.TestCase):
         # double integrator
         A = np.array([[0., 1.],[0., 0.]])
         B = np.array([[0.],[1.]])
-        c = np.zeros((2, 1))
+        c = np.zeros(2)
         h = 1.
 
         # discrete time from continuous
@@ -37,7 +37,7 @@ class TestDiscretizationMethods(unittest.TestCase):
             m = np.random.randint(1, 10)
             A = np.random.rand(n,n)
             B = np.random.rand(n,m)
-            c = np.random.rand(n,1)
+            c = np.random.rand(n)
 
             # reduce discretization step until the two method are almost equivalent
             h = .01

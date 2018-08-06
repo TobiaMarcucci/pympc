@@ -3,7 +3,7 @@ import numpy as np
 from pydrake.all import MathematicalProgram, SolutionResult
 from pydrake.solvers.gurobi import GurobiSolver
 
-def linear_program(f, A, b, C=None, d=None, tol=1.e-5):
+def linear_program(f, A, b, C=None, d=None, tol=1.e-5, **kwargs):
     """
     Solves the linear program min_x f^T x s.t. A x <= b, C x = d.
 
@@ -52,25 +52,17 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-5):
     else:
         n_eq = 0
 
-    # reshape inputs
-    if len(f.shape) == 2:
-        f = np.reshape(f, f.shape[0])
-
     # build program
     prog = MathematicalProgram()
     x = prog.NewContinuousVariables(n_x)
-    inequalities = []
-    for i in range(n_ineq):
-        lhs = A[i,:] + 1.e-20*np.random.rand((n_x)) # drake raises a RuntimeError if the in the expression x does not appear (e.g.: 0 x <= 1)
-        rhs = b[i] + 1.e-15*np.random.rand(1) # in case the constraint is 0 x <= 0 the previous trick ends up adding the constraint x <= 0 to the program...
-        inequalities.append(prog.AddLinearConstraint(lhs.dot(x) <= rhs))
-    for i in range(n_eq):
-        prog.AddLinearConstraint(C[i,:].dot(x) == d[i])
+    [prog.AddLinearConstraint(A[i].dot(x) <= b[i]) for i in range(n_ineq)]
+    [prog.AddLinearConstraint(C[i].dot(x) == d[i]) for i in range(n_eq)]
     prog.AddLinearCost(f.dot(x))
 
     # solve
     solver = GurobiSolver()
-    prog.SetSolverOption(solver.solver_type(), "OutputFlag", 0)
+    prog.SetSolverOption(solver.solver_type(), 'OutputFlag', 0)
+    [prog.SetSolverOption(solver.solver_type(), parameter, value) for parameter, value in kwargs.items()]
     result = prog.Solve()
 
     # initialize output
@@ -83,24 +75,24 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-5):
     }
 
     if result == SolutionResult.kSolutionFound:
-        sol['argmin'] = prog.GetSolution(x).reshape(n_x, 1)
-        sol['min'] = f.dot(sol['argmin'])[0]
+        sol['argmin'] = prog.GetSolution(x)
+        sol['min'] = f.dot(sol['argmin'])
         sol['active_set'] = np.where(A.dot(sol['argmin']) - b > -tol)[0].tolist()
 
         # retrieve multipliers through KKT conditions
-        M = A[sol['active_set'], :].T
+        M = A[sol['active_set']].T
         if n_eq > 0:
             M = np.hstack((M, C.T))
-        m = np.linalg.pinv(M).dot(-f.reshape(n_x, 1))
-        sol['multiplier_inequality'] = np.zeros((n_ineq, 1))
+        m = -np.linalg.pinv(M).dot(f)
+        sol['multiplier_inequality'] = np.zeros(n_ineq)
         for i, j in enumerate(sol['active_set']):
-            sol['multiplier_inequality'][j,0] = m[i, :]
+            sol['multiplier_inequality'][j] = m[i]
         if n_eq > 0:
-            sol['multiplier_equality'] = m[len(sol['active_set']):, :]
+            sol['multiplier_equality'] = m[len(sol['active_set']):]
 
     return sol
 
-def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-5):
+def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-5, **kwargs):
     """
     Solves the strictly convex (H > 0) quadratic program min .5 x' H x + f' x s.t. A x <= b, C x  = d.
 
@@ -151,25 +143,18 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-5):
     else:
         n_eq = 0
 
-    # reshape inputs
-    if len(f.shape) == 2:
-        f = np.reshape(f, f.shape[0])
-
     # build program
     prog = MathematicalProgram()
     x = prog.NewContinuousVariables(n_x)
+    [prog.AddLinearConstraint(A[i].dot(x) <= b[i]) for i in range(n_ineq)]
+    [prog.AddLinearConstraint(C[i].dot(x) == d[i]) for i in range(n_eq)]
     inequalities = []
-    for i in range(n_ineq):
-        lhs = A[i,:] + 1.e-15*np.random.rand((n_x)) # drake raises a RuntimeError if the in the expression x does not appear (e.g.: 0 x <= 1)
-        rhs = b[i] + 1.e-15*np.random.rand(1) # in case the constraint is 0 x <= 0 the previous trick ends up adding the constraint x <= 0 to the program...
-        inequalities.append(prog.AddLinearConstraint(lhs.dot(x) <= rhs))
-    for i in range(n_eq):
-        prog.AddLinearConstraint(C[i,:].dot(x) == d[i])
     prog.AddQuadraticCost(.5*x.dot(H).dot(x) + f.dot(x))
 
     # solve
     solver = GurobiSolver()
-    prog.SetSolverOption(solver.solver_type(), "OutputFlag", 0)
+    prog.SetSolverOption(solver.solver_type(), 'OutputFlag', 0)
+    [prog.SetSolverOption(solver.solver_type(), parameter, value) for parameter, value in kwargs.items()]
     result = prog.Solve()
 
     # initialize output
@@ -182,24 +167,24 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-5):
     }
 
     if result == SolutionResult.kSolutionFound:
-        sol['argmin'] = prog.GetSolution(x).reshape(n_x, 1)
-        sol['min'] = .5*sol['argmin'].T.dot(H).dot(sol['argmin'])[0,0] + f.dot(sol['argmin'])[0]
+        sol['argmin'] = prog.GetSolution(x)
+        sol['min'] = .5*sol['argmin'].dot(H).dot(sol['argmin']) + f.dot(sol['argmin'])
         sol['active_set'] = np.where(A.dot(sol['argmin']) - b > -tol)[0].tolist()
 
         # retrieve multipliers through KKT conditions
-        lhs = A[sol['active_set'], :]
-        rhs = b[sol['active_set'], :]
+        lhs = A[sol['active_set']]
+        rhs = b[sol['active_set']]
         if n_eq > 0:
             lhs = np.vstack((lhs, C))
-            rhs = np.vstack((rhs, d))
+            rhs = np.concatenate((rhs, d))
         H_inv = np.linalg.inv(H)
         M = lhs.dot(H_inv).dot(lhs.T)
-        m = - np.linalg.inv(M).dot(lhs.dot(H_inv).dot(f.reshape(n_x, 1)) + rhs)
-        sol['multiplier_inequality'] = np.zeros((n_ineq, 1))
+        m = - np.linalg.inv(M).dot(lhs.dot(H_inv).dot(f) + rhs)
+        sol['multiplier_inequality'] = np.zeros(n_ineq)
         for i, j in enumerate(sol['active_set']):
-            sol['multiplier_inequality'][j,0] = m[i]
+            sol['multiplier_inequality'][j] = m[i]
         if n_eq > 0:
-            sol['multiplier_equality'] = m[len(sol['active_set']):, :]
+            sol['multiplier_equality'] = m[len(sol['active_set']):]
 
     return sol
 
@@ -249,26 +234,20 @@ def mixed_integer_quadratic_program(nc, H, f, A, b, C=None, d=None, **kwargs):
     else:
         n_eq = 0
 
-    # reshape inputs
-    if len(f.shape) == 2:
-        f = np.reshape(f, f.shape[0])
-
     # build program
     prog = MathematicalProgram()
     x = np.hstack((
         prog.NewContinuousVariables(nc),
         prog.NewBinaryVariables(n_x - nc)
         ))
-    inequalities = []
-    for i in range(n_ineq):
-        inequalities.append(prog.AddLinearConstraint(A[i,:].dot(x) <= b[i]))
-    for i in range(n_eq):
-        prog.AddLinearConstraint(C[i,:].dot(x) == d[i])
+    [prog.AddLinearConstraint(A[i].dot(x) <= b[i]) for i in range(n_ineq)]
+    [prog.AddLinearConstraint(C[i].dot(x) == d[i]) for i in range(n_eq)]
     prog.AddQuadraticCost(.5*x.dot(H).dot(x) + f.dot(x))
 
     # solve
     solver = GurobiSolver()
-    prog.SetSolverOption(solver.solver_type(), "OutputFlag", 0)
+    prog.SetSolverOption(solver.solver_type(), 'OutputFlag', 0)
+    [prog.SetSolverOption(solver.solver_type(), parameter, value) for parameter, value in kwargs.items()]
     result = prog.Solve()
 
     # initialize output
@@ -278,7 +257,7 @@ def mixed_integer_quadratic_program(nc, H, f, A, b, C=None, d=None, **kwargs):
     }
 
     if result == SolutionResult.kSolutionFound:
-        sol['argmin'] = prog.GetSolution(x).reshape(n_x, 1)
-        sol['min'] = .5*sol['argmin'].T.dot(H).dot(sol['argmin'])[0,0] + f.dot(sol['argmin'])[0]
+        sol['argmin'] = prog.GetSolution(x)
+        sol['min'] = .5*sol['argmin'].dot(H).dot(sol['argmin']) + f.dot(sol['argmin'])
 
     return sol

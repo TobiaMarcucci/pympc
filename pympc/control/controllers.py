@@ -66,7 +66,7 @@ class ModelPredictiveController(object):
         """
 
         # create fake PWA system and use PWA condenser
-        c = np.zeros((self.S.nx, 1))
+        c = np.zeros(self.S.nx)
         S = AffineSystem(self.S.A, self.S.B, c)
         S = PieceWiseAffineSystem([S], [self.D])
         mode_sequence = [0]*self.N
@@ -96,7 +96,7 @@ class ModelPredictiveController(object):
             return None, None
 
         # from vector to list of vectors
-        u_feedforward = [sol['argmin'][self.S.nu*i : self.S.nu*(i+1), :] for i in range(self.N)]
+        u_feedforward = [sol['argmin'][self.S.nu*i : self.S.nu*(i+1)] for i in range(self.N)]
         V = sol['min']
 
         return u_feedforward, V
@@ -159,7 +159,7 @@ class ModelPredictiveController(object):
         # evaluate lookup table
         u = self.explicit_solution.u(x)
         if u is not None:
-            u = [u[t*self.S.nu:(t+1)*self.S.nu, :] for t in range(self.N)]
+            u = [u[t*self.S.nu:(t+1)*self.S.nu] for t in range(self.N)]
 
         return u, self.explicit_solution.V(x)
 
@@ -229,10 +229,10 @@ class ModelPredictiveController(object):
         feasible_set = self.mpqp.get_feasible_set()
 
         # create box containing the feasible set
-        x_max = max([v[0,0] for v in feasible_set.vertices])
-        x_min = min([v[0,0] for v in feasible_set.vertices])
-        y_max = max([v[1,0] for v in feasible_set.vertices])
-        y_min = min([v[1,0] for v in feasible_set.vertices])
+        x_max = max([v[0] for v in feasible_set.vertices])
+        x_min = min([v[0] for v in feasible_set.vertices])
+        y_max = max([v[1] for v in feasible_set.vertices])
+        y_min = min([v[1] for v in feasible_set.vertices])
 
         # create grid
         x = np.linspace(x_min, x_max, resolution)
@@ -240,7 +240,7 @@ class ModelPredictiveController(object):
         X, Y = np.meshgrid(x, y)
 
         # evaluate grid
-        zs = np.array([self.explicit_solution.V(np.array([[x],[y]])) for x,y in zip(np.ravel(X), np.ravel(Y))])
+        zs = np.array([self.explicit_solution.V(np.array([x,y])) for x,y in zip(np.ravel(X), np.ravel(Y))])
         Z = zs.reshape(X.shape)
 
         # plot
@@ -254,7 +254,6 @@ class HybridModelPredictiveController(object):
     def __init__(self, S, N, Q, R, P, X_N):
         """
         Initilizes the controller.
-
         Arguments
         ----------
         S : instance of PieceWiseAffineSystem
@@ -316,7 +315,6 @@ class HybridModelPredictiveController(object):
         beta_ij := max_{(x,u) in D_j} A_i x + B_i u + c_i.
         (Note that the previous are a number of LPs equal to the number of states.)
         The previous ensures that when the system is mode j != i, the dynamics A_i x + B_i u + c_i is lower bounded by alpha_ik and upper bounded by beta_ij.
-
         Returns
         ----------
         alpha : list of lists of numpy.ndarray
@@ -343,11 +341,11 @@ class HybridModelPredictiveController(object):
 
                 # solve two LPs for each component of the state vector
                 for k in range(S_i.nx):
-                    f = A_i[k:k+1,:].T
+                    f = A_i[k]
                     sol = linear_program(f, D_j.A, D_j.b, D_j.C, D_j.d)
-                    alpha_ij.append(sol['min'] + S_i.c[k,0])
+                    alpha_ij.append(sol['min'] + S_i.c[k])
                     sol = linear_program(-f, D_j.A, D_j.b, D_j.C, D_j.d)
-                    beta_ij.append(- sol['min'] + S_i.c[k,0])
+                    beta_ij.append(- sol['min'] + S_i.c[k])
 
                 # close inner loop appending bigMs
                 alpha_i.append(np.vstack(alpha_ij))
@@ -375,7 +373,6 @@ class HybridModelPredictiveController(object):
         gamma_ij := max_{(x,u) in D_j} F_i x + G_i u - h_i.
         (Note that the previous are a number of LPs equal to the number of rows of F_i.)
         The previous ensures that when the system is mode j != i, gamma_ij is always bigger than the left-hand side (i.e. F_i x + G_i u - h_i).
-
         Returns
         ----------
         gamma : list of lists of numpy.ndarray
@@ -395,9 +392,9 @@ class HybridModelPredictiveController(object):
 
                 # solve one LP for each inequality of the ith domain
                 for k in range(D_i.A.shape[0]):
-                    f = -D_i.A[k:k+1,:].T
+                    f = -D_i.A[k]
                     sol = linear_program(f, D_j.A, D_j.b, D_j.C, D_j.d)
-                    gamma_ij.append(- sol['min'] - D_i.b[k,0])
+                    gamma_ij.append(- sol['min'] - D_i.b[k])
 
                 # close inner loop appending bigMs
                 gamma_i.append(np.vstack(gamma_ij))
@@ -420,7 +417,6 @@ class HybridModelPredictiveController(object):
         z := (z(0), ..., z(N-1)), continuous,
         d := (d(0), ..., d(N-1)), binary,
         while x  is the intial condition.
-
         Returns
         ----------
         mpmiqp : instance of MultiParametricMixedIntegerQuadraticProgram
@@ -457,7 +453,6 @@ class HybridModelPredictiveController(object):
         in the form
         Ex x(t) + Eu u(t) + Ez z(t) + Ed delta(t) <= E0
         where z(t) := (z_1(t), ..., z_s(t)) and delta(t) := (delta_1(t), ..., delta_s(t)).
-
         Returns
         ----------
         E : dict of numpy.ndarray
@@ -504,13 +499,13 @@ class HybridModelPredictiveController(object):
             -self._bigM_matrices(self._gamma),                  # Equation 5
             np.vstack((np.ones((1, s)), -np.ones((1, s))))      # Equation 6
             ))
-        E['0'] = np.vstack((
-            np.zeros((nx*s, 1)),                              # Equation 1
-            np.zeros((nx*s, 1)),                              # Equation 2
-            np.vstack([S.c for S in self.S.affine_systems]),  # Equation 3
-            np.vstack([-S.c for S in self.S.affine_systems]), # Equation 4
-            np.vstack([D.b for D in self.S.domains]),         # Equation 5
-            np.array([[1.],[-1.]])                            # Equation 6
+        E['0'] = np.concatenate((
+            np.zeros(nx*s),                                        # Equation 1
+            np.zeros(nx*s),                                        # Equation 2
+            np.concatenate([S.c for S in self.S.affine_systems]),  # Equation 3
+            np.concatenate([-S.c for S in self.S.affine_systems]), # Equation 4
+            np.concatenate([D.b for D in self.S.domains]),         # Equation 5
+            np.array([1.,-1.])                                     # Equation 6
             ))
 
         return E
@@ -523,7 +518,6 @@ class HybridModelPredictiveController(object):
         |bigM[2][1]          0 bigM[2][3] ...|
         |bigM[3][1] bigM[3][2]          0 ...|
         |       ...        ...        ... ...|
-
         Arguments
         ----------
         bigM : list of lists of numpy.ndarray
@@ -555,12 +549,10 @@ class HybridModelPredictiveController(object):
         u_bar := (u(0), ..., u(N-1)),
         z_bar := (z(0), ..., z(N-1)),
         delta_bar := (delta(0), ..., delta(N-1)).
-
         Arguments
         ----------
         E : dict of numpy.ndarray
             Entries: 'x', 'u', 'z', 'd', '0' (see the defintion above).
-
         Returns
         ----------
         E_bar : dict of numpy.ndarray
@@ -585,7 +577,7 @@ class HybridModelPredictiveController(object):
             E_bar['d'],
             np.zeros((self.X_N.A.shape[0], E_bar['d'].shape[1]))
         ))
-        E_bar['0'] = np.vstack([E['0']]*self.N + [self.X_N.b])
+        E_bar['0'] = np.concatenate([E['0']]*self.N + [self.X_N.b])
 
         return E_bar
 
@@ -597,7 +589,6 @@ class HybridModelPredictiveController(object):
         x(t+1) = sum_{i=1}^s z_i(t), t = 0, ..., N-1,
         in the form
         x_bar = A_bar x0 + Bz_bar z_bar.
-
         Returns
         ----------
         A_bar, Bz_bar : numpy.ndarray
@@ -620,12 +611,10 @@ class HybridModelPredictiveController(object):
     def feedforward(self, x):
         """
         Given the state x of the system, returns the optimal sequence of N inputs and the related cost.
-
         Arguments
         ----------
         x : numpy.ndarray
             State of the system.
-
         Returns
         ----------
         u_feedforward : list of numpy.ndarray
@@ -644,12 +633,12 @@ class HybridModelPredictiveController(object):
         nx = self.S.nx
         s = self.S.nm
         nz = nx*s
-        u_list = [sol['u'][nu*i:nu*(i+1), :] for i in range(self.N)]
-        z_list = [sol['z'][nz*i:nz*(i+1), :] for i in range(self.N)]
-        d_list = [sol['d'][s*i:s*(i+1), :] for i in range(self.N)]
+        u_list = [sol['u'][nu*i:nu*(i+1)] for i in range(self.N)]
+        z_list = [sol['z'][nz*i:nz*(i+1)] for i in range(self.N)]
+        d_list = [sol['d'][s*i:s*(i+1)] for i in range(self.N)]
         x_list = [x]
         for z in z_list:
-            x_list.append(np.sum([z[nx*i:nx*(i+1), :] for i in range(s)], axis=0))
+            x_list.append(np.sum([z[nx*i:nx*(i+1)] for i in range(s)], axis=0))
         mode_sequence = []
         for d in d_list:
             mode_sequence.append(np.where(d > .5)[0][0])
@@ -659,12 +648,10 @@ class HybridModelPredictiveController(object):
     def feedback(self, x):
         """
         Returns the optimal feedback for the given state x.
-
         Arguments
         ----------
         x : numpy.ndarray
             State of the system.
-
         Returns
         ----------
         u_feedback : numpy.ndarray
@@ -681,12 +668,10 @@ class HybridModelPredictiveController(object):
     def get_mpqp(self, mode_sequence):
         """
         Returns the optimal control problem in condensed form for the given mode sequence.
-
         Arguments
         ----------
         mode_sequence : list of int
             Sequence of the modes of the PWA system.
-
         Returns
         ----------
         instance of MultiParametricQuadraticProgram
@@ -743,7 +728,7 @@ def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
     f = dict()
     f['u'] = B_bar.T.dot(Q_bar).dot(c_bar)
     f['x'] = A_bar.T.dot(Q_bar).dot(c_bar)
-    g = c_bar.T.dot(Q_bar).dot(c_bar)
+    g = .5 * c_bar.dot(Q_bar).dot(c_bar)
 
     # stack constraint matrices
     D_sequence = [S.domains[m]for m in mode_sequence]
@@ -753,7 +738,7 @@ def condense_optimal_control_problem(S, Q, R, P, X_N, mode_sequence):
         G_bar,
         np.zeros((X_N.A.shape[0], G_bar.shape[1]))
         ))
-    h_bar = np.vstack([D.b for D in D_sequence] + [X_N.b])
+    h_bar = np.concatenate([D.b for D in D_sequence] + [X_N.b])
 
     # get blocks for condensed contraints
     A = dict()

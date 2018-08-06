@@ -20,13 +20,13 @@ class TestMultiParametricQuadraticProgram(unittest.TestCase):
         H['xx'] = np.zeros((1,1))
         H['ux'] = np.zeros((1,1))
         f = dict()
-        f['u'] = np.zeros((1,1))
-        f['x'] = np.zeros((1,1))
-        g = np.zeros((1,1))
+        f['u'] = np.zeros(1)
+        f['x'] = np.zeros(1)
+        g = 0.
         A = dict()
         A['u'] = np.array([[1.],[-1.],[0.],[0.]])
         A['x'] = np.array([[-1.],[1.],[1.],[-1.]])
-        b = np.array([[1.],[1.],[2.],[2.]])
+        b = np.array([1.,1.,2.,2.])
         mpqp = MultiParametricQuadraticProgram(H, f, g, A, b)
 
         # explicit solve given active set
@@ -44,7 +44,7 @@ class TestMultiParametricQuadraticProgram(unittest.TestCase):
         self.assertAlmostEqual(cr._u['0'], 1.)
 
         # explicit solve given point
-        cr = mpqp.explicit_solve_given_point(np.array([[1.5]]))
+        cr = mpqp.explicit_solve_given_point(np.array([1.5]))
         self.assertAlmostEqual(cr._V['xx'], 1.)
         self.assertAlmostEqual(cr._V['x'], -1.)
         self.assertAlmostEqual(cr._V['0'], .5)
@@ -52,14 +52,14 @@ class TestMultiParametricQuadraticProgram(unittest.TestCase):
         self.assertAlmostEqual(cr._u['0'], -1.)
 
         # implicit solve given point
-        sol = mpqp.solve(np.array([[1.5]]))
+        sol = mpqp.solve(np.array([1.5]))
         self.assertAlmostEqual(sol['min'], .125)
         self.assertTrue(np.allclose(sol['argmin'], 0.5))
         self.assertEqual(sol['active_set'], [1])
 
         # solve
         exp_sol = mpqp.explicit_solve()
-        for x in [np.array([[.5]]), np.array([[1.5]]), np.array([[-1.5]]), np.array([[2.5]]), np.array([[-2.5]])]:
+        for x in [np.array([.5]), np.array([1.5]), np.array([-1.5]), np.array([2.5]), np.array([-2.5])]:
             sol = mpqp.solve(x)
             if sol['min'] is not None:
                 self.assertAlmostEqual(sol['min'], exp_sol.V(x))
@@ -75,8 +75,8 @@ class TestMultiParametricQuadraticProgram(unittest.TestCase):
         A = np.array([[1.],[-1.]])
         b = np.array([[2.],[2.]])
         self.assertTrue(same_rows(
-            np.hstack((A, b)),
-            np.hstack((fs.A, fs.b))
+            np.column_stack((A, b)),
+            np.column_stack((fs.A, fs.b))
             ))
 
 if __name__ == '__main__':

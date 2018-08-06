@@ -33,8 +33,7 @@ def pnnls(A, B, c):
     b_bar = B_bar.dot(c)
 
     # solve nnls
-    v, r = nnls(A_bar, b_bar.flatten())
-    v = np.reshape(v, (A.shape[1],1))
+    v, r = nnls(A_bar, b_bar)
     u = - B_pinv.dot(A.dot(v) - c)
 
     return v, u, r
@@ -98,27 +97,19 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
     else:
         n_eq = 0
 
-    # reshape inputs
-    if len(f.shape) == 1:
-        f = np.reshape(f, (f.shape[0], 1))
-    if len(b.shape) == 1:
-        b = np.reshape(b, (b.shape[0], 1))
-    if n_eq > 0 and len(d.shape) == 1:
-        d = np.reshape(d, (d.shape[0], 1))
-
     # state equalities as inequalities
     if n_eq > 0:
         AC = np.vstack((A, C, -C))
-        bd = np.vstack((b, d, -d))
+        bd = np.concatenate((b, d, -d))
     else:
         AC = A
         bd = b
 
     # build and solve pnnls problem
     A_pnnls = np.vstack((
-        np.hstack((
-            bd.T,
-            np.zeros((1, n_ineq + 2*n_eq))
+        np.concatenate((
+            bd,
+            np.zeros(n_ineq + 2*n_eq)
             )),
         np.hstack((
             np.zeros((n_ineq + 2*n_eq, n_ineq + 2*n_eq)),
@@ -129,8 +120,8 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
             np.zeros((n_x, n_ineq + 2*n_eq))
             ))
         ))
-    B_pnnls = np.vstack((f.T, AC, np.zeros((n_x, n_x))))
-    c_pnnls = np.vstack((0., bd, -f))
+    B_pnnls = np.vstack((f, AC, np.zeros((n_x, n_x))))
+    c_pnnls = np.concatenate((np.zeros(1), bd, -f))
     ys, x, r = pnnls(A_pnnls, B_pnnls, c_pnnls)
 
     # initialize output
@@ -145,12 +136,12 @@ def linear_program(f, A, b, C=None, d=None, tol=1.e-7):
     # fill solution if residual is almost zero
     if r < tol:
         sol['argmin'] = x
-        sol['min'] = f.T.dot(sol['argmin'])[0,0]
-        sol['multiplier_inequality'] = ys[:n_ineq,:]
-        sol['active_set'] = sorted(list(np.where(sol['multiplier_inequality'] > tol)[0]))
+        sol['min'] = f.dot(sol['argmin'])
+        sol['multiplier_inequality'] = ys[:n_ineq]
+        sol['active_set'] = sorted(np.where(sol['multiplier_inequality'] > tol)[0])
         if n_eq > 0:
-            mul_eq_pos = ys[n_ineq:n_ineq+n_eq, :]
-            mul_eq_neg = - ys[n_ineq+n_eq:n_ineq+2*n_eq, :]
+            mul_eq_pos = ys[n_ineq:n_ineq+n_eq]
+            mul_eq_neg = - ys[n_ineq+n_eq:n_ineq+2*n_eq]
             sol['multiplier_equality'] = mul_eq_pos + mul_eq_neg
 
     return sol
@@ -207,18 +198,10 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-7):
     else:
         n_eq = 0
 
-    # reshape inputs
-    if len(f.shape) == 1:
-        f = np.reshape(f, (f.shape[0], 1))
-    if len(b.shape) == 1:
-        b = np.reshape(b, (b.shape[0], 1))
-    if n_eq > 0 and len(d.shape) == 1:
-        d = np.reshape(d, (d.shape[0], 1))
-
     # state equalities as inequalities
     if n_eq > 0:
         AC = np.vstack((A, C, -C))
-        bd = np.vstack((b, d, -d))
+        bd = np.concatenate((b, d, -d))
     else:
         AC = A
         bd = b
@@ -229,17 +212,10 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-7):
     H_inv = L_inv.T.dot(L_inv)
     M = AC.dot(L_inv.T)
     m = bd + AC.dot(H_inv).dot(f)
-    gamma = 1
-    A_nnls = np.vstack((
-        - M.T,
-        - m.T
-        ))
-    b_nnls = np.vstack((
-        np.zeros((n_x, 1)),
-        gamma
-        ))
-    y, r = nnls(A_nnls, b_nnls.flatten())
-    y = np.reshape(y, (y.shape[0], 1))
+    gamma = np.ones(1)
+    A_nnls = np.vstack((- M.T, - m))
+    b_nnls = np.concatenate((np.zeros(n_x), gamma))
+    y, r = nnls(A_nnls, b_nnls)
 
     # initialize output
     sol = {
@@ -252,14 +228,14 @@ def quadratic_program(H, f, A, b, C=None, d=None, tol=1.e-7):
 
     # if feasibile
     if r > tol:
-        lam = y/(gamma + m.T.dot(y))
-        sol['multiplier_inequality'] = lam[:n_ineq,:]
+        lam = y / (gamma[0] + m.dot(y))
+        sol['multiplier_inequality'] = lam[:n_ineq]
         sol['argmin'] = - H_inv.dot(f + AC.T.dot(lam))
-        sol['min'] = (.5 * sol['argmin'].T.dot(H).dot(sol['argmin']) + f.T.dot(sol['argmin']))[0,0]
-        sol['active_set'] = sorted(list(np.where(sol['multiplier_inequality'] > tol)[0]))
+        sol['min'] = .5 * sol['argmin'].dot(H).dot(sol['argmin']) + f.dot(sol['argmin'])
+        sol['active_set'] = sorted(np.where(sol['multiplier_inequality'] > tol)[0])
         if n_eq > 0:
-            mul_eq_pos = lam[n_ineq:n_ineq+n_eq, :]
-            mul_eq_neg = - lam[n_ineq+n_eq:n_ineq+2*n_eq, :]
+            mul_eq_pos = lam[n_ineq:n_ineq+n_eq]
+            mul_eq_neg = - lam[n_ineq+n_eq:n_ineq+2*n_eq]
             sol['multiplier_equality'] = mul_eq_pos + mul_eq_neg
 
     return sol

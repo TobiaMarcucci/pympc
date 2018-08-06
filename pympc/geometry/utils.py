@@ -71,15 +71,15 @@ def plane_through_points(points):
     """
 
     # generate random offset
-    offset = np.random.rand(points[0].shape[0], 1)
+    offset = np.random.rand(points[0].size)
     points = [p + offset for p in points]
 
     # solve linear system
-    P = np.hstack(points).T
-    a = np.linalg.solve(P, np.ones(offset.shape))
+    P = np.vstack(points)
+    a = np.linalg.solve(P, np.ones(points[0].size))
 
     # go back to the original coordinates
-    d = 1. - a.T.dot(offset)[0,0]
+    d = 1. - a.dot(offset)
 
     # scale and select sign of the result
     a_norm = np.linalg.norm(a)
@@ -118,8 +118,8 @@ def same_rows(A, B, normalize=True):
     # if required, normalize
     if normalize:
         for i in range(A.shape[0]):
-            A[i,:] = A[i,:]/np.linalg.norm(A[i,:])
-            B[i,:] = B[i,:]/np.linalg.norm(B[i,:])
+            A[i] = A[i] / np.linalg.norm(A[i])
+            B[i] = B[i] / np.linalg.norm(B[i])
 
     # check one row per time
     for a in A:
@@ -147,15 +147,13 @@ def same_vectors(v_list, u_list):
         True if the set of arrays oin v_list and u_list are the same.
     """
 
-    # check inpputs
+    # check inputs
     for z_list in [v_list, u_list]:
-        if any(len(z.shape) != 2 for z in z_list):
-            raise ValueError('input vectors must be 2-dimensional arrays.')
-        if any(z.shape[1] > 1 for z in z_list):
-            raise ValueError('cannot compare matrices.')
+        if any(len(z.shape) >= 2 for z in z_list):
+            raise ValueError('input vectors must be 1-dimensional arrays.')
 
     # construct matrices
-    V = np.hstack(v_list).T
-    U = np.hstack(u_list).T
+    V = np.vstack(v_list)
+    U = np.vstack(u_list)
 
     return same_rows(V, U, False)

@@ -91,7 +91,7 @@ def zero_order_hold(A, B, c, h):
 
     # zero order hold
     M_c = np.vstack((
-        np.hstack((A, B, c)),
+        np.column_stack((A, B, c)),
         np.zeros((n_u+1, n_x+n_u+1))
         ))
     M_d = expm(M_c * h)
@@ -99,6 +99,6 @@ def zero_order_hold(A, B, c, h):
     # discrete time dynamics
     A_d = M_d[:n_x, :n_x]
     B_d = M_d[:n_x, n_x:n_x+n_u]
-    c_d = M_d[:n_x, n_x+n_u:n_x+n_u+1]
+    c_d = M_d[:n_x, n_x+n_u]
 
     return A_d, B_d, c_d

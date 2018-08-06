@@ -18,8 +18,8 @@ class TestPrograms(unittest.TestCase):
 
             # trivial LP with only inequalities
             A = -np.eye(2)
-            b = np.zeros((2, 1))
-            f = np.ones((2, 1))
+            b = np.zeros(2)
+            f = np.ones(2)
             sol = linear_program(f, A, b, solver=solver)
             self.assertAlmostEqual(
                 sol['min'],
@@ -27,7 +27,7 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['argmin'],
-                np.zeros((2, 1))
+                np.zeros(2)
                 )
             self.assertEqual(
                 sol['active_set'],
@@ -35,7 +35,7 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['multiplier_inequality'],
-                np.ones((2, 1))
+                np.ones(2)
                 )
             self.assertTrue(
                 sol['multiplier_equality'] is None
@@ -43,7 +43,7 @@ class TestPrograms(unittest.TestCase):
 
             # add equality
             C = np.array([[2., 1.]])
-            d = np.array([[2.]])
+            d = np.array([2.])
             sol = linear_program(f, A, b, C, d, solver=solver)
             self.assertAlmostEqual(
                 sol['min'],
@@ -51,7 +51,7 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['argmin'],
-                np.array([[1.], [0.]])
+                np.array([1.,0.])
                 )
             self.assertEqual(
                 sol['active_set'],
@@ -59,11 +59,11 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['multiplier_inequality'],
-                np.array([[0.], [.5]])
+                np.array([0.,.5])
                 )
             np.testing.assert_array_almost_equal(
                 sol['multiplier_equality'],
-                np.array([[-.5]])
+                np.array([-.5])
                 )
 
     def test_quadratic_program(self):
@@ -73,9 +73,9 @@ class TestPrograms(unittest.TestCase):
 
             # trivial QP with only inequalities
             H = np.eye(2)
-            f = np.ones((2, 1))
+            f = np.ones(2)
             A = -np.eye(2)
-            b = -np.ones((2, 1))
+            b = -np.ones(2)
             sol = quadratic_program(H, f, A, b, solver=solver)
             self.assertAlmostEqual(
                 sol['min'],
@@ -83,7 +83,7 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['argmin'],
-                np.array([[1.],[1.]])
+                np.array([1.,1.])
                 )
             self.assertEqual(
                 sol['active_set'],
@@ -91,7 +91,7 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['multiplier_inequality'],
-                np.array([[2.],[2.]])
+                np.array([2.,2.])
                 )
             self.assertTrue(
                 sol['multiplier_equality'] is None
@@ -99,7 +99,7 @@ class TestPrograms(unittest.TestCase):
 
             # add equality constraints
             C = np.array([[0., 1.]])
-            d = np.array([[2.]])
+            d = np.array([2.])
             sol = quadratic_program(H, f, A, b, C, d, solver=solver)
             self.assertAlmostEqual(
                 sol['min'],
@@ -107,7 +107,7 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['argmin'],
-                np.array([[1.],[2.]])
+                np.array([1.,2.])
                 )
             self.assertEqual(
                 sol['active_set'],
@@ -115,11 +115,11 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['multiplier_inequality'],
-                np.array([[2.],[0.]])
+                np.array([2.,0.])
                 )
             np.testing.assert_array_almost_equal(
                 sol['multiplier_equality'],
-                np.array([[-3.]])
+                np.array([-3.])
                 )
 
     def test_mixed_integer_quadratic_program(self):
@@ -140,7 +140,7 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['argmin'],
-                np.array([[0.],[1.]])
+                np.array([0.,1.])
                 )
 
             # add equalities
@@ -153,7 +153,7 @@ class TestPrograms(unittest.TestCase):
                 )
             np.testing.assert_array_almost_equal(
                 sol['argmin'],
-                np.zeros((2,1))
+                np.zeros(2)
                 )
 
             # unfeasible miqp

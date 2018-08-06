@@ -27,10 +27,10 @@ class testModelPredictiveController(unittest.TestCase):
                 controllable = S.controllable
 
             # stage constraints
-            x_min = -np.random.rand(n,1)
-            x_max = np.random.rand(n,1)
-            u_min = -np.random.rand(m,1)
-            u_max = np.random.rand(m,1)
+            x_min = -np.random.rand(n)
+            x_max = np.random.rand(n)
+            u_min = -np.random.rand(m)
+            u_max = np.random.rand(m)
             X = Polyhedron.from_bounds(x_min, x_max)
             U = Polyhedron.from_bounds(u_min, u_max)
             D = X.cartesian_product(U)
@@ -47,13 +47,13 @@ class testModelPredictiveController(unittest.TestCase):
             for j in range(10):
 
                 # intial state
-                x = np.multiply(np.random.rand(n,1), x_max - x_min) + x_min
+                x = np.multiply(np.random.rand(n), x_max - x_min) + x_min
 
                 # mpc
                 u_mpc, V_mpc = controller.feedforward(x)
 
                 # lqr
-                V_lqr = (.5*x.T.dot(P).dot(x))[0,0]
+                V_lqr = .5*x.dot(P).dot(x)
                 u_lqr = []
                 x_next = x
                 for t in range(N):
@@ -68,7 +68,7 @@ class testModelPredictiveController(unittest.TestCase):
                     constraints = constraints.cartesian_product(D)
                     C = np.zeros((n, constraints.A.shape[1]))
                     C[:, -2*(n+m):] = np.hstack((A, B, -np.eye(n), np.zeros((n,m))))
-                    d = np.zeros((n, 1))
+                    d = np.zeros(n)
                     constraints.add_equality(C, d)
                 constraints = constraints.cartesian_product(X_N)
 
@@ -91,8 +91,8 @@ class testModelPredictiveController(unittest.TestCase):
                     self.assertTrue(X_N.contains(x_mpc[N]))
 
                     # check feasibility
-                    xu_mpc = np.vstack([np.vstack((x_mpc[t], u_mpc[t])) for t in range(N)])
-                    xu_mpc = np.vstack((xu_mpc, x_mpc[N]))
+                    xu_mpc = np.concatenate([np.concatenate((x_mpc[t], u_mpc[t])) for t in range(N)])
+                    xu_mpc = np.concatenate((xu_mpc, x_mpc[N]))
                     self.assertTrue(constraints.contains(xu_mpc))
 
                 # else certify empyness of the constraint set
@@ -117,10 +117,10 @@ class testModelPredictiveController(unittest.TestCase):
                 controllable = S.controllable
 
             # stage constraints
-            x_min = -np.random.rand(n,1)
-            x_max = np.random.rand(n,1)
-            u_min = -np.random.rand(m,1)
-            u_max = np.random.rand(m,1)
+            x_min = -np.random.rand(n)
+            x_max = np.random.rand(n)
+            u_min = -np.random.rand(m)
+            u_max = np.random.rand(m)
             X = Polyhedron.from_bounds(x_min, x_max)
             U = Polyhedron.from_bounds(u_min, u_max)
             D = X.cartesian_product(U)
@@ -140,7 +140,7 @@ class testModelPredictiveController(unittest.TestCase):
             for j in range(10):
 
                 # intial state
-                x = np.multiply(np.random.rand(n,1), x_max - x_min) + x_min
+                x = np.multiply(np.random.rand(n), x_max - x_min) + x_min
 
                 # implicit vs explicit mpc
                 u_implicit, V_implicit = controller.feedforward(x)
@@ -185,25 +185,25 @@ class testHybridModelPredictiveController(unittest.TestCase):
         # dynamics n.2
         A2 = np.array([[0., 1.],[g/l-k/m, 0.]])
         B2 = B1
-        c2 = np.array([[0.],[k*d/(m*l)]])
+        c2 = np.array([0., k*d/(m*l)])
         S2 = AffineSystem.from_continuous(A2, B2, c2, h, method)
 
         # list of dynamics
         S_list = [S1, S2]
 
         # state domain n.1
-        x1_min = np.array([[-2.*d/l],[-1.5]])
-        x1_max = np.array([[d/l], [1.5]])
+        x1_min = np.array([-2.*d/l, -1.5])
+        x1_max = np.array([d/l, 1.5])
         X1 = Polyhedron.from_bounds(x1_min, x1_max)
 
         # state domain n.2
-        x2_min = np.array([[d/l], [-1.5]])
-        x2_max = np.array([[2.*d/l],[1.5]])
+        x2_min = np.array([d/l, -1.5])
+        x2_max = np.array([2.*d/l, 1.5])
         X2 = Polyhedron.from_bounds(x2_min, x2_max)
 
         # input domain
-        u_min = np.array([[-4.]])
-        u_max = np.array([[4.]])
+        u_min = np.array([-4.])
+        u_max = np.array([4.])
         U = Polyhedron.from_bounds(u_min, u_max)
 
         # domains
@@ -227,9 +227,9 @@ class testHybridModelPredictiveController(unittest.TestCase):
         controller = HybridModelPredictiveController(S, N, Q, R, P, X_N)
 
         # compare with lqr
-        x0 = np.array([[.0],[.6]])
+        x0 = np.array([.0, .6])
         self.assertTrue(X_N.contains(x0))
-        V_lqr = .5*x0.T.dot(P).dot(x0)[0,0]
+        V_lqr = .5*x0.dot(P).dot(x0)
         x_lqr = [x0]
         u_lqr = []
         for t in range(N):
@@ -237,31 +237,31 @@ class testHybridModelPredictiveController(unittest.TestCase):
             x_lqr.append((S1.A + S1.B.dot(K)).dot(x_lqr[t]))
         u_hmpc, x_hmpc, ms_hmpc, V_hmpc = controller.feedforward(x0)
         np.testing.assert_array_almost_equal(
-            np.vstack((u_lqr)),
-            np.vstack((u_hmpc))
+            np.concatenate((u_lqr)),
+            np.concatenate((u_hmpc))
             )
         np.testing.assert_array_almost_equal(
-            np.vstack((x_lqr)),
-            np.vstack((x_hmpc))
+            np.concatenate((x_lqr)),
+            np.concatenate((x_hmpc))
             )
         self.assertAlmostEqual(V_lqr, V_hmpc)
         self.assertTrue(all([m == 0 for m in ms_hmpc]))
         np.testing.assert_array_almost_equal(u_hmpc[0], controller.feedback(x0))
 
         # compare with linear mpc
-        x0 = np.array([[.0],[.8]])
+        x0 = np.array([.0,.8])
         self.assertFalse(X_N.contains(x0))
         linear_controller = ModelPredictiveController(S1, N, Q, R, P, D1, X_N)
         u_lmpc, V_lmpc = linear_controller.feedforward(x0)
         x_lmpc = S1.simulate(x0, u_lmpc)
         u_hmpc, x_hmpc, ms_hmpc, V_hmpc = controller.feedforward(x0)
         np.testing.assert_array_almost_equal(
-            np.vstack((u_lmpc)),
-            np.vstack((u_hmpc))
+            np.concatenate((u_lmpc)),
+            np.concatenate((u_hmpc))
             )
         np.testing.assert_array_almost_equal(
-            np.vstack((x_lmpc)),
-            np.vstack((x_hmpc))
+            np.concatenate((x_lmpc)),
+            np.concatenate((x_hmpc))
             )
         self.assertAlmostEqual(V_lmpc, V_hmpc)
         self.assertTrue(all([m == 0 for m in ms_hmpc]))
@@ -271,19 +271,19 @@ class testHybridModelPredictiveController(unittest.TestCase):
         mpqp = controller.get_mpqp(ms_hmpc)
         sol = mpqp.solve(x0)
         np.testing.assert_array_almost_equal(
-            np.vstack((u_lmpc)),
+            np.concatenate((u_lmpc)),
             sol['argmin']
             )
         self.assertAlmostEqual(V_lmpc, sol['min'])
 
         # with change of the mode sequence
-        x0 = np.array([[.08],[.8]])
+        x0 = np.array([.09, .2])
         u_hmpc, x_hmpc, ms_hmpc, V_hmpc = controller.feedforward(x0)
         self.assertTrue(sum(ms_hmpc) >= 1)
         mpqp = controller.get_mpqp(ms_hmpc)
         sol = mpqp.solve(x0)
         np.testing.assert_array_almost_equal(
-            np.vstack((u_hmpc)),
+            np.concatenate((u_hmpc)),
             sol['argmin']
             )
         self.assertAlmostEqual(V_hmpc, sol['min'])
