@@ -11,4 +11,4 @@ This toolbox implements several algorithms for:
 
 # Examples
 
-The example folder contains some introductory Jupyter notebooks.
+The `examples` folder contains some introductory Jupyter notebooks.
