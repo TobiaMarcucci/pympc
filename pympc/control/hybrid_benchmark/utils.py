@@ -9,6 +9,32 @@ from pympc.geometry.polyhedron import Polyhedron
 from pympc.optimization.programs import linear_program
 from pympc.geometry.utils import plane_through_points
 
+def reachability_graph(S):
+    """
+    graph is a list of lists of booleans.
+    graph[i][j] is True if the system from mode i can be in mode j at the next time step.
+    This is done solving the feasibility linear program
+    Find (x,u,u+) such that (x,u) in Di, (Ai x + Bi u + ci, u+) in Dj.
+    """
+    f = np.zeros(S.nx + 2*S.nu)
+    graph = []
+    for i in range(S.nm):
+        Di = S.domains[i]
+        Si = S.affine_systems[i]
+        graphi = []
+        for j in range(S.nm):
+            Dj = S.domains[j]
+            Fj = Dj.A[:,:S.nx]
+            Gj = Dj.A[:,S.nx:]
+            A = np.vstack((
+                np.hstack((Di.A, np.zeros((Di.A.shape[0],S.nu)))),
+                np.hstack((Fj.dot(Si.A), Fj.dot(Si.B), Gj))
+                ))
+            b = np.concatenate((Di.b, Dj.b - Fj.dot(Si.c)))
+            sol = linear_program(f, A, b)
+            graphi.append(sol['min'] is not None)
+        graph.append(graphi)
+    return graph
 
 def graph_representation(S):
     '''
@@ -28,7 +54,7 @@ def graph_representation(S):
             np.hstack((Si.A, Si.B, -np.eye(S.nx))),
             np.hstack((-Si.A, -Si.B, np.eye(S.nx))),
             ))
-        bi = np.vstack((Di.b, -Si.c, Si.c))
+        bi = np.concatenate((Di.b, -Si.c, Si.c))
         P.append(Polyhedron(Ai, bi))
     return P
 
@@ -46,16 +72,14 @@ def big_m(P_list, tol=1.e-6):
         for j, Pj in enumerate(P_list):
             mij = []
             for k in range(Pi.A.shape[0]):
-                f = -Pi.A[k:k+1,:].T
-                sol = linear_program(f, Pj.A, Pj.b)
-                mijk = - sol['min'] - Pi.b[k,0]
+                sol = linear_program(-Pi.A[k], Pj.A, Pj.b)
+                mijk = - sol['min'] - Pi.b[k]
                 if np.abs(mijk) < tol:
                     mijk = 0.
                 mij.append(mijk)
-            mi.append(np.vstack(mij))
+            mi.append(np.array(mij))
         m.append(mi)
-    mi = [np.maximum.reduce([mij for mij in mi]) for mi in m]
-    return m, mi
+    return m
 
 def big_m_relaxation(P_list):
     nx = P_list[0].A.shape[1]
@@ -96,10 +120,12 @@ def add_vars(prog, n, lb=None, **kwargs):
     return np.array([xi for xi in x.values()])
 
 def add_linear_inequality(prog, x, y):
-    return [prog.addConstr(x.flatten()[k] <= y.flatten()[k]) for k in range(x.size)]
+    assert x.size == y.size
+    return [prog.addConstr(x[k] <= y[k]) for k in range(x.size)]
 
 def add_linear_equality(prog, x, y):
-    return [prog.addConstr(x.flatten()[k] == y.flatten()[k]) for k in range(x.size)]
+    assert x.size == y.size
+    return [prog.addConstr(x[k] == y[k]) for k in range(x.size)]
 
 def add_rotated_socc(prog, H, x, y, z, tol=1.e-8):
     '''
@@ -120,11 +146,12 @@ def get_constraint_set(prog):
     '''
     Returns the linear constraints of prog in the form A x < = b.
     '''
+    prog.update()
     cs = prog.getConstrs()
     vs = prog.getVars()
     v_id = {v: i for i, v in enumerate(vs)}
     nv = len(vs)
-    CS = Polyhedron(np.zeros((0, nv)), np.zeros((0, 1)))
+    CS = Polyhedron(np.zeros((0, nv)), np.zeros(0))
     for i, v in enumerate(vs):
         if v.getAttr(grb.GRB.Attr.LB) != -grb.GRB.INFINITY:
             CS.add_lower_bound(v.getAttr(grb.GRB.Attr.LB), [i])
@@ -135,7 +162,7 @@ def get_constraint_set(prog):
         Ai = np.zeros((1, nv))
         for j in range(expr.size()):
             Ai[0, v_id[expr.getVar(j)]] = expr.getCoeff(j)
-        bi = np.vstack([c.getAttr(grb.GRB.Attr.RHS)])
+        bi = np.array([c.getAttr(grb.GRB.Attr.RHS)])
         if c.getAttr(grb.GRB.Attr.Sense) in ['<', '=']:
             CS.add_inequality(Ai, bi)
         if c.getAttr(grb.GRB.Attr.Sense) in ['>', '=']:
@@ -167,7 +194,7 @@ def remove_redundant_inequalities_fast(P, tol=1.e-7):
         prog.optimize()
 
         # remove redundant facets from the list
-        if  prog.objVal - P.b[i,0] < tol:
+        if  prog.objVal - P.b[i] < tol:
             prog.remove(cons[i])
             minimal_facets.remove(i)
         else:
@@ -218,15 +245,15 @@ def convex_hull_method_fast(P, resiudal_dimensions):
     if n == 1:
         E = np.array([[1.],[-1.]])
         f = np.array([
-            [max(v[0,0] for v in vertices)],
-            [- min(v[0,0] for v in vertices)]
+            max(v[0] for v in vertices),
+            - min(v[0] for v in vertices)
             ])
         return E, f, vertices
     vertices = _get_inner_simplex(prog, x, vertices)
 
     # expand facets
     hull = ConvexHull(
-        np.hstack(vertices).T,
+        np.vstack(vertices),
         incremental=True
         )
     hull = _expand_simplex(prog, x, hull)
@@ -234,8 +261,8 @@ def convex_hull_method_fast(P, resiudal_dimensions):
 
     # get outputs
     E = hull.equations[:, :-1]
-    f = - hull.equations[:, -1:]
-    vertices = [np.reshape(v, (v.shape[0], 1)) for v in hull.points]
+    f = - hull.equations[:, -1]
+    vertices = [v for v in hull.points]
 
     proj = Polyhedron(E, f)
     proj._vertices = vertices
@@ -253,7 +280,7 @@ def _get_two_vertices(prog, x, n):
     for f in [a, -a]:
         prog.setObjective(f.dot(x))
         prog.optimize()
-        v = np.vstack([xi.x for xi in x[:n]])
+        v = np.array([xi.x for xi in x[:n]])
         vertices.append(v)
 
     return vertices
@@ -265,19 +292,19 @@ def _get_inner_simplex(prog, x, vertices, tol=1.e-7):
 
     # expand increasing at every iteration the dimension of the space
     for i in range(2, n+1):
-        a, d = plane_through_points([v[:i,:] for v in vertices])
-        f = np.vstack((a, np.zeros((len(x)-i, 1))))
-        prog.setObjective(f.flatten().dot(x))
+        a, d = plane_through_points([v[:i] for v in vertices])
+        f = np.concatenate((a, np.zeros(len(x)-i)))
+        prog.setObjective(f.dot(x))
         prog.optimize()
-        argmin = np.vstack([xi.x for xi in x])
+        argmin = np.array([xi.x for xi in x])
 
         # check the length of the expansion wrt to the plane, if zero expand in the opposite direction
-        expansion = np.abs(a.T.dot(argmin[:i, :]) - d) # >= 0
+        expansion = np.abs(a.dot(argmin[:i]) - d) # >= 0
         if expansion < tol:
-            prog.setObjective(-f.flatten().dot(x))
+            prog.setObjective(-f.dot(x))
             prog.optimize()
-            argmin = np.vstack([xi.x for xi in x])
-        vertices.append(argmin[:n,:])
+            argmin = np.array([xi.x for xi in x])
+        vertices.append(argmin[:n])
 
     return vertices
 
@@ -296,7 +323,7 @@ def _expand_simplex(prog, x, hull, tol=1.e-7):
         for i in range(hull.equations.shape[0]):
 
             # get normalized halfplane {x | a' x <= d} of the ith facet
-            a = hull.equations[i:i+1, :-1].T
+            a = hull.equations[i, :-1]
             d = - hull.equations[i, -1]
             a_norm = np.linalg.norm(a)
             a /= a_norm
@@ -308,19 +335,45 @@ def _expand_simplex(prog, x, hull, tol=1.e-7):
                 a_explored.append(a)
 
                 # maximize in the direction a
-                f = np.vstack((
+                f = np.concatenate((
                     - a,
-                    np.zeros((len(x)-n, 1))
+                    np.zeros(len(x)-n)
                     ))
-                prog.setObjective(f.flatten().dot(x))
+                prog.setObjective(f.dot(x))
                 prog.optimize()
-                argmin = np.vstack([xi.x for xi in x])
+                argmin = np.array([xi.x for xi in x])
 
                 # check if expansion wrt to the halfplane is greater than zero
                 expansion = - prog.objVal - d # >= 0
                 if expansion > tol:
                     convergence = False
-                    hull.add_points(argmin[:n,:].T)
+                    hull.add_points(argmin[:n].reshape((1,n)))
                     break
 
     return hull
+
+
+from itertools import product
+from scipy.linalg import block_diag
+
+def is_included(l1, l2):
+    for i in range(len(l2)-len(l1)+1):
+        if l2[i:i+len(l1)] == l1:
+            return True
+    return False
+
+def infeasible_mode_sequences(PWA, t_max):
+    imss = []
+    for t in range(1, t_max):
+        for ms in product(*[range(PWA.nm)]*(t+1)):
+            if not any(is_included(ims, ms) for ims in imss):
+                F_c = block_diag(*[PWA.domains[m].A[:,:PWA.nx] for m in ms])
+                G_c = block_diag(*[PWA.domains[m].A[:,PWA.nx:] for m in ms])
+                h_c = np.concatenate([PWA.domains[m].b for m in ms])
+                A_c, B_c, c_c = [M[:-PWA.nx] for M in PWA.condense(ms)]
+                lhs = np.hstack((G_c + F_c.dot(B_c), F_c.dot(A_c)))
+                rhs = h_c - F_c.dot(c_c)
+                fs = Polyhedron(lhs, rhs)
+                if fs.empty:
+                    imss.append(ms)
+    return imss

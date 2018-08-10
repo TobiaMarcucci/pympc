@@ -5,7 +5,7 @@
   <link name="ground">
     <visual>
       <geometry>
-        <box size="10 0 .5" />
+        <box size="6 0 .5" />
       </geometry>
       <material name="green">
         <color rgba="0 1 0 1" />
@@ -62,6 +62,30 @@
         <color rgba="1 0 0 1" />
       </material>
     </visual>
+    <collision>
+      <origin xyz="0 0 2" rpy="0 0 0" />
+      <geometry>
+        <sphere radius=".05" />
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="wall">
+    <visual>
+      <origin xyz="-3 0 .7" rpy="0 0 0" />
+      <geometry>
+        <box size=".2 0 4.1" />
+      </geometry>
+      <material name="white">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-3 0 .7" rpy="0 0 0" />
+      <geometry>
+        <box size=".2 0 4.1" />
+      </geometry>
+    </collision>
   </link>
   
   <joint name="track" type="prismatic">
