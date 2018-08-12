@@ -2,7 +2,7 @@
 import numpy as np
 import gurobipy as grb
 from scipy.linalg import block_diag
-from copy import copy
+from copy import copy, deepcopy
 
 # internal inputs
 from pympc.control.hybrid_benchmark.utils import (graph_representation,
@@ -14,7 +14,6 @@ from pympc.control.hybrid_benchmark.utils import (graph_representation,
                                                   infeasible_mode_sequences
                                                   )
 from pympc.optimization.programs import linear_program
-
 
 class HybridModelPredictiveController(object):
 
@@ -30,7 +29,7 @@ class HybridModelPredictiveController(object):
 
         # mpMIQP
         self.prog = self.build_mpmiqp(method)
-        self.partial_mode_sequence = []
+        # self.partial_mode_sequence = []
 
     def build_mpmiqp(self, method):
         if method == 'Traditional formulation':
@@ -152,15 +151,10 @@ class HybridModelPredictiveController(object):
         m = big_m(P)
 
         # graph of the dynamics and big-Ms, final stage
-        P_N = []
-        P_N_index = []
-        for i, Pi in enumerate(P):
-            Pi = copy(Pi)
-            Pi.add_inequality(self.X_N.A, self.X_N.b, range(nx+nu, 2*nx+nu))
-            if not Pi.empty:
-                P_N.append(Pi)
-                P_N_index.append(i)
-        m_N = big_m(P_N)
+        P_N = [copy(Pi) for Pi in P]
+        [Pi.add_inequality(self.X_N.A, self.X_N.b, range(nx+nu, 2*nx+nu)) for Pi in P_N]
+        P_N_indices = [i for i, Pi in enumerate(P_N) if not Pi.empty]
+        m_N = big_m([P_N[i] for i in P_N_indices])
 
         # initialize program
         prog = grb.Model()
@@ -178,10 +172,7 @@ class HybridModelPredictiveController(object):
                 x = x_next
             x_next = add_vars(prog, nx, name='x%d'%(t+1))
             u = add_vars(prog, nu, name='u%d'%t)
-            if t < self.N-1:
-                d = add_vars(prog, nm, lb=[0.]*nm, name='d%d'%t)
-            else:
-                d = np.array([prog.addVar(lb=0., name='d%d[%d]'%(t,k)) for k in P_N_index])
+            d = add_vars(prog, nm, lb=[0.]*nm, name='d%d'%t)
             prog.update()
 
             # constrained dynamics
@@ -191,8 +182,8 @@ class HybridModelPredictiveController(object):
                     sum_mi = sum(m[i][j] * d[j] for j in range(nm) if j != i)
                     add_linear_inequality(prog, P[i].A.dot(xux), P[i].b + sum_mi)
             else:
-                for i in range(len(P_N)):
-                    sum_mi = sum(m_N[i][j] * d[j] for j in range(len(P_N)) if j != i)
+            	for i in P_N_indices:
+                    sum_mi = sum(m_N[i][j] * d[j] for j in P_N_indices if j != i)
                     add_linear_inequality(prog, P_N[i].A.dot(xux), P_N[i].b + sum_mi)
 
             # constraints on the binaries
@@ -353,111 +344,164 @@ class HybridModelPredictiveController(object):
             self.prog.getVarByName('x0[%d]'%k).UB = x0[k]
         self.prog.update()
 
+    def _reset_initial_condition(self):
+    	for k in range(self.S.nx):
+    		self.prog.getVarByName('x0[%d]'%k).LB = -grb.GRB.INFINITY
+    		self.prog.getVarByName('x0[%d]'%k).UB = grb.GRB.INFINITY
+
+    def set_binaries(self, identifier):
+    	'''
+    	`identifier` is a dictionary of dictionaries.
+    	`identifier[time][mode]`, if the keys exist, gives the value for d[time][mode].
+    	'''
+    	self._reset_binaries()
+    	for k, v in identifier.items():
+    		self.prog.getVarByName('d%d[%d]'%k).LB = v
+    		self.prog.getVarByName('d%d[%d]'%k).UB = v
+    	self.prog.update()
+
+    def _reset_binaries(self):
+    	for t in range(self.N):
+    		for k in range(self.S.nm):
+    			self.prog.getVarByName('d%d[%d]'%(t, k)).LB = 0.
+    			self.prog.getVarByName('d%d[%d]'%(t, k)).UB = grb.GRB.INFINITY
+
+    def _set_type_binaries(self, d_type):
+        for t in range(self.N):
+            for k in range(self.S.nm):
+                self.prog.getVarByName('d%d[%d]'%(t,k)).VType = d_type
+
     def reset_program(self):
-        self.set_type_auxliaries('C')
-        self.update_mode_sequence([])
-        for k in range(self.S.nx):
-            self.prog.getVarByName('x0[%d]'%k).LB = -grb.GRB.INFINITY
-            self.prog.getVarByName('x0[%d]'%k).UB = grb.GRB.INFINITY
+        self._set_type_binaries('C')
+        self.reset_binaries()
+        self.reset_initial_condition()
         self.prog.update()
 
-    def update_mode_sequence(self, partial_mode_sequence):
-
-        # loop over the time horizon
-        for t in range(self.N):
-
-            # earse and write
-            if t < len(partial_mode_sequence) and t < len(self.partial_mode_sequence):
-                if partial_mode_sequence[t] != self.partial_mode_sequence[t]:
-                    self.prog.getVarByName('d%d[%d]'%(t,self.partial_mode_sequence[t])).LB = 0.
-                    self.prog.getVarByName('d%d[%d]'%(t,partial_mode_sequence[t])).LB = 1.
-
-            # erase only
-            elif t >= len(partial_mode_sequence) and t < len(self.partial_mode_sequence):
-                self.prog.getVarByName('d%d[%d]'%(t,self.partial_mode_sequence[t])).LB = 0.
-
-            # write only
-            elif t < len(partial_mode_sequence) and t >= len(self.partial_mode_sequence):
-                self.prog.getVarByName('d%d[%d]'%(t,partial_mode_sequence[t])).LB = 1.
-
-        # update partial mode sequence
-        self.partial_mode_sequence = partial_mode_sequence
-
-    def feedforward_relaxation(self, x0, partial_mode_sequence):
+    def solve_relaxation(self, x0, identifier):
 
         # reset program
         self.prog.reset()
 
         # set up miqp
-        self.set_type_auxliaries('C')
-        self.update_mode_sequence(partial_mode_sequence)
+        self._set_type_binaries('C')
         self.set_initial_condition(x0)
-
+    	self.set_binaries(identifier)
+        
         # parameters
         self.prog.setParam('OutputFlag', 0)
-        self.prog.setParam('Method', 0)
-        self.prog.setParam('BarConvTol', 1.e-8)
+        # self.prog.setParam('Method', 0)
+        # self.prog.setParam('BarConvTol', 1.e-8)
 
         # run the optimization
         self.prog.optimize()
 
-        return self.organize_result()
+        # elaborate result
+        solution = self.organize_result()
+        objective = solution['objective']
+        feasible = objective is not None
+        if feasible:
+            integer_feasible = all(np.isclose(max(dt), 1., atol=1.e-6) for dt in solution['binaries'])
+        else:
+        	integer_feasible = None
+
+        return solution, feasible, objective, integer_feasible
+
+    def branching_rule(self, identifier, sol):
+
+    	t = np.argmin([max(dt) - min(dt) for dt in sol['binaries']])
+    	free_bin_id = range(self.S.nm)
+    	[free_bin_id.remove(k[1]) for k in identifier.keys() if k[0] == t]
+    	free_bin_val = [sol['binaries'][t][i] for i in free_bin_id]
+    	free_bin_id_ordered = [free_bin_id[i] for i in np.argsort(free_bin_val)]
+
+    	n = len(free_bin_id)
+    	free_bin_id_1 = free_bin_id_ordered[(n+1)/2:]
+    	free_bin_id_2 = free_bin_id_ordered[:(n+1)/2]
+
+    	branch_1 = {}
+    	branch_2 = {}
+    	for i in free_bin_id_1:
+    		branch_1[(t,i)] = 0.
+    	for i in free_bin_id_2:
+    		branch_2[(t,i)] = 0.
+
+    	return [branch_1, branch_2]
+
+    # def update_mode_sequence(self, partial_mode_sequence):
+
+    #     # loop over the time horizon
+    #     for t in range(self.N):
+
+    #         # earse and write
+    #         if t < len(partial_mode_sequence) and t < len(self.partial_mode_sequence):
+    #             if partial_mode_sequence[t] != self.partial_mode_sequence[t]:
+    #                 self.prog.getVarByName('d%d[%d]'%(t,self.partial_mode_sequence[t])).LB = 0.
+    #                 self.prog.getVarByName('d%d[%d]'%(t,partial_mode_sequence[t])).LB = 1.
+
+    #         # erase only
+    #         elif t >= len(partial_mode_sequence) and t < len(self.partial_mode_sequence):
+    #             self.prog.getVarByName('d%d[%d]'%(t,self.partial_mode_sequence[t])).LB = 0.
+
+    #         # write only
+    #         elif t < len(partial_mode_sequence) and t >= len(self.partial_mode_sequence):
+    #             self.prog.getVarByName('d%d[%d]'%(t,partial_mode_sequence[t])).LB = 1.
+
+    #     # update partial mode sequence
+    #     self.partial_mode_sequence = partial_mode_sequence
+
+    # def feedforward_relaxation(self, x0, partial_mode_sequence):
+
+    #     # reset program
+    #     self.prog.reset()
+
+    #     # set up miqp
+    #     self.set_type_auxliaries('C')
+    #     self.update_mode_sequence(partial_mode_sequence)
+    #     self.set_initial_condition(x0)
+
+    #     # parameters
+    #     self.prog.setParam('OutputFlag', 0)
+    #     self.prog.setParam('Method', 0)
+    #     self.prog.setParam('BarConvTol', 1.e-8)
+
+    #     # run the optimization
+    #     self.prog.optimize()
+
+    #     return self.organize_result()
 
     def feedforward(self, x0):
 
         # reset program
-        # self.prog.reset()
+        self.prog.reset()
 
         # set up miqp
-        self.set_type_auxliaries('B')
-        self.update_mode_sequence([])
+        self._reset_binaries()
+        self._set_type_binaries('B')
         self.set_initial_condition(x0)
 
         # parameters
-        self.prog.setParam('OutputFlag', 0)
-        self.prog.setParam('Threads', 0)
+        self.prog.setParam('OutputFlag', 1)
+        # self.prog.setParam('Threads', 0)
 
         # run the optimization
         self.prog.optimize()
         # print self.prog.Runtime
+        sol = self.organize_result()
 
-        return self.organize_result()
+        return sol['input'], sol['state'], sol['mode_sequence'], sol['objective']
 
     def feedback(self, x):
-
-        # get feedforward and extract first input
         u_feedforward = self.feedforward(x)[0]
         if u_feedforward is None:
             return None
-
         return u_feedforward[0]
 
-    def set_type_auxliaries(self, d_type):
-        for t in range(self.N):
-            for i in range(self.S.nm):
-                v = self.prog.getVarByName('d%d[%d]'%(t,i))
-                if v is not None:
-                    v.VType = d_type
-
     def organize_result(self):
-        if self.prog.status in [2, 9, 11] and self.prog.SolCount > 0: # optimal or interrupted or time limit
-            x = [np.array([self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)]) for t in range(self.N+1)]
-            u = [np.array([self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)]) for t in range(self.N)]
-
-            # with the big-M method at the terminal stage it might be that from some of the domains it is not possible to reach the terminal set, hence I need to check if the d's are None.
-            d = []
-            for t in range(self.N):
-                dt = []
-                for k in range(self.S.nm):
-                    dtk = self.prog.getVarByName('d%d[%d]'%(t,k))
-                    if dtk is not None:
-                        dt.append(dtk.x)
-                    else:
-                        dt.append(0.)
-                d.append(dt)
-            # d = [[self.prog.getVarByName('d%d[%d]'%(t,k)).x for k in range(self.S.nm)] for t in range(self.N)]
-            ms = [dt.index(max(dt)) for dt in d]
-            cost = self.prog.objVal
-            return u, x, ms, cost
-        else:
-            return [None]*4
+    	sol = {'state': None, 'input': None, 'mode_sequence': None, 'objective': None, 'binaries': None}
+        if self.prog.status in [2, 9, 11] and self.prog.SolCount > 0: # optimal, interrupted, time limit
+            sol['state'] = [np.array([self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)]) for t in range(self.N+1)]
+            sol['input'] = [np.array([self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)]) for t in range(self.N)]
+            sol['binaries'] = [[self.prog.getVarByName('d%d[%d]'%(t,k)).x for k in range(self.S.nm)] for t in range(self.N)]
+            sol['mode_sequence'] = [dt.index(max(dt)) for dt in sol['binaries']]
+            sol['objective'] = self.prog.objVal
+        return sol
