@@ -404,7 +404,7 @@ class HybridModelPredictiveController(object):
         else:
         	integer_feasible = None
 
-        return solution, feasible, objective, integer_feasible
+        return feasible, objective, integer_feasible, solution
 
     def branching_rule(self, identifier, sol):
 
