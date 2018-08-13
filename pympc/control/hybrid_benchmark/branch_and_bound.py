@@ -38,25 +38,29 @@ class Node(object):
         if parent is not None:
             self.identifier.update(parent.identifier)
         
-    def solve(self, solver):
+    def solve(self, solver, objective_cutoff):
         '''
         Solves the subproblem for this node.
 
         Arguments
         ----------
         solver : function
-            Function that given the identifier of the node solves its subproblem.
-            solver should return:
+            Function that given the identifier of the node (and the cutoff for the
+            objective) solves its subproblem.
+            The solver must return:
             - feasible (bool), True if the subproblem is feasible, False otherwise.
             - objective (float or None), cost of the subproblem (None if infeasible).
             - integer_feasible (bool), True if the subproblem is a feasible
             solution for the original problem, False otherwise.
             - solution, container for any other info we want to keep from the
             solution of the subproblem.
+        objective_cutoff : float
+            Cutoff value (float) for the objective, if the objective found is
+            higher then the cutoff the subproblem can be considered unfeasible.
         '''
 
         # solve subproblem
-        self.feasible, self.objective, self.integer_feasible, self.solution = solver(self.identifier)
+        self.feasible, self.objective, self.integer_feasible, self.solution = solver(self.identifier, objective_cutoff)
 
         # update number of solved children for the parent
         if self.parent is not None:
@@ -113,6 +117,8 @@ class Printer(object):
             Maximum amount of time in seconds without printing.
         column_width : int
             Number of characters of the columns of the table printed during the solution.
+        bound_tol : float
+            Tolerance on the check if a new bound has been found.
         '''
 
         # store parameters
@@ -150,8 +156,11 @@ class Printer(object):
         '''
         Prints the status of the algorithm.
         It prints in case:
-        - a new (upper or lower) bound has been found after the last call of the function,
+        - a new upper bound has been found after the last call of the function,
         - nothing has been printed in the last printing_period seconds.
+        At every print it informs if a new lower bound has been found.
+        (Since, depending on the candidate_selection, new lower bounds can be
+        quite frequent it does not print in case of new lower_bound.)
 
         Arguments
         ----------
@@ -168,7 +177,7 @@ class Printer(object):
         tp = (time_now - self.last_print_time) > self.printing_period
         lb = lower_bound > self.lower_bound
         ub = upper_bound < self.upper_bound
-        if not any([tp, lb, ub]):
+        if not any([tp, ub]):
             return
 
         # write updates if new bounds has been found in this loop
@@ -201,7 +210,8 @@ def branch_and_bound(
         candidate_selection,
         branching_rule,
         tol=0.,
-        printing_period=5.
+        printing_period=5.,
+        **kwargs
         ):
     '''
     Branch and bound solver for combinatorial optimization problems.
@@ -246,7 +256,7 @@ def branch_and_bound(
 
     # initialize printing
     if printing_period is not None:
-        printer = Printer(printing_period)
+        printer = Printer(printing_period, **kwargs)
         printer.print_fields()
 
     # termination check
@@ -257,7 +267,7 @@ def branch_and_bound(
         candidate_nodes.remove(candidate_node)
 
         # solution of candidate node
-        candidate_node.solve(solver)
+        candidate_node.solve(solver, upper_bound)
 
         # fathoming for infeasibility
         # (trivially not a lower bound)
@@ -356,7 +366,7 @@ def best_first(candidate_nodes, incumbent):
     candidate_selection function for the branch and bound algorithm.
     Gets the node whose parent has the lowest cost (in case there are siblings
     picks the first in the list).
-    Good for finding feasible solutions, bad for proving optimality.
+    Good for proving optimality,bad for finding feasible solutions.
 
     Arguments
     ----------
@@ -377,8 +387,10 @@ def best_first(candidate_nodes, incumbent):
 
     # loop over all possible candidates
     for i, node in enumerate(candidate_nodes):
-        if node.parent is not None and node.parent.objective < objective_best:
-            index_best = i
+        if node.parent is not None:
+            if  node.parent.objective < objective_best:
+                index_best = i
+                objective_best = node.parent.objective
 
     return candidate_nodes[index_best]
 
@@ -406,3 +418,28 @@ def first_depth_then_breadth(candidate_nodes, incumbent):
         return depth_first(candidate_nodes, incumbent)
     else:
         return breadth_first(candidate_nodes, incumbent)
+
+def first_depth_then_best(candidate_nodes, incumbent):
+    '''
+    candidate_selection function for the branch and bound algorithm.
+    Uses the depth_first approach until a feasible solution is found, then
+    continues with the best first.
+    Should get the best of the two approaches.
+
+    Arguments
+    ----------
+    candidate_nodes : list of Node
+        List of the nodes among which we need to select the next subproblem to solve.
+    incumbent : Node
+        Incumbent node in the branch and bound algorithm.
+
+    Returns
+    ----------
+    candidate_node : Node
+        Node whose subproblem is the next to be solved.
+    '''
+
+    if incumbent is None:
+        return depth_first(candidate_nodes, incumbent)
+    else:
+        return best_first(candidate_nodes, incumbent)

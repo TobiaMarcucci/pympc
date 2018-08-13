@@ -377,10 +377,10 @@ class HybridModelPredictiveController(object):
         self.reset_initial_condition()
         self.prog.update()
 
-    def solve_relaxation(self, x0, identifier):
+    def solve_relaxation(self, x0, identifier, objective_cutoff=np.inf):
 
         # reset program
-        self.prog.reset()
+        # self.prog.reset()
 
         # set up miqp
         self._set_type_binaries('C')
@@ -389,6 +389,8 @@ class HybridModelPredictiveController(object):
         
         # parameters
         self.prog.setParam('OutputFlag', 0)
+        if not np.isinf(objective_cutoff):
+            self.prog.setParam('Cutoff', objective_cutoff)
         # self.prog.setParam('Method', 0)
         # self.prog.setParam('BarConvTol', 1.e-8)
 
@@ -426,6 +428,11 @@ class HybridModelPredictiveController(object):
     		branch_2[(t,i)] = 0.
 
     	return [branch_1, branch_2]
+
+    def branching_rule_2(self, identifier, sol):
+        t = len(identifier)
+        branches = [{(t,mode): 1.} for mode in np.argsort(sol['binaries'][t])]
+        return branches
 
     # def update_mode_sequence(self, partial_mode_sequence):
 
