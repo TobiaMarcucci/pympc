@@ -11,7 +11,8 @@ class Node(object):
         '''
         A node is uniquely identified by its identifier.
         The identifier is a dictionary (typically containing the binary assigment).
-        The identifier of the node is given by the union of the identifier of its partent and the branch dictionary.
+        The identifier of the node is given by the union of the identifier of
+        its partent and the branch dictionary.
 
         Arguments
         ----------
@@ -19,7 +20,8 @@ class Node(object):
             Parent node in the branch and bound tree.
             The root node in the tree should have None here.
         branch : dict
-            Subpart of identifier that merged with the identifier of the parent gives the identifier of the child.
+            Subpart of identifier that merged with the identifier of the parent
+            gives the identifier of the child.
         '''
 
         # initialize node
@@ -47,8 +49,10 @@ class Node(object):
             solver should return:
             - feasible (bool), True if the subproblem is feasible, False otherwise.
             - objective (float or None), cost of the subproblem (None if infeasible).
-            - integer_feasible (bool), True if the subproblem is a feasible solution for the original problem, False otherwise.
-            - solution, container for any other info we want to keep from the solution of the subproblem.
+            - integer_feasible (bool), True if the subproblem is a feasible
+            solution for the original problem, False otherwise.
+            - solution, container for any other info we want to keep from the
+            solution of the subproblem.
         '''
 
         # solve subproblem
@@ -60,12 +64,14 @@ class Node(object):
 
     def branch(self, branching_rule):
         '''
-        Given the (feasible) solution of the subproblem for the node, generates the children nodes.
+        Given the (feasible) solution of the subproblem for the node generates
+        the children nodes.
 
         Arguments
         ----------
         branching_rule : function
-            Function that given the identifier and the solution of the subproblem for this node, returns a branch (dict) for each children.
+            Function that given the identifier and the solution of the
+            subproblem for this node, returns a branch (dict) for each children.
 
         Returns
         ----------
@@ -80,7 +86,8 @@ class Node(object):
         children_branches = branching_rule(self.identifier, self.solution)
         children = [Node(self, branch) for branch in children_branches]
 
-        # store number of children (needed with num_solved_children to uderstand if this node is a leaf of the tree).
+        # store number of children (needed with num_solved_children to
+        # uderstand if this node is a leaf of the tree).
         self.num_children = len(children_branches)
 
         return children
@@ -149,9 +156,11 @@ class Printer(object):
         Arguments
         ----------
         lower_bound : float
-            Best lower bound in the branch and bound algorithm at the moment of the call of this method.
+            Best lower bound in the branch and bound algorithm at the moment of
+            the call of this method.
         upper_bound : float
-            Best upper bound in the branch and bound algorithm at the moment of the call of this method.
+            Best upper bound in the branch and bound algorithm at the moment of
+            the call of this method.
         '''
 
         # check if a print is required
@@ -187,7 +196,13 @@ class Printer(object):
             self.upper_bound = upper_bound
             
 
-def branch_and_bound(solver, candidate_selection, branching_rule, tol=0., printing_period=5.):
+def branch_and_bound(
+        solver,
+        candidate_selection,
+        branching_rule,
+        tol=0.,
+        printing_period=5.
+        ):
     '''
     Branch and bound solver for combinatorial optimization problems.
 
@@ -197,12 +212,16 @@ def branch_and_bound(solver, candidate_selection, branching_rule, tol=0., printi
         Function that given the identifier of the node solves its subproblem.
         (See the docs in the solve method of the Node class.)
     candidate_selection : function
-        Function that given a list of nodes and the current incumbent node picks the subproblem (node) to solve next.
-        The current incumbent is provided to enable selection strategies that vary depending on the progress of the algorithm.
+        Function that given a list of nodes and the current incumbent node
+        picks the subproblem (node) to solve next.
+        The current incumbent is provided to enable selection strategies that
+        vary depending on the progress of the algorithm.
     branching_rule : function
-        Function that given the identifier and the solution of the subproblem for this node, returns a branch (dict) for each children.
+        Function that given the identifier and the solution of the subproblem
+        for this node, returns a branch (dict) for each children.
     tol : float
-        Positive convergence tolerance on the different between the best lower bound and the best upper bound.
+        Positive convergence tolerance on the different between the best lower
+        bound and the best upper bound.
     printing_period : float or None
         Period in seconds for printing the status of the solver.
 
@@ -210,7 +229,8 @@ def branch_and_bound(solver, candidate_selection, branching_rule, tol=0., printi
     ----------
     solution : unpecified
         Generic container of the info to keep from the solution of the incumbent node.
-        Is the solution output provided by solver function when applied to the incumbent node.
+        Is the solution output provided by solver function when applied to
+        the incumbent node.
     solution_time : float
         Overall time spent to solve the combinatorial program.
     explored_nodes : int
@@ -334,7 +354,8 @@ def depth_first(candidate_nodes, incumbent):
 def best_first(candidate_nodes, incumbent):
     '''
     candidate_selection function for the branch and bound algorithm.
-    Gets the node whose parent has the lowest cost (in case there are siblings picks the first in the list).
+    Gets the node whose parent has the lowest cost (in case there are siblings
+    picks the first in the list).
     Good for finding feasible solutions, bad for proving optimality.
 
     Arguments
@@ -364,7 +385,8 @@ def best_first(candidate_nodes, incumbent):
 def first_depth_then_breadth(candidate_nodes, incumbent):
     '''
     candidate_selection function for the branch and bound algorithm.
-    Uses the depth_first approach until a feasible solution is found, the continues with the breadth first.
+    Uses the depth_first approach until a feasible solution is found, then
+    continues with the breadth first.
     Should get the best of the two approaches.
 
     Arguments
