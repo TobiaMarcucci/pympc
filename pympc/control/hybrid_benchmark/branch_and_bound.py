@@ -1,4 +1,4 @@
-from numpy import inf
+from numpy import inf, argmin
 from time import time
 
 
@@ -365,7 +365,7 @@ def best_first(candidate_nodes, incumbent):
     '''
     candidate_selection function for the branch and bound algorithm.
     Gets the node whose parent has the lowest cost (in case there are siblings
-    picks the last in the list).
+    picks the first in the list, because argmin returns the first).
     Good for proving optimality,bad for finding feasible solutions.
 
     Arguments
@@ -382,17 +382,8 @@ def best_first(candidate_nodes, incumbent):
     '''
 
     # best node
-    index_best = 0
-    objective_best = inf
-
-    # loop over all possible candidates
-    for i, node in enumerate(candidate_nodes):
-        if node.parent is not None:
-            if node.parent.objective <= objective_best:
-                index_best = i
-                objective_best = node.parent.objective
-
-    return candidate_nodes[index_best]
+    index_best_node = argmin([node.parent.objective if node.parent is not None else inf for node in candidate_nodes])
+    return candidate_nodes[index_best_node]
 
 def first_depth_then_breadth(candidate_nodes, incumbent):
     '''
