@@ -122,7 +122,7 @@ class Printer(object):
         print ' ',
         print updates.ljust(self.column_width+1),
         print ('%.3f' % (time() - self.tic)).ljust(self.column_width+1),
-        print str(self.explored_nodes).ljust(self.column_width+1),
+        print ('%d' % self.explored_nodes).ljust(self.column_width+1),
         print ('%.3f' % self.lower_bound).ljust(self.column_width+1),
         print ('%.3f' % self.upper_bound).ljust(self.column_width+1)
 
@@ -214,8 +214,8 @@ def branch_and_bound(
         The current incumbent is provided to enable selection strategies that
         vary depending on the progress of the algorithm.
     branching_rule : function
-        Function that given the identifier and the solution of the subproblem
-        for this node, returns a branch (dict) for each children.
+        Function that given the (solved) candidate node, returns a branch
+        (dict) for each children.
     tol : float
         Positive convergence tolerance on the different between the best lower
         bound and the best upper bound.
@@ -273,7 +273,7 @@ def branch_and_bound(
 
         # branching
         else:
-            for branch in branching_rule(candidate_node.identifier, candidate_node.solution):
+            for branch in branching_rule(candidate_node):
                 candidate_nodes.append(Node(candidate_node, branch))
 
         # compute new lower bound (returns inf if candisate_nodes = [] and upper_bound = inf)
