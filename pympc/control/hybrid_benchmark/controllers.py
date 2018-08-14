@@ -354,13 +354,14 @@ class HybridModelPredictiveController(object):
     	`identifier` is a dictionary of dictionaries.
     	`identifier[time][mode]`, if the keys exist, gives the value for d[time][mode].
     	'''
-    	self._reset_binaries()
+        self._set_type_binaries('C')
+    	self._reset_bounds_binaries()
     	for k, v in identifier.items():
     		self.prog.getVarByName('d%d[%d]'%k).LB = v
     		self.prog.getVarByName('d%d[%d]'%k).UB = v
     	self.prog.update()
 
-    def _reset_binaries(self):
+    def _reset_bounds_binaries(self):
     	for t in range(self.N):
     		for k in range(self.S.nm):
     			self.prog.getVarByName('d%d[%d]'%(t, k)).LB = 0.
@@ -371,26 +372,28 @@ class HybridModelPredictiveController(object):
             for k in range(self.S.nm):
                 self.prog.getVarByName('d%d[%d]'%(t,k)).VType = d_type
 
-    def reset_program(self):
-        self._set_type_binaries('C')
-        self.reset_binaries()
-        self.reset_initial_condition()
+    def reset_program(self, d_type):
+        self.prog.reset()
+        self._set_type_binaries(d_type)
+        self._reset_bounds_binaries()
+        self._reset_initial_condition()
+        self.prog.setParam('Cutoff', grb.GRB.INFINITY)
         self.prog.update()
 
     def solve_relaxation(self, x0, identifier, objective_cutoff=np.inf):
 
         # reset program
-        # self.prog.reset()
+        self.prog.reset()
 
         # set up miqp
-        self._set_type_binaries('C')
         self.set_initial_condition(x0)
     	self.set_binaries(identifier)
         
         # parameters
         self.prog.setParam('OutputFlag', 0)
+        self.prog.setParam('Cutoff', grb.GRB.INFINITY)
         if not np.isinf(objective_cutoff):
-            self.prog.setParam('Cutoff', objective_cutoff)
+            self.prog.setParam('Cutoff', objective_cutoff) # DO NOT SET Cutoff TO NP.INF! IT IS DIFFERENT FROM SETTING IT TO grb.GRB.INFINITY!!
         # self.prog.setParam('Method', 0)
         # self.prog.setParam('BarConvTol', 1.e-8)
 
@@ -482,7 +485,7 @@ class HybridModelPredictiveController(object):
         self.prog.reset()
 
         # set up miqp
-        self._reset_binaries()
+        self._reset_bounds_binaries()
         self._set_type_binaries('B')
         self.set_initial_condition(x0)
 

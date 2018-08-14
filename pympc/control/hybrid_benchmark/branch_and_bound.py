@@ -32,9 +32,11 @@ class Node(object):
         self.integer_feasible = None
 
         # build identifier of the node
-        self.identifier = branch
-        if parent is not None:
-            self.identifier.update(parent.identifier)
+        if parent is None:
+            self.identifier = branch
+        else:
+            self.identifier = parent.identifier.copy()
+            self.identifier.update(branch)
         
     def solve(self, solver, objective_cutoff):
         '''
@@ -276,7 +278,7 @@ def branch_and_bound(
             for branch in branching_rule(candidate_node):
                 candidate_nodes.append(Node(candidate_node, branch))
 
-        # compute new lower bound (returns inf if candisate_nodes = [] and upper_bound = inf)
+        # compute new lower bound (returns inf if candidate_nodes = [] and upper_bound = inf)
         lower_bound = min([node.parent.objective for node in candidate_nodes if node.parent is not None] + [upper_bound])
 
         # print status
