@@ -365,7 +365,7 @@ def best_first(candidate_nodes, incumbent):
     '''
     candidate_selection function for the branch and bound algorithm.
     Gets the node whose parent has the lowest cost (in case there are siblings
-    picks the first in the list).
+    picks the last in the list).
     Good for proving optimality,bad for finding feasible solutions.
 
     Arguments
@@ -388,7 +388,7 @@ def best_first(candidate_nodes, incumbent):
     # loop over all possible candidates
     for i, node in enumerate(candidate_nodes):
         if node.parent is not None:
-            if  node.parent.objective < objective_best:
+            if node.parent.objective <= objective_best:
                 index_best = i
                 objective_best = node.parent.objective
 

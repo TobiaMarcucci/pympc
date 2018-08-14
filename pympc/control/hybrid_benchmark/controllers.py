@@ -408,7 +408,7 @@ class HybridModelPredictiveController(object):
 
         return feasible, objective, integer_feasible, solution
 
-    def branching_rule(self, identifier, sol):
+    def explore_most_ambiguous_node(self, identifier, sol):
 
     	t = np.argmin([max(dt) - min(dt) for dt in sol['binaries']])
     	free_bin_id = range(self.S.nm)
@@ -429,7 +429,7 @@ class HybridModelPredictiveController(object):
 
     	return [branch_1, branch_2]
 
-    def branching_rule_2(self, identifier, sol):
+    def explore_in_chronological_order(self, identifier, sol):
         t = len(identifier)
         branches = [{(t,mode): 1.} for mode in np.argsort(sol['binaries'][t])]
         return branches
