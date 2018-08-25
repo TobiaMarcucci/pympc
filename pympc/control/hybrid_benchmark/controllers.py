@@ -2,7 +2,7 @@
 import numpy as np
 import gurobipy as grb
 from scipy.linalg import block_diag
-from copy import copy, deepcopy
+from copy import copy
 
 # internal inputs
 from pympc.control.hybrid_benchmark.utils import (graph_representation,
@@ -153,8 +153,9 @@ class HybridModelPredictiveController(object):
         # graph of the dynamics and big-Ms, final stage
         P_N = [copy(Pi) for Pi in P]
         [Pi.add_inequality(self.X_N.A, self.X_N.b, range(nx+nu, 2*nx+nu)) for Pi in P_N]
+        m_N = big_m(P_N)
         P_N_indices = [i for i, Pi in enumerate(P_N) if not Pi.empty]
-        m_N = big_m([P_N[i] for i in P_N_indices])
+        # m_N = big_m([P_N[i] for i in P_N_indices])
 
         # initialize program
         prog = grb.Model()
@@ -387,13 +388,15 @@ class HybridModelPredictiveController(object):
 
         # set up miqp
         self.set_initial_condition(x0)
+        if type(identifier) in [list, tuple]:
+            identifier = {(t,m): 1. for t, m in enumerate(identifier)}
     	self.set_binaries(identifier)
         
         # parameters
         self.prog.setParam('OutputFlag', 0)
         self.prog.setParam('Cutoff', grb.GRB.INFINITY)
         if not np.isinf(objective_cutoff):
-            self.prog.setParam('Cutoff', objective_cutoff) # DO NOT SET Cutoff TO NP.INF! IT IS DIFFERENT FROM SETTING IT TO grb.GRB.INFINITY!!
+            self.prog.setParam('Cutoff', objective_cutoff) # DO NOT SET Cutoff TO np.inf! IT IS DIFFERENT FROM SETTING IT TO grb.GRB.INFINITY!!
         # self.prog.setParam('Method', 0)
         # self.prog.setParam('BarConvTol', 1.e-8)
 

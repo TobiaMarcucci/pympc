@@ -73,9 +73,12 @@ def big_m(P_list, tol=1.e-6):
             mij = []
             for k in range(Pi.A.shape[0]):
                 sol = linear_program(-Pi.A[k], Pj.A, Pj.b)
-                mijk = - sol['min'] - Pi.b[k]
-                if np.abs(mijk) < tol:
-                    mijk = 0.
+                if sol['min'] is not None:
+                    mijk = - sol['min'] - Pi.b[k]
+                    if np.abs(mijk) < tol:
+                        mijk = 0.
+                else:
+                    mijk = None
                 mij.append(mijk)
             mi.append(np.array(mij))
         m.append(mi)
