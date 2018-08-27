@@ -1,4 +1,4 @@
-from numpy import inf, argmin
+from numpy import inf, argmin, array
 from time import time
 
 
@@ -241,6 +241,8 @@ def branch_and_bound(
     incumbent = None
     upper_bound = inf
     lower_bound = - inf
+    UPPER_BOUNDS = []
+    LOWER_BOUNDS = []
 
     # initialize printing
     if printing_period is not None:
@@ -257,21 +259,24 @@ def branch_and_bound(
         # solution of candidate node
         candidate_node.solve(solver, upper_bound)
 
-        # fathoming for infeasibility
+        # pruning, infeasibility
         if not candidate_node.feasible:
             pass
 
-        # fathoming for cost
+        # pruning, optimality
         elif candidate_node.objective >= upper_bound:
             pass
 
-        # fathoming for new incumbent
+        # pruning, value dominance
         elif candidate_node.integer_feasible:
             if candidate_node.objective < upper_bound:
 
-                # set new result
+                # set new incumbent
                 upper_bound = candidate_node.objective
                 incumbent = candidate_node
+
+                # prune the branches that become suboptimal
+                candidate_nodes = [node for node in candidate_nodes if node.parent.objective < upper_bound]
 
         # branching
         else:
@@ -286,13 +291,16 @@ def branch_and_bound(
             printer.add_one_node()
             printer.print_status(lower_bound, upper_bound)
 
+        UPPER_BOUNDS.append(upper_bound)
+        LOWER_BOUNDS.append(lower_bound)
+
     # return solution
     if printing_period is not None:
         printer.print_solution(tol)
     if incumbent is None:
         return None
     else:
-        return incumbent.solution
+        return incumbent.solution, array(LOWER_BOUNDS), array(UPPER_BOUNDS)
 
 
 def breadth_first(candidate_nodes, incumbent):
@@ -344,7 +352,8 @@ def best_first(candidate_nodes, incumbent):
     candidate_selection function for the branch and bound algorithm.
     Gets the node whose parent has the lowest cost (in case there are siblings
     picks the first in the list, because argmin returns the first).
-    Good for proving optimality,bad for finding feasible solutions.
+
+    Good for proving optimality, bad for finding feasible solutions.
 
     Arguments
     ----------

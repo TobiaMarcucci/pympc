@@ -78,13 +78,13 @@ def plot_input_sequence(u, h, u_bounds=None, legend=True):
         plt.subplot(nu, 1, i+1)
 
         # plot input sequence
-        u_i_sequence = [u[k][i,0] for k in range(N)]
+        u_i_sequence = [u[k][i] for k in range(N)]
         input_plot, = plt.step(t, [u_i_sequence[0]] + u_i_sequence, 'b')
 
         # plot bounds if provided
         if u_bounds is not None:
             for bound in u_bounds:
-                bound_plot, = plt.step(t, bound[i,0]*np.ones(len(t)), 'r')
+                bound_plot, = plt.step(t, bound[i]*np.ones(len(t)), 'r')
 
         # miscellaneous
         plt.ylabel(r'$u_{' + str(i+1) + '}$')
@@ -139,7 +139,7 @@ def plot_state_trajectory(x, h, x_bounds=None, legend=True):
         # plot bounds if provided
         if x_bounds is not None:
             for bound in x_bounds:
-                bound_plot, = plt.step(t, bound[i,0]*np.ones(len(t)),'r')
+                bound_plot, = plt.step(t, bound[i]*np.ones(len(t)),'r')
 
         # miscellaneous
         plt.ylabel(r'$x_{' + str(i+1) + '}$')
