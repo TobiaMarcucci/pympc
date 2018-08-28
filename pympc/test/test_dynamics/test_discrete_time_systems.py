@@ -1,6 +1,7 @@
 # external imports
 import unittest
 import numpy as np
+import sympy as sp
 
 # internal inputs
 from pympc.dynamics.discrete_time_systems import LinearSystem, AffineSystem, PieceWiseAffineSystem, mcais
@@ -118,17 +119,17 @@ class TestLinearSystem(unittest.TestCase):
         O_inf = S.mcais(K, D)
         self.assertTrue(O_inf.contains(np.zeros(2)))
 
-    def test_from_continuous(self):
+    def test_from_continuous_and_symbolic(self):
 
-        # test from continuous
+        # generate random matrices
+        h = .01
         for i in range(10):
             n = np.random.randint(1, 10)
             m = np.random.randint(1, 10)
             A = np.random.rand(n,n)
             B = np.random.rand(n,m)
 
-            # reduce discretization step until the two method are almost equivalent
-            h = .01
+            # test .from_continuous(), explicit euler vs zoh
             convergence = False
             while not convergence:
                 S_ee = LinearSystem.from_continuous(A, B, h, 'explicit_euler')
@@ -137,7 +138,42 @@ class TestLinearSystem(unittest.TestCase):
                 if not convergence:
                     h /= 10.
             self.assertTrue(convergence)
+
+            # test .from_symbolic()
+            x = sp.Matrix([sp.Symbol('x'+str(i), real=True) for i in range(n)])
+            u = sp.Matrix([sp.Symbol('u'+str(i), real=True) for i in range(m)])
+            x_next = sp.Matrix(A)*x + sp.Matrix(B)*u
+            S = LinearSystem.from_symbolic(x_next, x, u)
+            np.testing.assert_array_almost_equal(S.A, A)
+            np.testing.assert_array_almost_equal(S.B, B)
+
+            # test .from_symbolic_continuous()
+            S = LinearSystem.from_symbolic_continuous(x_next, x, u, h, 'explicit_euler')
+            np.testing.assert_array_almost_equal(S.A, S_ee.A)
+            np.testing.assert_array_almost_equal(S.B, S_ee.B)
+            S = LinearSystem.from_symbolic_continuous(x_next, x, u, h, 'zero_order_hold')
+            np.testing.assert_array_almost_equal(S.A, S_zoh.A)
+            np.testing.assert_array_almost_equal(S.B, S_zoh.B)
+
+        # negative time step
+        self.assertRaises(ValueError, LinearSystem.from_continuous, A, B, -.1, 'explicit_euler')
+        self.assertRaises(ValueError, LinearSystem.from_symbolic_continuous, x_next, x, u, -.1, 'explicit_euler')
+        self.assertRaises(ValueError, LinearSystem.from_continuous, A, B, -.1, 'zero_order_hold')
+        self.assertRaises(ValueError, LinearSystem.from_symbolic_continuous, x_next, x, u, -.1, 'zero_order_hold')
+
+        # wrong input size
+        x_wrong = sp.Matrix([sp.Symbol('x_wrong'+str(i), real=True) for i in range(n+1)])
+        u_wrong = sp.Matrix([sp.Symbol('u_wrong'+str(i), real=True) for i in range(m+1)])
+        self.assertRaises(TypeError, LinearSystem.from_symbolic, x_next, x_wrong, u)
+        self.assertRaises(TypeError, LinearSystem.from_symbolic, x_next, x, u_wrong)
+        self.assertRaises(TypeError, LinearSystem.from_symbolic_continuous, x_next, x_wrong, u, h, 'explicit_euler')
+        self.assertRaises(TypeError, LinearSystem.from_symbolic_continuous, x_next, x, u_wrong, h, 'explicit_euler')
+        self.assertRaises(TypeError, LinearSystem.from_symbolic_continuous, x_next, x_wrong, u, h, 'zero_order_hold')
+        self.assertRaises(TypeError, LinearSystem.from_symbolic_continuous, x_next, x, u_wrong, h, 'zero_order_hold')
+
+        # from continuous wrong method
         self.assertRaises(ValueError, LinearSystem.from_continuous, A, B, h, 'gatto')
+        self.assertRaises(ValueError, LinearSystem.from_symbolic_continuous, x_next, x, u, h, 'gatto')
 
 class TestAffineSystem(unittest.TestCase):
 
@@ -178,9 +214,10 @@ class TestAffineSystem(unittest.TestCase):
                 A_bar.dot(x0) + B_bar.dot(np.concatenate(u)) + c_bar
                 )
 
-    def test_from_continuous(self):
+    def test_from_continuous_and_symbolic(self):
 
-        # test from continuous
+        # generate random matrices
+        h = .01
         for i in range(10):
             n = np.random.randint(1, 10)
             m = np.random.randint(1, 10)
@@ -188,8 +225,7 @@ class TestAffineSystem(unittest.TestCase):
             B = np.random.rand(n,m)
             c = np.random.rand(n)
 
-            # reduce discretization step until the two method are almost equivalent
-            h = .01
+            # test .from_continuous(), explicit euler vs zoh
             convergence = False
             while not convergence:
                 S_ee = AffineSystem.from_continuous(A, B, c, h, 'explicit_euler')
@@ -198,7 +234,45 @@ class TestAffineSystem(unittest.TestCase):
                 if not convergence:
                     h /= 10.
             self.assertTrue(convergence)
+
+            # test .from_symbolic()
+            x = sp.Matrix([sp.Symbol('x'+str(i), real=True) for i in range(n)])
+            u = sp.Matrix([sp.Symbol('u'+str(i), real=True) for i in range(m)])
+            x_next = sp.Matrix(A)*x + sp.Matrix(B)*u + sp.Matrix(c)
+            S = AffineSystem.from_symbolic(x_next, x, u)
+            np.testing.assert_array_almost_equal(S.A, A)
+            np.testing.assert_array_almost_equal(S.B, B)
+            np.testing.assert_array_almost_equal(S.c, c)
+
+            # test .from_symbolic_continuous()
+            S = AffineSystem.from_symbolic_continuous(x_next, x, u, h, 'explicit_euler')
+            np.testing.assert_array_almost_equal(S.A, S_ee.A)
+            np.testing.assert_array_almost_equal(S.B, S_ee.B)
+            np.testing.assert_array_almost_equal(S.c, S_ee.c)
+            S = AffineSystem.from_symbolic_continuous(x_next, x, u, h, 'zero_order_hold')
+            np.testing.assert_array_almost_equal(S.A, S_zoh.A)
+            np.testing.assert_array_almost_equal(S.B, S_zoh.B)
+            np.testing.assert_array_almost_equal(S.c, S_zoh.c)
+
+        # negative time step
+        self.assertRaises(ValueError, AffineSystem.from_continuous, A, B, c, -.1, 'explicit_euler')
+        self.assertRaises(ValueError, AffineSystem.from_symbolic_continuous, x_next, x, u, -.1, 'explicit_euler')
+        self.assertRaises(ValueError, AffineSystem.from_continuous, A, B, c, -.1, 'zero_order_hold')
+        self.assertRaises(ValueError, AffineSystem.from_symbolic_continuous, x_next, x, u, -.1, 'zero_order_hold')
+
+        # wrong input size
+        x_wrong = sp.Matrix([sp.Symbol('x_wrong'+str(i), real=True) for i in range(n+1)])
+        u_wrong = sp.Matrix([sp.Symbol('u_wrong'+str(i), real=True) for i in range(m+1)])
+        self.assertRaises(TypeError, AffineSystem.from_symbolic, x_next, x_wrong, u)
+        self.assertRaises(TypeError, AffineSystem.from_symbolic, x_next, x, u_wrong)
+        self.assertRaises(TypeError, AffineSystem.from_symbolic_continuous, x_next, x_wrong, u, h, 'explicit_euler')
+        self.assertRaises(TypeError, AffineSystem.from_symbolic_continuous, x_next, x, u_wrong, h, 'explicit_euler')
+        self.assertRaises(TypeError, AffineSystem.from_symbolic_continuous, x_next, x_wrong, u, h, 'zero_order_hold')
+        self.assertRaises(TypeError, AffineSystem.from_symbolic_continuous, x_next, x, u_wrong, h, 'zero_order_hold')
+
+        # from continuous wrong method
         self.assertRaises(ValueError, AffineSystem.from_continuous, A, B, c, h, 'gatto')
+        self.assertRaises(ValueError, AffineSystem.from_symbolic_continuous, x_next, x, u, h, 'gatto')
 
 class TestPieceWiseAffineSystem(unittest.TestCase):
 
