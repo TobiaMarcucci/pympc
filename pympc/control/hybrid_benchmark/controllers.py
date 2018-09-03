@@ -11,13 +11,15 @@ from pympc.control.hybrid_benchmark.utils import (graph_representation,
                                                   add_linear_inequality,
                                                   add_linear_equality,
                                                   add_rotated_socc,
-                                                  infeasible_mode_sequences
+                                                  infeasible_mode_sequences,
+                                                  add_stage_cost,
+                                                  add_terminal_cost
                                                   )
 from pympc.optimization.programs import linear_program
 
 class HybridModelPredictiveController(object):
 
-    def __init__(self, S, N, Q, R, P, X_N, method='Big-M'):
+    def __init__(self, S, N, Q, R, P, X_N, method='Big-M', norm='two'):
 
         # store inputs
         self.S = S
@@ -28,18 +30,18 @@ class HybridModelPredictiveController(object):
         self.X_N = X_N
 
         # mpMIQP
-        self.prog = self.build_mpmiqp(method)
+        self.prog = self.build_mpmiqp(method, norm)
         # self.partial_mode_sequence = []
 
-    def build_mpmiqp(self, method):
+    def build_mpmiqp(self, method, norm):
         if method == 'Traditional formulation':
-            return self.bild_miqp_bemporad_morari()
+            return self.bild_miqp_bemporad_morari(norm)
         if method == 'Big-M':
-            return self.bild_miqp_bigm()
+            return self.bild_miqp_bigm(norm)
         if method == 'Convex hull':
-            return self.bild_miqp_convex_hull()
+            return self.bild_miqp_convex_hull(norm)
         if method == 'Convex hull, lifted constraints':
-            return self.build_miqp_convex_hull_lifted_constraints()
+            return self.build_miqp_convex_hull_lifted_constraints(norm)
         else:
             raise ValueError('unknown method ' + method + '.')
 
@@ -50,7 +52,7 @@ class HybridModelPredictiveController(object):
             for t in range(self.N-len(ms)):
                 self.prog.addConstr(sum([self.prog.getVarByName('d%d[%d]'%(t+tau,m)) for tau, m in enumerate(ms)]) <= len(ms)-1.)
 
-    def bild_miqp_bemporad_morari(self):
+    def bild_miqp_bemporad_morari(self, norm):
 
         # shortcuts
         [nx, nu, nm] = [self.S.nx, self.S.nu, self.S.nm]
@@ -129,19 +131,19 @@ class HybridModelPredictiveController(object):
             prog.addConstr(sum(d) == 1.)
             # prog.addSOS(d, [1.]*nm, grb.GRB.SOS_TYPE1)
 
-            # stage cost to the objective
-            obj += .5 * (x.dot(self.Q).dot(x) + u.dot(self.R).dot(u))
+            # stage cost
+            obj += add_stage_cost(prog, self.Q, self.R, x, u, norm)
 
         # terminal constraint
         add_linear_inequality(prog, self.X_N.A.dot(x_next), self.X_N.b)
 
         # terminal cost
-        obj += .5 * x_next.dot(self.P).dot(x_next)
+        obj += add_terminal_cost(prog, self.P, x_next, norm)
         prog.setObjective(obj)
 
         return prog
 
-    def bild_miqp_bigm(self):
+    def bild_miqp_bigm(self, norm):
 
         # shortcuts
         [nx, nu, nm] = [self.S.nx, self.S.nu, self.S.nm]
@@ -183,7 +185,7 @@ class HybridModelPredictiveController(object):
                     sum_mi = sum(m[i][j] * d[j] for j in range(nm) if j != i)
                     add_linear_inequality(prog, P[i].A.dot(xux), P[i].b + sum_mi)
             else:
-            	for i in P_N_indices:
+                for i in P_N_indices:
                     sum_mi = sum(m_N[i][j] * d[j] for j in P_N_indices if j != i)
                     add_linear_inequality(prog, P_N[i].A.dot(xux), P_N[i].b + sum_mi)
 
@@ -191,16 +193,16 @@ class HybridModelPredictiveController(object):
             prog.addConstr(sum(d) == 1.)
             # prog.addSOS(grb.GRB.SOS_TYPE1, d, [1.]*d.size)
 
-            # stage cost to the objective
-            obj += .5 * (x.dot(self.Q).dot(x) + u.dot(self.R).dot(u))
+            # stage cost
+            obj += add_stage_cost(prog, self.Q, self.R, x, u, norm)
 
         # terminal cost
-        obj += .5 * x_next.dot(self.P).dot(x_next)
+        obj += add_terminal_cost(prog, self.P, x_next, norm)
         prog.setObjective(obj)
 
         return prog
 
-    def bild_miqp_convex_hull(self):
+    def bild_miqp_convex_hull(self, norm):
 
         # shortcuts
         [nx, nu, nm] = [self.S.nx, self.S.nu, self.S.nm]
@@ -246,20 +248,20 @@ class HybridModelPredictiveController(object):
             prog.addConstr(sum(d) == 1.)
             # prog.addSOS(grb.GRB.SOS_TYPE1, d, [1.]*d.size)
 
-            # stage cost to the objective
-            obj += .5 * (x.dot(self.Q).dot(x) + u.dot(self.R).dot(u))
+            # stage cost
+            obj += add_stage_cost(prog, self.Q, self.R, x, u, norm)
 
         # terminal constraint
         for i in range(nm):
             add_linear_inequality(prog, self.X_N.A.dot(z[i]), self.X_N.b * d[i])
 
         # terminal cost
-        obj += .5 * x_next.dot(self.P).dot(x_next)
+        obj += add_terminal_cost(prog, self.P, x_next, norm)
         prog.setObjective(obj)
 
         return prog
 
-    def build_miqp_convex_hull_lifted_constraints(self):
+    def build_miqp_convex_hull_lifted_constraints(self, norm):
 
         # shortcuts
         [nx, nu, nm] = [self.S.nx, self.S.nu, self.S.nm]
@@ -289,41 +291,77 @@ class HybridModelPredictiveController(object):
             y = [add_vars(prog, nx) for i in range(nm)]
             z = [add_vars(prog, nx) for i in range(nm)]
             v = [add_vars(prog, nu) for i in range(nm)]
-            s = add_vars(prog, nm, lb=[0.]*nm)
-            prog.update()
+
+            # slacks for the stage cost
+            if norm == 'inf':
+                sx = [add_vars(prog, 1, lb=[0.])[0] for i in range(nm)]
+                su = [add_vars(prog, 1, lb=[0.])[0] for i in range(nm)]
+                prog.update()
+                obj += sum(sx) + sum(su)
+            elif norm == 'one':
+                sx = [add_vars(prog, self.Q.shape[0], lb=[0.]*self.Q.shape[0]) for i in range(nm)]
+                su = [add_vars(prog, self.R.shape[0], lb=[0.]*self.R.shape[0]) for i in range(nm)]
+                prog.update()
+                obj += sum(sum(sxi) for sxi in sx) + sum(sum(sui) for sui in su)
+            elif norm == 'two':
+                s = [add_vars(prog, 1, lb=[0.])[0] for i in range(nm)]
+                prog.update()
+                obj += sum(s)
 
             # constrained dynamics
             for i in range(nm):
                 yvzi = np.concatenate((y[i], v[i], z[i]))
                 add_linear_inequality(prog, P[i].A.dot(yvzi), P[i].b * d[i])
 
-                # stage cost
-                if t < self.N - 1:
-                    add_rotated_socc(
-                        prog,
-                        block_diag(self.Q, self.R),
-                        np.concatenate((y[i], v[i])),
-                        s[i],
-                        d[i]
-                        )
+            # stage cost infinity norm
+            if norm == 'inf':
+                for i in range(nm):
+                    add_linear_inequality(prog,  self.Q.dot(y[i]), np.ones(self.Q.shape[0])*sx[i])
+                    add_linear_inequality(prog, -self.Q.dot(y[i]), np.ones(self.Q.shape[0])*sx[i])
+                    add_linear_inequality(prog,  self.R.dot(v[i]), np.ones(self.R.shape[0])*su[i])
+                    add_linear_inequality(prog, -self.R.dot(v[i]), np.ones(self.R.shape[0])*su[i])
+                if t == self.N - 1:
+                    sxN = [add_vars(prog, 1, lb=[0.])[0] for i in range(nm)]
+                    prog.update()
+                    obj += sum(sxN)
+                    for i in range(nm):
+                        add_linear_inequality(prog,  self.P.dot(z[i]), np.ones(self.P.shape[0])*sxN[i])
+                        add_linear_inequality(prog, -self.P.dot(z[i]), np.ones(self.P.shape[0])*sxN[i])
+                        
+            # stage cost infinity norm
+            elif norm == 'one':
+                for i in range(nm):
+                    add_linear_inequality(prog,  self.Q.dot(y[i]), sx[i])
+                    add_linear_inequality(prog, -self.Q.dot(y[i]), sx[i])
+                    add_linear_inequality(prog,  self.R.dot(v[i]), su[i])
+                    add_linear_inequality(prog, -self.R.dot(v[i]), su[i])
+                if t == self.N - 1:
+                    sxN = [add_vars(prog, self.P.shape[0], lb=[0.]*self.P.shape[0]) for i in range(nm)]
+                    prog.update()
+                    obj += sum(sum(sxNi) for sxNi in sxN)
+                    for i in range(nm):
+                        add_linear_inequality(prog,  self.P.dot(z[i]), sxN[i])
+                        add_linear_inequality(prog, -self.P.dot(z[i]), sxN[i])
 
-                # final time step
-                else:
-
-                    # terminal cost
-                    add_rotated_socc(
-                        prog,
-                        block_diag(self.Q, self.R, self.P),
-                        np.concatenate((y[i], v[i], z[i])),
-                        s[i],
-                        d[i]
-                        )
-
-                    # terminal constraint
-                    add_linear_inequality(prog, self.X_N.A.dot(z[i]), self.X_N.b * d[i])
-
-            # update cost
-            obj += sum(s)
+            # stage cost infinity norm
+            elif norm == 'two':
+                for i in range(nm):
+                    if t < self.N - 1:
+                        add_rotated_socc(
+                            prog,
+                            block_diag(self.Q, self.R),
+                            np.concatenate((y[i], v[i])),
+                            s[i],
+                            d[i]
+                            )
+                    else:
+                        add_rotated_socc(
+                            prog,
+                            block_diag(self.Q, self.R, self.P),
+                            np.concatenate((y[i], v[i], z[i])),
+                            s[i],
+                            d[i]
+                            )
 
             # recompose the state and input (convex hull method)
             add_linear_equality(prog, x, sum(y))
@@ -332,7 +370,10 @@ class HybridModelPredictiveController(object):
 
             # constraints on the binaries
             prog.addConstr(sum(d) == 1.)
-            # prog.addSOS(grb.GRB.SOS_TYPE1, d, [1.]*d.size)
+
+        # terminal constraint
+        for i in range(nm):
+            add_linear_inequality(prog, self.X_N.A.dot(z[i]), self.X_N.b * d[i])
 
         # set cost
         prog.setObjective(obj)
@@ -346,27 +387,27 @@ class HybridModelPredictiveController(object):
         self.prog.update()
 
     def _reset_initial_condition(self):
-    	for k in range(self.S.nx):
-    		self.prog.getVarByName('x0[%d]'%k).LB = -grb.GRB.INFINITY
-    		self.prog.getVarByName('x0[%d]'%k).UB = grb.GRB.INFINITY
+        for k in range(self.S.nx):
+            self.prog.getVarByName('x0[%d]'%k).LB = -grb.GRB.INFINITY
+            self.prog.getVarByName('x0[%d]'%k).UB = grb.GRB.INFINITY
 
     def set_binaries(self, identifier):
-    	'''
-    	`identifier` is a dictionary of dictionaries.
-    	`identifier[time][mode]`, if the keys exist, gives the value for d[time][mode].
-    	'''
+        '''
+        `identifier` is a dictionary of dictionaries.
+        `identifier[time][mode]`, if the keys exist, gives the value for d[time][mode].
+        '''
         self._set_type_binaries('C')
-    	self._reset_bounds_binaries()
-    	for k, v in identifier.items():
-    		self.prog.getVarByName('d%d[%d]'%k).LB = v
-    		self.prog.getVarByName('d%d[%d]'%k).UB = v
-    	self.prog.update()
+        self._reset_bounds_binaries()
+        for k, v in identifier.items():
+            self.prog.getVarByName('d%d[%d]'%k).LB = v
+            self.prog.getVarByName('d%d[%d]'%k).UB = v
+        self.prog.update()
 
     def _reset_bounds_binaries(self):
-    	for t in range(self.N):
-    		for k in range(self.S.nm):
-    			self.prog.getVarByName('d%d[%d]'%(t, k)).LB = 0.
-    			self.prog.getVarByName('d%d[%d]'%(t, k)).UB = grb.GRB.INFINITY
+        for t in range(self.N):
+            for k in range(self.S.nm):
+                self.prog.getVarByName('d%d[%d]'%(t, k)).LB = 0.
+                self.prog.getVarByName('d%d[%d]'%(t, k)).UB = grb.GRB.INFINITY
 
     def _set_type_binaries(self, d_type):
         for t in range(self.N):
@@ -390,7 +431,7 @@ class HybridModelPredictiveController(object):
         self.set_initial_condition(x0)
         if type(identifier) in [list, tuple]:
             identifier = {(t,m): 1. for t, m in enumerate(identifier)}
-    	self.set_binaries(identifier)
+        self.set_binaries(identifier)
         
         # parameters
         self.prog.setParam('OutputFlag', 0)
@@ -410,30 +451,30 @@ class HybridModelPredictiveController(object):
         if feasible:
             integer_feasible = all(np.isclose(max(dt), 1., atol=1.e-6) for dt in solution['binaries'])
         else:
-        	integer_feasible = None
+            integer_feasible = None
 
         return feasible, objective, integer_feasible, solution
 
     def explore_most_ambiguous_node(self, node):
 
-    	t = np.argmin([max(dt) - min(dt) for dt in node.solution['binaries']])
-    	free_bin_id = range(self.S.nm)
-    	[free_bin_id.remove(k[1]) for k in node.identifier.keys() if k[0] == t]
-    	free_bin_val = [node.solution['binaries'][t][i] for i in free_bin_id]
-    	free_bin_id_ordered = [free_bin_id[i] for i in np.argsort(free_bin_val)]
+        t = np.argmin([max(dt) - min(dt) for dt in node.solution['binaries']])
+        free_bin_id = range(self.S.nm)
+        [free_bin_id.remove(k[1]) for k in node.identifier.keys() if k[0] == t]
+        free_bin_val = [node.solution['binaries'][t][i] for i in free_bin_id]
+        free_bin_id_ordered = [free_bin_id[i] for i in np.argsort(free_bin_val)]
 
-    	n = len(free_bin_id)
-    	free_bin_id_1 = free_bin_id_ordered[(n+1)/2:]
-    	free_bin_id_2 = free_bin_id_ordered[:(n+1)/2]
+        n = len(free_bin_id)
+        free_bin_id_1 = free_bin_id_ordered[(n+1)/2:]
+        free_bin_id_2 = free_bin_id_ordered[:(n+1)/2]
 
-    	branch_1 = {}
-    	branch_2 = {}
-    	for i in free_bin_id_1:
-    		branch_1[(t,i)] = 0.
-    	for i in free_bin_id_2:
-    		branch_2[(t,i)] = 0.
+        branch_1 = {}
+        branch_2 = {}
+        for i in free_bin_id_1:
+            branch_1[(t,i)] = 0.
+        for i in free_bin_id_2:
+            branch_2[(t,i)] = 0.
 
-    	return [branch_1, branch_2]
+        return [branch_1, branch_2]
 
     def explore_in_chronological_order(self, node):
         t = len(node.identifier)
@@ -510,7 +551,7 @@ class HybridModelPredictiveController(object):
         return u_feedforward[0]
 
     def organize_result(self):
-    	sol = {'state': None, 'input': None, 'mode_sequence': None, 'objective': None, 'binaries': None}
+        sol = {'state': None, 'input': None, 'mode_sequence': None, 'objective': None, 'binaries': None}
         if self.prog.status in [2, 9, 11] and self.prog.SolCount > 0: # optimal, interrupted, time limit
             sol['state'] = [np.array([self.prog.getVarByName('x%d[%d]'%(t,k)).x for k in range(self.S.nx)]) for t in range(self.N+1)]
             sol['input'] = [np.array([self.prog.getVarByName('u%d[%d]'%(t,k)).x for k in range(self.S.nu)]) for t in range(self.N)]

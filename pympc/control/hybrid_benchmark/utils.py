@@ -51,10 +51,12 @@ def graph_representation(S):
         Si = S.affine_systems[i]
         Ai = np.vstack((
             np.hstack((Di.A, np.zeros((Di.A.shape[0], S.nx)))),
+            np.hstack((Di.C, np.zeros((Di.C.shape[0], S.nx)))),
+            np.hstack((-Di.C, np.zeros((Di.C.shape[0], S.nx)))),
             np.hstack((Si.A, Si.B, -np.eye(S.nx))),
             np.hstack((-Si.A, -Si.B, np.eye(S.nx))),
             ))
-        bi = np.concatenate((Di.b, -Si.c, Si.c))
+        bi = np.concatenate((Di.b, Di.d, -Di.d, -Si.c, Si.c))
         P.append(Polyhedron(Ai, bi))
     return P
 
@@ -144,6 +146,76 @@ def add_rotated_socc(prog, H, x, y, z, tol=1.e-8):
     add_linear_equality(prog, x_aux, R.dot(x))
     cons = prog.addConstr(.5 * x_aux.dot(x_aux) <= y * z),
     return cons, x_aux
+
+def add_stage_cost(prog, Q, R, x, u, norm):
+
+    # stage cost infinity norm
+    if norm == 'inf':
+
+        # add slacks
+        sx = add_vars(prog, 1, lb=[0.])[0]
+        su = add_vars(prog, 1, lb=[0.])[0]
+        prog.update()
+        obj = sx + su
+
+        # enforce infinity norm
+        add_linear_inequality(prog,  Q.dot(x), np.ones(Q.shape[0])*sx)
+        add_linear_inequality(prog, -Q.dot(x), np.ones(Q.shape[0])*sx)
+        add_linear_inequality(prog,  R.dot(u), np.ones(R.shape[0])*su)
+        add_linear_inequality(prog, -R.dot(u), np.ones(R.shape[0])*su)
+
+    # stage cost one norm
+    elif norm == 'one':
+
+        # add slacks
+        sx = add_vars(prog, Q.shape[0], lb=[0.]*Q.shape[0])
+        su = add_vars(prog, R.shape[0], lb=[0.]*R.shape[0])
+        prog.update()
+        obj = sum(sx) + sum(su)
+
+        # enforce one norm
+        add_linear_inequality(prog,  Q.dot(x), sx)
+        add_linear_inequality(prog, -Q.dot(x), sx)
+        add_linear_inequality(prog,  R.dot(u), su)
+        add_linear_inequality(prog, -R.dot(u), su)
+
+    # stage cost one norm
+    elif norm == 'two':
+        obj = .5 * (x.dot(Q).dot(x) + u.dot(R).dot(u))
+
+    return obj
+
+def add_terminal_cost(prog, P, x, norm):
+
+    # stage cost infinity norm
+    if norm == 'inf':
+
+        # add slacks
+        s = add_vars(prog, 1, lb=[0.])[0]
+        prog.update()
+        obj = s
+
+        # enforce infinity norm
+        add_linear_inequality(prog,  P.dot(x), np.ones(P.shape[0])*s)
+        add_linear_inequality(prog, -P.dot(x), np.ones(P.shape[0])*s)
+
+    # stage cost one norm
+    elif norm == 'one':
+
+        # add slacks
+        s = add_vars(prog, P.shape[0], lb=[0.]*P.shape[0])
+        prog.update()
+        obj = sum(s)
+
+        # enforce one norm
+        add_linear_inequality(prog,  P.dot(x), s)
+        add_linear_inequality(prog, -P.dot(x), s)
+
+    # stage cost one norm
+    elif norm == 'two':
+        obj = .5 * x.dot(P).dot(x)
+
+    return obj
     
 def get_constraint_set(prog):
     '''
