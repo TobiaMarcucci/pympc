@@ -255,7 +255,7 @@ class LinearSystem(object):
         return LinearSystem(A, B)
 
     @staticmethod
-    def from_symbolic_continuous(x, u, x_next, h, method='zero_order_hold'):
+    def from_symbolic_continuous(x, u, x_dot, h, method='zero_order_hold'):
         """
         Instatiates a LinearSystem starting from the symbolic value of the next state.
 
@@ -265,8 +265,8 @@ class LinearSystem(object):
             Symbolic state of the system.
         u : sympy matrix filled with sympy symbols
             Symbolic input of the system.
-        x_next : sympy matrix filled with sympy symbolic linear expressions
-            Symbolic value of the state update.
+        x_dot : sympy matrix filled with sympy symbolic linear expressions
+            Symbolic value of the state time derivative.
         h : float
             Discretization time step.
         method : str
@@ -274,7 +274,7 @@ class LinearSystem(object):
         """
 
         # state transition matrices
-        A, B, c = get_state_transition_matrices(x, u, x_next)
+        A, B, c = get_state_transition_matrices(x, u, x_dot)
 
         # check that offset setm is zero
         if not np.allclose(c, np.zeros(x.shape[0])):
@@ -409,18 +409,18 @@ class AffineSystem(object):
         return AffineSystem(*get_state_transition_matrices(x, u, x_next))
 
     @staticmethod
-    def from_symbolic_continuous(x, u, x_next, h, method='zero_order_hold'):
+    def from_symbolic_continuous(x, u, x_dot, h, method='zero_order_hold'):
         """
         Instatiates a LinearSystem starting from the symbolic value of the next state.
 
         Arguments
         ----------
         x : sympy matrix filled with sympy symbols
-            Symbolic state of the system
+            Symbolic state of the system.
         u : sympy matrix filled with sympy symbols
-            Symbolic input of the system
-        x_next : sympy matrix filled with sympy symbolic linear expressions
-            Symbolic value of the state update
+            Symbolic input of the system.
+        x_dot : sympy matrix filled with sympy symbolic linear expressions
+            Symbolic value of the state time derivative.
         h : float
             Discretization time step.
         method : str
@@ -428,7 +428,7 @@ class AffineSystem(object):
         """
 
         # get state transition matrices
-        A, B, c = get_state_transition_matrices(x, u, x_next)
+        A, B, c = get_state_transition_matrices(x, u, x_dot)
 
         return AffineSystem.from_continuous(A, B, c, h, method)
 
