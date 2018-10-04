@@ -5,9 +5,7 @@ from scipy.linalg import block_diag
 from copy import copy
 
 # internal inputs
-from pympc.control.hybrid_benchmark.utils import (graph_representation,
-                                                  big_m,
-                                                  add_vars,
+from pympc.control.hybrid_benchmark.utils import (add_vars,
                                                   add_linear_inequality,
                                                   add_linear_equality,
                                                   add_rotated_socc,
@@ -16,32 +14,31 @@ from pympc.control.hybrid_benchmark.utils import (graph_representation,
                                                   add_terminal_cost
                                                   )
 from pympc.optimization.programs import linear_program
+from build_mip_mld import bild_mip_mld
+from build_mip_bm import bild_mip_bm
+from build_mip_ch import bild_mip_ch
+from build_mip_pf import bild_mip_pf
 
 class HybridModelPredictiveController(object):
 
-    def __init__(self, S, N, Q, R, P, X_N, method='Big-M', norm='two'):
+    def __init__(self, S, N, Q, R, P, X_N, method='bm', norm='two'):
+
+        # check that all the domains are in hrep (if not use two inequalities)
+        assert max([D.d.size for D in S.domains]) == 0
 
         # store inputs
         self.S = S
         self.N = N
-        self.Q = Q
-        self.R = R
-        self.P = P
-        self.X_N = X_N
 
-        # mpMIQP
-        self.prog = self.build_mpmiqp(method, norm)
-        # self.partial_mode_sequence = []
-
-    def build_mpmiqp(self, method, norm):
-        if method == 'Traditional formulation':
-            return self.bild_miqp_bemporad_morari(norm)
-        if method == 'Big-M':
-            return self.bild_miqp_bigm(norm)
-        if method == 'Convex hull':
-            return self.bild_miqp_convex_hull(norm)
-        if method == 'Convex hull, lifted constraints':
-            return self.build_miqp_convex_hull_lifted_constraints(norm)
+        # build mixed integer program
+        if method == 'mld':
+            self.prog = bild_mip_mld(S, N, Q, R, P, X_N, norm)
+        elif method == 'bm':
+            self.prog = bild_mip_bm(S, N, Q, R, P, X_N, norm)
+        elif method == 'ch':
+            self.prog = bild_mip_ch(S, N, Q, R, P, X_N, norm)
+        elif method == 'pf':
+            self.prog = bild_mip_pf(S, N, Q, R, P, X_N, norm)
         else:
             raise ValueError('unknown method ' + method + '.')
 
@@ -49,336 +46,9 @@ class HybridModelPredictiveController(object):
 
         imss = infeasible_mode_sequences(self.S, t_max)
         for ms in imss:
+            print ms
             for t in range(self.N-len(ms)):
                 self.prog.addConstr(sum([self.prog.getVarByName('d%d[%d]'%(t+tau,m)) for tau, m in enumerate(ms)]) <= len(ms)-1.)
-
-    def bild_miqp_bemporad_morari(self, norm):
-
-        # shortcuts
-        [nx, nu, nm] = [self.S.nx, self.S.nu, self.S.nm]
-
-        # big-M dynamics
-        alpha = []
-        beta = []
-        for i, S_i in enumerate(self.S.affine_systems):
-            alpha_i = []
-            beta_i = []
-            A_i = np.hstack((S_i.A, S_i.B))
-            for j, S_j in enumerate(self.S.affine_systems):
-                alpha_ij = []
-                beta_ij = []
-                D_j = self.S.domains[j]
-                for k in range(S_i.nx):
-                    sol = linear_program(A_i[k], D_j.A, D_j.b, D_j.C, D_j.d)
-                    alpha_ij.append(sol['min'] + S_i.c[k])
-                    sol = linear_program(-A_i[k], D_j.A, D_j.b, D_j.C, D_j.d)
-                    beta_ij.append(- sol['min'] + S_i.c[k])
-                alpha_i.append(np.array(alpha_ij))
-                beta_i.append(np.array(beta_ij))
-            alpha.append(alpha_i)
-            beta.append(beta_i)
-        alpha = np.minimum.reduce([np.minimum.reduce(alpha_i) for alpha_i in alpha])
-        beta = np.maximum.reduce([np.maximum.reduce(beta_i) for beta_i in beta])
-
-        # big-M domains
-        gamma = []
-        for i, D_i in enumerate(self.S.domains):
-            gamma_i = []
-            for j, D_j in enumerate(self.S.domains):
-                gamma_ij = []
-                for k in range(D_i.A.shape[0]):
-                    sol = linear_program(-D_i.A[k], D_j.A, D_j.b, D_j.C, D_j.d)
-                    gamma_ij.append(- sol['min'] - D_i.b[k])
-                gamma_i.append(np.array(gamma_ij))
-            gamma.append(gamma_i)
-        gamma = [np.maximum.reduce(gamma_i) for gamma_i in gamma]
-
-        # initialize program
-        prog = grb.Model()
-        obj = 0.
-
-        # loop over the time horizon
-        for t in range(self.N):
-
-            # initial conditions
-            if t == 0:
-                x = add_vars(prog, nx, name='x0')
-
-            # stage variables
-            else:
-                x = x_next
-            x_next = add_vars(prog, nx, name='x%d'%(t+1))
-            z = [add_vars(prog, nx) for i in range(nm)]
-            u = add_vars(prog, nu, name='u%d'%t)
-            d = add_vars(prog, nm, lb=[0.]*nm, name='d%d'%t)
-            prog.update()
-
-            # constrained dynamics
-            add_linear_equality(prog, x_next, sum(z))
-            xu = np.concatenate((x, u))
-            for i in range(nm):
-                Ai = self.S.affine_systems[i].A
-                Bi = self.S.affine_systems[i].B
-                ci = self.S.affine_systems[i].c
-                dyn_i = Ai.dot(x) + Bi.dot(u) + ci
-                add_linear_inequality(prog, alpha*d[i], z[i])
-                add_linear_inequality(prog, z[i], beta*d[i])
-                add_linear_inequality(prog, alpha*(1.-d[i]), dyn_i - z[i])
-                add_linear_inequality(prog, dyn_i - z[i], beta*(1.-d[i]))
-                add_linear_inequality(prog, self.S.domains[i].A.dot(xu), self.S.domains[i].b + gamma[i]*(1.-d[i]))
-
-            # constraints on the binaries
-            prog.addConstr(sum(d) == 1.)
-            # prog.addSOS(d, [1.]*nm, grb.GRB.SOS_TYPE1)
-
-            # stage cost
-            obj += add_stage_cost(prog, self.Q, self.R, x, u, norm)
-
-        # terminal constraint
-        add_linear_inequality(prog, self.X_N.A.dot(x_next), self.X_N.b)
-
-        # terminal cost
-        obj += add_terminal_cost(prog, self.P, x_next, norm)
-        prog.setObjective(obj)
-
-        return prog
-
-    def bild_miqp_bigm(self, norm):
-
-        # shortcuts
-        [nx, nu, nm] = [self.S.nx, self.S.nu, self.S.nm]
-
-        # graph of the dynamics and big-Ms
-        P = graph_representation(self.S)
-        m = big_m(P)
-
-        # graph of the dynamics and big-Ms, final stage
-        P_N = [copy(Pi) for Pi in P]
-        [Pi.add_inequality(self.X_N.A, self.X_N.b, range(nx+nu, 2*nx+nu)) for Pi in P_N]
-        m_N = big_m(P_N)
-        P_N_indices = [i for i, Pi in enumerate(P_N) if not Pi.empty]
-        # m_N = big_m([P_N[i] for i in P_N_indices])
-
-        # initialize program
-        prog = grb.Model()
-        obj = 0.
-
-        # loop over the time horizon
-        for t in range(self.N):
-
-            # initial conditions
-            if t == 0:
-                x = add_vars(prog, nx, name='x0')
-
-            # stage variables
-            else:
-                x = x_next
-            x_next = add_vars(prog, nx, name='x%d'%(t+1))
-            u = add_vars(prog, nu, name='u%d'%t)
-            d = add_vars(prog, nm, lb=[0.]*nm, name='d%d'%t)
-            prog.update()
-
-            # constrained dynamics
-            xux = np.concatenate((x, u, x_next))
-            if t < self.N-1:
-                for i in range(nm):
-                    sum_mi = sum(m[i][j] * d[j] for j in range(nm) if j != i)
-                    add_linear_inequality(prog, P[i].A.dot(xux), P[i].b + sum_mi)
-            else:
-                for i in P_N_indices:
-                    sum_mi = sum(m_N[i][j] * d[j] for j in P_N_indices if j != i)
-                    add_linear_inequality(prog, P_N[i].A.dot(xux), P_N[i].b + sum_mi)
-
-            # constraints on the binaries
-            prog.addConstr(sum(d) == 1.)
-            # prog.addSOS(grb.GRB.SOS_TYPE1, d, [1.]*d.size)
-
-            # stage cost
-            obj += add_stage_cost(prog, self.Q, self.R, x, u, norm)
-
-        # terminal cost
-        obj += add_terminal_cost(prog, self.P, x_next, norm)
-        prog.setObjective(obj)
-
-        return prog
-
-    def bild_miqp_convex_hull(self, norm):
-
-        # shortcuts
-        [nx, nu, nm] = [self.S.nx, self.S.nu, self.S.nm]
-
-        # graph of the dynamics
-        P = graph_representation(self.S)
-
-        # initialize program
-        prog = grb.Model()
-        obj = 0.
-
-        # loop over the time horizon
-        for t in range(self.N):
-
-            # initial conditions
-            if t == 0:
-                x = add_vars(prog, nx, name='x0')
-
-            # stage variables
-            else:
-                x = x_next
-            x_next = add_vars(prog, nx, name='x%d'%(t+1))
-            u = add_vars(prog, nu, name='u%d'%t)
-            d = add_vars(prog, nm, lb=[0.]*nm, name='d%d'%t)
-
-            # auxiliary continuous variables for the convex-hull method
-            y = [add_vars(prog, nx) for i in range(nm)]
-            z = [add_vars(prog, nx) for i in range(nm)]
-            v = [add_vars(prog, nu) for i in range(nm)]
-            prog.update()
-
-            # constrained dynamics
-            for i in range(nm):
-                yvzi = np.concatenate((y[i], v[i], z[i]))
-                add_linear_inequality(prog, P[i].A.dot(yvzi), P[i].b * d[i])
-
-            # recompose the state and input (convex hull method)
-            add_linear_equality(prog, x, sum(y))
-            add_linear_equality(prog, x_next, sum(z))
-            add_linear_equality(prog, u, sum(v))
-
-            # constraints on the binaries
-            prog.addConstr(sum(d) == 1.)
-            # prog.addSOS(grb.GRB.SOS_TYPE1, d, [1.]*d.size)
-
-            # stage cost
-            obj += add_stage_cost(prog, self.Q, self.R, x, u, norm)
-
-        # terminal constraint
-        for i in range(nm):
-            add_linear_inequality(prog, self.X_N.A.dot(z[i]), self.X_N.b * d[i])
-
-        # terminal cost
-        obj += add_terminal_cost(prog, self.P, x_next, norm)
-        prog.setObjective(obj)
-
-        return prog
-
-    def build_miqp_convex_hull_lifted_constraints(self, norm):
-
-        # shortcuts
-        [nx, nu, nm] = [self.S.nx, self.S.nu, self.S.nm]
-
-        # graph of the dynamics
-        P = graph_representation(self.S)
-
-        # initialize program
-        prog = grb.Model()
-        obj = 0.
-        
-        # loop over time
-        for t in range(self.N):
-
-            # initial conditions
-            if t == 0:
-                x = add_vars(prog, nx, name='x0')
-
-            # stage variables
-            else:
-                x = x_next
-            x_next = add_vars(prog, nx, name='x%d'%(t+1))
-            u = add_vars(prog, nu, name='u%d'%t)
-            d = add_vars(prog, nm, lb=[0.]*nm, name='d%d'%t)
-
-            # auxiliary continuous variables for the improved convex-hull method
-            y = [add_vars(prog, nx) for i in range(nm)]
-            z = [add_vars(prog, nx) for i in range(nm)]
-            v = [add_vars(prog, nu) for i in range(nm)]
-
-            # slacks for the stage cost
-            if norm == 'inf':
-                sx = [add_vars(prog, 1, lb=[0.])[0] for i in range(nm)]
-                su = [add_vars(prog, 1, lb=[0.])[0] for i in range(nm)]
-                prog.update()
-                obj += sum(sx) + sum(su)
-            elif norm == 'one':
-                sx = [add_vars(prog, self.Q.shape[0], lb=[0.]*self.Q.shape[0]) for i in range(nm)]
-                su = [add_vars(prog, self.R.shape[0], lb=[0.]*self.R.shape[0]) for i in range(nm)]
-                prog.update()
-                obj += sum(sum(sxi) for sxi in sx) + sum(sum(sui) for sui in su)
-            elif norm == 'two':
-                s = [add_vars(prog, 1, lb=[0.])[0] for i in range(nm)]
-                prog.update()
-                obj += sum(s)
-
-            # constrained dynamics
-            for i in range(nm):
-                yvzi = np.concatenate((y[i], v[i], z[i]))
-                add_linear_inequality(prog, P[i].A.dot(yvzi), P[i].b * d[i])
-
-            # stage cost infinity norm
-            if norm == 'inf':
-                for i in range(nm):
-                    add_linear_inequality(prog,  self.Q.dot(y[i]), np.ones(self.Q.shape[0])*sx[i])
-                    add_linear_inequality(prog, -self.Q.dot(y[i]), np.ones(self.Q.shape[0])*sx[i])
-                    add_linear_inequality(prog,  self.R.dot(v[i]), np.ones(self.R.shape[0])*su[i])
-                    add_linear_inequality(prog, -self.R.dot(v[i]), np.ones(self.R.shape[0])*su[i])
-                if t == self.N - 1:
-                    sxN = [add_vars(prog, 1, lb=[0.])[0] for i in range(nm)]
-                    prog.update()
-                    obj += sum(sxN)
-                    for i in range(nm):
-                        add_linear_inequality(prog,  self.P.dot(z[i]), np.ones(self.P.shape[0])*sxN[i])
-                        add_linear_inequality(prog, -self.P.dot(z[i]), np.ones(self.P.shape[0])*sxN[i])
-                        
-            # stage cost infinity norm
-            elif norm == 'one':
-                for i in range(nm):
-                    add_linear_inequality(prog,  self.Q.dot(y[i]), sx[i])
-                    add_linear_inequality(prog, -self.Q.dot(y[i]), sx[i])
-                    add_linear_inequality(prog,  self.R.dot(v[i]), su[i])
-                    add_linear_inequality(prog, -self.R.dot(v[i]), su[i])
-                if t == self.N - 1:
-                    sxN = [add_vars(prog, self.P.shape[0], lb=[0.]*self.P.shape[0]) for i in range(nm)]
-                    prog.update()
-                    obj += sum(sum(sxNi) for sxNi in sxN)
-                    for i in range(nm):
-                        add_linear_inequality(prog,  self.P.dot(z[i]), sxN[i])
-                        add_linear_inequality(prog, -self.P.dot(z[i]), sxN[i])
-
-            # stage cost infinity norm
-            elif norm == 'two':
-                for i in range(nm):
-                    if t < self.N - 1:
-                        add_rotated_socc(
-                            prog,
-                            block_diag(self.Q, self.R),
-                            np.concatenate((y[i], v[i])),
-                            s[i],
-                            d[i]
-                            )
-                    else:
-                        add_rotated_socc(
-                            prog,
-                            block_diag(self.Q, self.R, self.P),
-                            np.concatenate((y[i], v[i], z[i])),
-                            s[i],
-                            d[i]
-                            )
-
-            # recompose the state and input (convex hull method)
-            add_linear_equality(prog, x, sum(y))
-            add_linear_equality(prog, x_next, sum(z))
-            add_linear_equality(prog, u, sum(v))
-
-            # constraints on the binaries
-            prog.addConstr(sum(d) == 1.)
-
-        # terminal constraint
-        for i in range(nm):
-            add_linear_inequality(prog, self.X_N.A.dot(z[i]), self.X_N.b * d[i])
-
-        # set cost
-        prog.setObjective(obj)
-
-        return prog
 
     def set_initial_condition(self, x0):
         for k in range(self.S.nx):
@@ -481,48 +151,6 @@ class HybridModelPredictiveController(object):
         branches = [{(t,mode): 1.} for mode in np.argsort(node.solution['binaries'][t])]
         return branches
 
-    # def update_mode_sequence(self, partial_mode_sequence):
-
-    #     # loop over the time horizon
-    #     for t in range(self.N):
-
-    #         # earse and write
-    #         if t < len(partial_mode_sequence) and t < len(self.partial_mode_sequence):
-    #             if partial_mode_sequence[t] != self.partial_mode_sequence[t]:
-    #                 self.prog.getVarByName('d%d[%d]'%(t,self.partial_mode_sequence[t])).LB = 0.
-    #                 self.prog.getVarByName('d%d[%d]'%(t,partial_mode_sequence[t])).LB = 1.
-
-    #         # erase only
-    #         elif t >= len(partial_mode_sequence) and t < len(self.partial_mode_sequence):
-    #             self.prog.getVarByName('d%d[%d]'%(t,self.partial_mode_sequence[t])).LB = 0.
-
-    #         # write only
-    #         elif t < len(partial_mode_sequence) and t >= len(self.partial_mode_sequence):
-    #             self.prog.getVarByName('d%d[%d]'%(t,partial_mode_sequence[t])).LB = 1.
-
-    #     # update partial mode sequence
-    #     self.partial_mode_sequence = partial_mode_sequence
-
-    # def feedforward_relaxation(self, x0, partial_mode_sequence):
-
-    #     # reset program
-    #     self.prog.reset()
-
-    #     # set up miqp
-    #     self.set_type_auxliaries('C')
-    #     self.update_mode_sequence(partial_mode_sequence)
-    #     self.set_initial_condition(x0)
-
-    #     # parameters
-    #     self.prog.setParam('OutputFlag', 0)
-    #     self.prog.setParam('Method', 0)
-    #     self.prog.setParam('BarConvTol', 1.e-8)
-
-    #     # run the optimization
-    #     self.prog.optimize()
-
-    #     return self.organize_result()
-
     def feedforward(self, x0):
 
         # reset program
@@ -534,8 +162,7 @@ class HybridModelPredictiveController(object):
         self.set_initial_condition(x0)
 
         # parameters
-        self.prog.setParam('OutputFlag', 1)
-        # self.prog.setParam('Threads', 0)
+        self.prog.setParam('OutputFlag', 0)
 
         # run the optimization
         self.prog.optimize()
