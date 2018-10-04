@@ -582,6 +582,53 @@ class PieceWiseAffineSystem(object):
 
         return True
 
+    def condense_stages(self, N):
+
+        # initialize condensed pwa system
+        pwa = copy(self)
+
+        # loop over stages
+        for t in range(1, N):
+
+            # initialize domains and affine dynamics of the condensed pwa
+            domains = []
+            affine_systems = []
+
+            # consider all the possible combination of modes
+            for i in range(pwa.nm):
+                for j in range(self.nm):
+
+                    # shortcuts
+                    s1 = pwa.affine_systems[i]
+                    s2 = self.affine_systems[j]
+                    d1 = pwa.domains[i]
+                    d2 = self.domains[j]
+                    F2 = d2.A[:,:pwa.nx]
+                    G2 = d2.A[:,pwa.nx:]
+
+                    # condense domains
+                    A = np.vstack((
+                        np.hstack((d1.A, np.zeros((d1.A.shape[0], self.nu)))),
+                        np.hstack((F2.dot(s1.A), F2.dot(s1.B), G2))
+                        ))
+                    b = np.concatenate((d1.b, d2.b - F2.dot(s1.c)))
+                    domain = Polyhedron(A, b)
+
+                    # add the mode to the condensed system if feasible
+                    if not domain.empty:
+                        domains.append(domain)
+
+                        # condense dynamics
+                        A = s2.A.dot(s1.A)
+                        B = np.hstack((s2.A.dot(s1.B), s2.B))
+                        c = s2.c + s2.A.dot(s1.c)
+                        affine_systems.append(AffineSystem(A, B, c))
+
+            # new condensed pwa system
+            pwa = PieceWiseAffineSystem(affine_systems, domains)
+
+        return pwa
+
 def mcais(A, X, verbose=False):
     """
     Returns the maximal constraint-admissible (positive) invariant set O_inf for the system x(t+1) = A x(t) subject to the constraint x in X.
