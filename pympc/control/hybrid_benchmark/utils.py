@@ -19,11 +19,11 @@ def add_vars(prog, n, lb=None, **kwargs):
 
 def add_linear_inequality(prog, x, y):
     assert x.size == y.size
-    return [prog.addConstr(x[k] <= y[k]) for k in range(x.size)]
+    return [prog.addConstr(x[k] - y[k] <= 0.) for k in range(x.size)] # sometimes x is a vector of floats: gurobi raises errors if variables are not in the lhs
 
 def add_linear_equality(prog, x, y):
     assert x.size == y.size
-    return [prog.addConstr(x[k] == y[k]) for k in range(x.size)]
+    return [prog.addConstr(x[k] - y[k] == 0.) for k in range(x.size)] # sometimes x is a vector of floats: gurobi raises errors if variables are not in the lhs
 
 def add_stage_cost(prog, Q, R, x, u, norm):
 
