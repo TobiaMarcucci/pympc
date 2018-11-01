@@ -105,13 +105,6 @@ def add_rotated_socc(prog, H, x, y, z, tol=1.e-8):
     cons = prog.addConstr(.5 * x_aux.dot(x_aux) <= y * z),
     return cons, x_aux
 
-
-
-
-
-
-##########################
-
 def get_constraint_set(prog):
     '''
     Returns the linear constraints of prog in the form A x < = b.
@@ -121,13 +114,17 @@ def get_constraint_set(prog):
     v_id = {v: i for i, v in enumerate(vs)}
     nv = len(vs)
     P = Polyhedron(np.zeros((0, nv)), np.zeros(0))
+    print 'Getting constraint set:'
     for i, v in enumerate(vs):
+        print('Variable %d on %d\r' % (i,nv)),
         if v.getAttr(grb.GRB.Attr.LB) != -grb.GRB.INFINITY:
             P.add_lower_bound(v.getAttr(grb.GRB.Attr.LB), [i])
         if v.getAttr(grb.GRB.Attr.UB) != grb.GRB.INFINITY:
             P.add_upper_bound(v.getAttr(grb.GRB.Attr.UB), [i])
     cs = prog.getConstrs()
+    nc = len(cs)
     for i, c in enumerate(cs):
+        print('Constraint %d on %d\r' % (i,nc)),
         expr = prog.getRow(c)
         Ai = np.zeros((1, nv))
         for j in range(expr.size()):
@@ -178,38 +175,27 @@ def is_included(l1, l2):
             return True
     return False
 
-def infeasible_mode_sequences(PWA, t_max):
+def feasible_mode_sequences(S, T, tol=1.e-7):
+    '''
+    For the piecewise affine system S returns the feasible and
+    infeasible modesequences for a time window of T time steps.
+    '''
+    fmss = []
     imss = []
-    for t in range(1, t_max):
-        for ms in product(*[range(PWA.nm)]*(t+1)):
+    for t in range(T):
+        for ms in product(*[range(S.nm)]*(t+1)):
             if not any(is_included(ims, ms) for ims in imss):
-                F_c = block_diag(*[PWA.domains[m].A[:,:PWA.nx] for m in ms])
-                G_c = block_diag(*[PWA.domains[m].A[:,PWA.nx:] for m in ms])
-                h_c = np.concatenate([PWA.domains[m].b for m in ms])
-                A_c, B_c, c_c = [M[:-PWA.nx] for M in PWA.condense(ms)]
+                F_c = block_diag(*[S.domains[m].A[:,:S.nx] for m in ms])
+                G_c = block_diag(*[S.domains[m].A[:,S.nx:] for m in ms])
+                h_c = np.concatenate([S.domains[m].b for m in ms])
+                A_c, B_c, c_c = [M[:-S.nx] for M in S.condense(ms)]
                 lhs = np.hstack((G_c + F_c.dot(B_c), F_c.dot(A_c)))
                 rhs = h_c - F_c.dot(c_c)
                 fs = Polyhedron(lhs, rhs)
                 if fs.empty:
                     imss.append(ms)
-    return imss
-
-
-def read_gurobi_status(status):
-    return {
-        1: 'loaded', # Model is loaded, but no solution information is available.'
-        2: 'optimal',   # Model was solved to optimality (subject to tolerances), and an optimal solution is available.
-        3: 'infeasible', # Model was proven to be infeasible.
-        4: 'inf_or_unbd', # Model was proven to be either infeasible or unbounded. To obtain a more definitive conclusion, set the DualReductions parameter to 0 and reoptimize.
-        5: 'unbounded', # Model was proven to be unbounded. Important note: an unbounded status indicates the presence of an unbounded ray that allows the objective to improve without limit. It says nothing about whether the model has a feasible solution. If you require information on feasibility, you should set the objective to zero and reoptimize.
-        6: 'cutoff', # Optimal objective for model was proven to be worse than the value specified in the Cutoff parameter. No solution information is available. (Note: problem might also be infeasible.)
-        7: 'iteration_limit', # Optimization terminated because the total number of simplex iterations performed exceeded the value specified in the IterationLimit parameter, or because the total number of barrier iterations exceeded the value specified in the BarIterLimit parameter.
-        8: 'node_limit', # Optimization terminated because the total number of branch-and-cut nodes explored exceeded the value specified in the NodeLimit parameter.
-        9: 'time_limit', # Optimization terminated because the time expended exceeded the value specified in the TimeLimit parameter.
-        10: 'solution_limit', # Optimization terminated because the number of solutions found reached the value specified in the SolutionLimit parameter.
-        11: 'interrupted', # Optimization was terminated by the user.
-        12: 'numeric', # Optimization was terminated due to unrecoverable numerical difficulties.
-        13: 'suboptimal', # Unable to satisfy optimality tolerances; a sub-optimal solution is available.
-        14: 'in_progress', # An asynchronous optimization call was made, but the associated optimization run is not yet complete.
-        15: 'user_obj_limit' # User specified an objective limit (a bound on either the best objective or the best bound), and that limit has been reached.
-        }[status]
+                elif fs.radius < tol:
+                    imss.append((ms, fs.radius))
+                elif t == T-1:
+                    fmss.append((ms, fs.radius))
+    return fmss, imss

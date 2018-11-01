@@ -485,6 +485,114 @@ class PieceWiseAffineSystem(object):
         self.domains = domains
         self.nm = len(affine_systems)
 
+    def condense_stages(self, T, tol=1.e-7):
+
+        # initialize condensed pwa system
+        A_list = [Si.A for Si in self.affine_systems]
+        B_list = [Si.B for Si in self.affine_systems]
+        c_list = [Si.c for Si in self.affine_systems]
+        F_list = [Di.A[:,:self.nx] for Di in self.domains]
+        G_list = [Di.A[:,self.nx:] for Di in self.domains]
+        h_list = [Di.b for Di in self.domains]
+        nm = self.nm
+        
+        # loop over stages
+        for t in range(1, T):
+            nm = 0
+
+            # initialize domains and affine dynamics of the condensed pwa
+            A_list_t = []
+            B_list_t = []
+            c_list_t = []
+            F_list_t = []
+            G_list_t = []
+            h_list_t = []
+
+            # consider all the possible combination of modes
+            for i in range(len(A_list)):
+                for j in range(self.nm):
+
+                    # shortcuts
+                    Ai = A_list[i]
+                    Bi = B_list[i]
+                    ci = c_list[i]
+                    Fi = F_list[i]
+                    Gi = G_list[i]
+                    hi = h_list[i]
+                    Sj = self.affine_systems[j]
+                    Fj = self.domains[j].A[:,:self.nx]
+                    Gj = self.domains[j].A[:,self.nx:]
+                    hj = self.domains[j].b
+                    
+                    # condense domains
+                    Fij = np.vstack((Fi, Fj.dot(Ai[-self.nx:,:])))
+                    Gij = np.vstack((
+                        np.hstack((Gi, np.zeros((Gi.shape[0], Gj.shape[1])))),
+                        np.hstack((Fj.dot(Bi[-self.nx:,:]), Gj))
+                    ))
+                    hij = np.concatenate((hi, hj - Fj.dot(ci[-self.nx:])))
+                    Dij = Polyhedron(np.hstack((Fij, Gij)), hij)
+                    
+                    # add the mode to the condensed system if feasible
+                    if not Dij.empty and Dij.radius > tol:
+                        nm += 1
+                    
+                        # condense dynamics
+                        Aij = np.vstack((Ai, Sj.A.dot(Ai[-self.nx:,:])))
+                        Bij = np.vstack((
+                            np.hstack((Bi, np.zeros((Bi.shape[0], Sj.nu)))),
+                            np.hstack((Sj.A.dot(Bi[-self.nx:,:]), Sj.B))
+                        ))
+                        cij = np.concatenate((ci, Sj.A.dot(ci[-self.nx:]) + Sj.c))
+                        
+                        # update list
+                        A_list_t.append(Aij)
+                        B_list_t.append(Bij)
+                        c_list_t.append(cij)
+                        F_list_t.append(Fij)
+                        G_list_t.append(Gij)
+                        h_list_t.append(hij)
+                        
+            A_list = A_list_t
+            B_list = B_list_t
+            c_list = c_list_t
+            F_list = F_list_t
+            G_list = G_list_t
+            h_list = h_list_t
+            
+        A_list_augmented = []
+        for A in A_list:
+            A_list_augmented.append(
+                np.hstack((np.zeros((A.shape[0], self.nx*(T-1))), A))
+            )
+
+        FG_list_augmented = []
+        for i, F in enumerate(F_list):
+            G = G_list[i]
+            FG_list_augmented.append(
+                np.hstack((
+                    np.zeros((F.shape[0], self.nx*(T-1))),
+                    F,
+                    G,
+                ))
+            )
+  
+        affine_systems = [
+            AffineSystem(
+                A_list_augmented[i],
+                B_list[i],
+                c_list[i]
+            ) for i in range(nm)
+        ]
+        domains = [
+            Polyhedron(
+                FG_list_augmented[i],
+                h_list[i]
+            ) for i in range(nm)
+        ]
+
+        return PieceWiseAffineSystem(affine_systems, domains)
+
     def condense(self, mode_sequence):
         """
         See the documentation of condense_pwa_system().
@@ -582,53 +690,52 @@ class PieceWiseAffineSystem(object):
 
         return True
 
-    def condense_stages(self, N):
+    # def condense_stages(self, N):
 
-        # initialize condensed pwa system
-        pwa = copy(self)
+    #     # initialize condensed pwa system
+    #     pwa = copy(self)
 
-        # loop over stages
-        for t in range(1, N):
+    #     # loop over stages
+    #     for t in range(1, N):
 
-            # initialize domains and affine dynamics of the condensed pwa
-            domains = []
-            affine_systems = []
+    #         # initialize domains and affine dynamics of the condensed pwa
+    #         domains = []
+    #         affine_systems = []
 
-            # consider all the possible combination of modes
-            for i in range(pwa.nm):
-                for j in range(self.nm):
+    #         # consider all the possible combination of modes
+    #         for i in range(pwa.nm):
+    #             for j in range(self.nm):
 
-                    # shortcuts
-                    s1 = pwa.affine_systems[i]
-                    s2 = self.affine_systems[j]
-                    d1 = pwa.domains[i]
-                    d2 = self.domains[j]
-                    F2 = d2.A[:,:pwa.nx]
-                    G2 = d2.A[:,pwa.nx:]
+    #                 # shortcuts
+    #                 Si = pwa.affine_systems[i]
+    #                 Sj = self.affine_systems[j]
+    #                 Di = pwa.domains[i]
+    #                 Dj = self.domains[j]
+    #                 Fj = Dj.A[:,:pwa.nx]
+    #                 Gj = Dj.A[:,pwa.nx:]
 
-                    # condense domains
-                    A = np.vstack((
-                        np.hstack((d1.A, np.zeros((d1.A.shape[0], self.nu)))),
-                        np.hstack((F2.dot(s1.A), F2.dot(s1.B), G2))
-                        ))
-                    b = np.concatenate((d1.b, d2.b - F2.dot(s1.c)))
-                    domain = Polyhedron(A, b)
+    #                 # condense domains
+    #                 A = np.vstack((
+    #                     np.hstack((Di.A, np.zeros((Di.A.shape[0], self.nu)))),
+    #                     np.hstack((Fj.dot(Si.A), Fj.dot(Si.B), Gj))
+    #                     ))
+    #                 b = np.concatenate((Di.b, Dj.b - Fj.dot(Si.c)))
+    #                 Dij = Polyhedron(A, b)
 
-                    # add the mode to the condensed system if feasible
-                    if not domain.empty:
-                        domains.append(domain)
+    #                 # add the mode to the condensed system if feasible
+    #                 if not Dij.empty:
+    #                     domains.append(Dij)
 
-                        # condense dynamics
-                        A = s2.A.dot(s1.A)
-                        B = np.hstack((s2.A.dot(s1.B), s2.B))
-                        c = s2.c + s2.A.dot(s1.c)
-                        affine_systems.append(AffineSystem(A, B, c))
+    #                     # condense dynamics
+    #                     A = Sj.A.dot(Si.A)
+    #                     B = np.hstack((Sj.A.dot(Si.B), Sj.B))
+    #                     c = Sj.c + Sj.A.dot(Si.c)
+    #                     affine_systems.append(AffineSystem(A, B, c))
 
-            # new condensed pwa system
-            pwa = PieceWiseAffineSystem(affine_systems, domains)
+    #         # new condensed pwa system
+    #         pwa = PieceWiseAffineSystem(affine_systems, domains)
 
-        return pwa
-
+    #     return pwa
 def mcais(A, X, verbose=False):
     """
     Returns the maximal constraint-admissible (positive) invariant set O_inf for the system x(t+1) = A x(t) subject to the constraint x in X.
