@@ -63,7 +63,7 @@ def bild_mip_mld(S, N, Q, R, P, X_N, norm):
         # reconstruct state and binaries
         add_linear_equality(prog, x_next, sum(z))
         prog.addConstr(sum(d) == 1.)
-        # prog.addSOS(d, [1.]*nm, grb.GRB.SOS_TYPE1)
+        # prog.addSOS(grb.GRB.SOS_TYPE1, d, [1.]*d.size)
 
         # stage cost
         obj += add_stage_cost(prog, Q, R, x, u, norm)

@@ -32,7 +32,8 @@ class HybridModelPredictiveController(object):
 
         # build micp
         prog = bild_mip_pf(x0, self.S, self.N, self.Q, self.R, self.P, self.X_N, self.norm)
-        prog.setParam('OutputFlag', 0)
+        prog.setParam('OutputFlag', 1)
+        prog.setParam('TimeLimit', 3600)
 
         # run the optimization
         prog.optimize()

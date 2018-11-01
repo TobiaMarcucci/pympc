@@ -59,7 +59,6 @@ def bild_mip_ch(S, N, Q, R, P, X_N, norm):
 
         # constraints on the binaries
         prog.addConstr(sum(d) == 1.)
-        # prog.addSOS(grb.GRB.SOS_TYPE1, d, [1.]*d.size)
 
         # stage cost
         obj += add_stage_cost(prog, Q, R, x, u, norm)
@@ -73,11 +72,3 @@ def bild_mip_ch(S, N, Q, R, P, X_N, norm):
     prog.setObjective(obj)
 
     return prog
-
-# def set_initial_condition(prog, x0):
-#     for i in range(nm):
-#         v0i = np.array([prog.getVarByName('v_0_%d[%d]'%(i,k)) for k in range(nu)])
-#         z0i = np.array([prog.getVarByName('z_0_%d[%d]'%(i,k)) for k in range(nx)])
-#         d0i = prog.getVarByName('d_0[%d]'%i)
-#         add_linear_equality(Si.B.dot(v0i) - z0i, - d0i * (Si.c + Si.A.dot(x0)))
-#         add_linear_inequality(Gi.dot(v0i), d0i * (hi - SFi.dot(x0)))

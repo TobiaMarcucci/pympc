@@ -87,7 +87,7 @@ def bild_mip_pf(S, N, Q, R, P, X_N, norm):
                     add_linear_inequality(prog,  P.dot(z[i]), np.ones(P.shape[0]) * sxN[i])
                     add_linear_inequality(prog, -P.dot(z[i]), np.ones(P.shape[0]) * sxN[i])
                     
-        # stage cost infinity norm
+        # stage cost one norm
         elif norm == 'one':
             for i in range(nm):
                 add_linear_inequality(prog,  Q.dot(y[i]), sx[i])
@@ -95,7 +95,7 @@ def bild_mip_pf(S, N, Q, R, P, X_N, norm):
                 add_linear_inequality(prog,  R.dot(v[i]), su[i])
                 add_linear_inequality(prog, -R.dot(v[i]), su[i])
 
-            # stage cost one norm
+            # terminal cost one norm
             if t == N - 1:
                 sxN = [add_vars(prog, P.shape[0], lb=[0.]*P.shape[0]) for i in range(nm)]
                 obj += sum(sum(sxN))
@@ -103,7 +103,7 @@ def bild_mip_pf(S, N, Q, R, P, X_N, norm):
                     add_linear_inequality(prog,  P.dot(z[i]), sxN[i])
                     add_linear_inequality(prog, -P.dot(z[i]), sxN[i])
 
-        # stage cost infinity norm
+        # stage cost two norm
         elif norm == 'two':
             for i in range(nm):
                 if t < N - 1:
@@ -111,7 +111,7 @@ def bild_mip_pf(S, N, Q, R, P, X_N, norm):
                     yvi = np.concatenate((y[i], v[i]))
                     add_rotated_socc(prog, QR, yvi, s[i], d[i])
 
-                # stage cost two norm
+                # terminal cost two norm
                 else:
                     QRP = block_diag(Q, R, P)
                     yvzi = np.concatenate((y[i], v[i], z[i]))
@@ -124,7 +124,6 @@ def bild_mip_pf(S, N, Q, R, P, X_N, norm):
 
         # constraints on the binaries
         prog.addConstr(sum(d) == 1.)
-        # prog.addSOS(grb.GRB.SOS_TYPE1, d, [1.]*d.size)
 
     # terminal constraint
     for i in range(nm):

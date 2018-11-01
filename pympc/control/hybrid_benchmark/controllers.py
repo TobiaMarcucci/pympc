@@ -9,7 +9,6 @@ from pympc.control.hybrid_benchmark.utils import (add_vars,
                                                   add_linear_inequality,
                                                   add_linear_equality,
                                                   add_rotated_socc,
-                                                  infeasible_mode_sequences,
                                                   add_stage_cost,
                                                   add_terminal_cost
                                                   )
@@ -21,7 +20,7 @@ from build_mip_pf import bild_mip_pf
 
 class HybridModelPredictiveController(object):
 
-    def __init__(self, S, N, Q, R, P, X_N, method='bm', norm='two'):
+    def __init__(self, S, N, Q, R, P, X_N, method='BM', norm='two'):
 
         # check that all the domains are in hrep (if not use two inequalities)
         assert max([D.d.size for D in S.domains]) == 0
@@ -31,24 +30,16 @@ class HybridModelPredictiveController(object):
         self.N = N
 
         # build mixed integer program
-        if method == 'mld':
+        if method == 'MLD':
             self.prog = bild_mip_mld(S, N, Q, R, P, X_N, norm)
-        elif method == 'bm':
+        elif method == 'BM':
             self.prog = bild_mip_bm(S, N, Q, R, P, X_N, norm)
-        elif method == 'ch':
+        elif method == 'CH':
             self.prog = bild_mip_ch(S, N, Q, R, P, X_N, norm)
-        elif method == 'pf':
+        elif method == 'PF':
             self.prog = bild_mip_pf(S, N, Q, R, P, X_N, norm)
         else:
             raise ValueError('unknown method ' + method + '.')
-
-    def add_reachability_constraints(self, t_max):
-
-        imss = infeasible_mode_sequences(self.S, t_max)
-        for ms in imss:
-            print ms
-            for t in range(self.N-len(ms)):
-                self.prog.addConstr(sum([self.prog.getVarByName('d%d[%d]'%(t+tau,m)) for tau, m in enumerate(ms)]) <= len(ms)-1.)
 
     def set_initial_condition(self, x0):
         for k in range(self.S.nx):
@@ -162,7 +153,7 @@ class HybridModelPredictiveController(object):
         self.set_initial_condition(x0)
 
         # parameters
-        self.prog.setParam('OutputFlag', 0)
+        self.prog.setParam('OutputFlag', 1)
 
         # run the optimization
         self.prog.optimize()
