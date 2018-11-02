@@ -230,6 +230,58 @@ class LinearSystem(object):
 
         return LinearSystem(A_d, B_d)
 
+    @staticmethod
+    def from_symbolic(x, u, x_next):
+        """
+        Instatiates a LinearSystem starting from the symbolic value of the next state.
+
+        Arguments
+        ----------
+        x : sympy matrix filled with sympy symbols
+            Symbolic state of the system.
+        u : sympy matrix filled with sympy symbols
+            Symbolic input of the system.
+        x_next : sympy matrix filled with sympy symbolic linear expressions
+            Symbolic value of the state update.
+        """
+
+        # state transition matrices
+        A, B, c = get_state_transition_matrices(x, u, x_next)
+
+        # check that offset setm is zero
+        if not np.allclose(c, np.zeros(x.shape[0])):
+            raise ValueError('The given system has a non zero offset.')
+
+        return LinearSystem(A, B)
+
+    @staticmethod
+    def from_symbolic_continuous(x, u, x_dot, h, method='zero_order_hold'):
+        """
+        Instatiates a LinearSystem starting from the symbolic value of the next state.
+
+        Arguments
+        ----------
+        x : sympy matrix filled with sympy symbols
+            Symbolic state of the system.
+        u : sympy matrix filled with sympy symbols
+            Symbolic input of the system.
+        x_dot : sympy matrix filled with sympy symbolic linear expressions
+            Symbolic value of the state time derivative.
+        h : float
+            Discretization time step.
+        method : str
+            Discretization method: 'zero_order_hold', or 'explicit_euler'.
+        """
+
+        # state transition matrices
+        A, B, c = get_state_transition_matrices(x, u, x_dot)
+
+        # check that offset setm is zero
+        if not np.allclose(c, np.zeros(x.shape[0])):
+            raise ValueError('The given system has a non zero offset.')
+
+        return LinearSystem.from_continuous(A, B, h, method)
+
 class AffineSystem(object):
     """
     Discrete-time affine systems in the form x(t+1) = A x(t) + B u(t) + c.
@@ -337,6 +389,47 @@ class AffineSystem(object):
             raise ValueError('unknown discretization method.')
 
         return AffineSystem(A_d, B_d, c_d)
+
+    @staticmethod
+    def from_symbolic(x, u, x_next):
+        """
+        Instatiates a AffineSystem starting from the symbolic value of the next state.
+
+        Arguments
+        ----------
+        x : sympy matrix filled with sympy symbols
+            Symbolic state of the system.
+        u : sympy matrix filled with sympy symbols
+            Symbolic input of the system.
+        x_next : sympy matrix filled with sympy symbolic linear expressions
+            Symbolic value of the state update.
+        """
+
+        return AffineSystem(*get_state_transition_matrices(x, u, x_next))
+
+    @staticmethod
+    def from_symbolic_continuous(x, u, x_dot, h, method='zero_order_hold'):
+        """
+        Instatiates a LinearSystem starting from the symbolic value of the next state.
+
+        Arguments
+        ----------
+        x : sympy matrix filled with sympy symbols
+            Symbolic state of the system.
+        u : sympy matrix filled with sympy symbols
+            Symbolic input of the system.
+        x_dot : sympy matrix filled with sympy symbolic linear expressions
+            Symbolic value of the state time derivative.
+        h : float
+            Discretization time step.
+        method : str
+            Discretization method: 'zero_order_hold', or 'explicit_euler'.
+        """
+
+        # get state transition matrices
+        A, B, c = get_state_transition_matrices(x, u, x_dot)
+
+        return AffineSystem.from_continuous(A, B, c, h, method)
 
 class PieceWiseAffineSystem(object):
     """
@@ -656,3 +749,27 @@ def productory(matrix_list):
         A = A.dot(B)
 
     return A
+
+def get_state_transition_matrices(x, u, x_next):
+    """
+    Extracts from the symbolic expression of the state at the next time step the matrices A, B, and c.
+    Arguments
+    ----------
+    x : sympy matrix filled with sympy symbols
+        Symbolic state of the system.
+    u : sympy matrix filled with sympy symbols
+        Symbolic input of the system.
+    x_next : sympy matrix filled with sympy symbolic linear expressions
+        Symbolic value of the state update.
+    """
+
+    # state transition matrices
+    A = np.array(x_next.jacobian(x)).astype(np.float64)
+    B = np.array(x_next.jacobian(u)).astype(np.float64)
+
+    # offset term
+    origin = {xi:0 for xi in x}
+    origin.update({ui:0 for ui in u})
+    c = np.array(x_next.subs(origin)).astype(np.float64).flatten()
+    
+    return A, B, c
