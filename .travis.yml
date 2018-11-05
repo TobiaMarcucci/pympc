@@ -4,12 +4,11 @@ python:
   - "2.7"
 notifications: 
   email: false
-install: 
-  - pip install Cython
+install:
   - pip install -r requirements.txt
   - pip install nose
   - pip install codecov
   - touch gurobipy.py
-script: "python -m nose pympc --with-coverage --exclude=test_feedforward_feedback_and_get_mpqp"
+script: "python -m nose pympc --with-coverage --exclude=test_feedforward_feedback_and_get_mpqp --exclude=test_linear_program_gurobi --exclude=test_quadratic_program_gurobi --exclude=test_mixed_integer_quadratic_program_gurobi"
 after_success:
   - codecov
