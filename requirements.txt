@@ -2,7 +2,3 @@ scipy
 numpy
 sympy
 matplotlib
-
-
-
-
