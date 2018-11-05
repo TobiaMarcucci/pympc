@@ -10,6 +10,6 @@ install:
   - pip install nose
   - pip install codecov
   - touch gurobipy.py
-script: "python -m nose pympc --with-coverage --exclude=test_MPCController --exclude=test_MPCHybridController --exclude=test_linear_program --exclude=test_quadratic_program"
+script: "python -m nose pympc --with-coverage --exclude=test_feedforward_feedback_and_get_mpqp"
 after_success:
   - codecov
