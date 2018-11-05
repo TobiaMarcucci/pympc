@@ -18,18 +18,18 @@ class Node(object):
         ----------
         parent : Node or None
             Parent node in the branch and bound tree.
-            The root node in the tree should have None here.
+            The parent of the root node is assumed to be None.
         branch : dict
-            Subpart of identifier that merged with the identifier of the parent
+            Sub-identifier that merged with the identifier of the parent
             gives the identifier of the child.
         '''
 
         # initialize node
         self.parent = parent
-        self.solution = None
-        self.feasible = None
-        self.objective = None
-        self.integer_feasible = None
+        self.feasible = None # bool
+        self.objective = None # float
+        self.integer_feasible = None # bool
+        self.extra_data = None # all data we want to retrieve after the solution
 
         # build identifier of the node
         if parent is None:
@@ -45,22 +45,25 @@ class Node(object):
         Arguments
         ----------
         solver : function
-            Function that given the identifier of the node (and the cutoff for the
-            objective) solves its subproblem.
+            Function that given the identifier of the node and the cutoff for the
+            objective solves its subproblem.
             The solver must return:
-            - feasible (bool), True if the subproblem is feasible, False otherwise.
-            - objective (float or None), cost of the subproblem (None if infeasible).
-            - integer_feasible (bool), True if the subproblem is a feasible
+            - feasible (bool): True if the subproblem is feasible, False otherwise.
+            - objective (float or None): cost of the subproblem (None if infeasible).
+            - integer_feasible (bool): True if the subproblem is a feasible
             solution for the original problem, False otherwise.
-            - solution, container for any other info we want to keep from the
-            solution of the subproblem.
+            - extra_data: container for all data we want to retrieve after the solution.
         objective_cutoff : float
-            Cutoff value (float) for the objective, if the objective found is
-            higher then the cutoff the subproblem can be considered unfeasible.
+            Cutoff value (float) for the objective, if the objective found is higher then
+            the cutoff the subproblem is suboptimal and can be considered unfeasible.
         '''
 
         # solve subproblem
-        self.feasible, self.objective, self.integer_feasible, self.solution = solver(self.identifier, objective_cutoff)
+        solution = solver(self.identifier, objective_cutoff)
+        self.feasible = solution[0]
+        self.objective = solution[1]
+        self.integer_feasible = solution[2]
+        self.extra_data = solution[3]
 
 
 class Printer(object):
@@ -76,8 +79,6 @@ class Printer(object):
             Maximum amount of time in seconds without printing.
         column_width : int
             Number of characters of the columns of the table printed during the solution.
-        bound_tol : float
-            Tolerance on the check if a new bound has been found.
         '''
 
         # store parameters
@@ -129,12 +130,11 @@ class Printer(object):
         print ('%.3f' % self.upper_bound).ljust(self.column_width+1)
 
 
-    def print_status(self, lower_bound, upper_bound):
+    def print_and_update(self, lower_bound, upper_bound):
         '''
-        Prints the status of the algorithm.
-        It prints in case:
+        Prints the status of the algorithm ONLY in case:
         - the root node is solved,
-        - a new upper bound has been found after the last call of the function,
+        - a new incumbent has been found after the last call of the function,
         - nothing has been printed in the last printing_period seconds.
 
         Arguments
@@ -148,31 +148,33 @@ class Printer(object):
         '''
 
         # check if a print is required (self.lower_bound = -inf only at the beginning)
-        root_node_solve = self.lower_bound == -inf
-        print_time = (time() - self.last_print_time) > self.printing_period
+        root_node_solved = self.lower_bound == -inf
         new_incumbent = upper_bound < self.upper_bound
-
-        # update bounds
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
+        print_time = (time() - self.last_print_time) > self.printing_period
 
         # continue only if print is required
-        if any([root_node_solve, print_time, new_incumbent]):
+        if any([root_node_solved, new_incumbent, print_time]):
 
             # write updates if new bounds has been found in this loop
-            updates = ''
-            if new_incumbent:
-                updates += 'New incumbent'
-            elif root_node_solve:
-                updates += 'Root node'
+            if root_node_solved:
+                updates = 'Root node'
+            elif new_incumbent:
+                updates = 'New incumbent'
+            elif print_time:
+            	updates = ''
 
             # print
             self.print_new_row(updates)
             self.last_print_time = time()
 
+        # update bounds
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+
     def print_solution(self, tol):
         '''
         Prints the final massage.
+
         Arguments
         ----------
         tol : float
@@ -180,18 +182,21 @@ class Printer(object):
             bound and the best upper bound.
         '''
 
-        # infeasible problem
+        # print final row in the table
         if self.upper_bound == inf:
             self.print_new_row('Infeasible')
-            print '\nExplored %d nodes in %.3f seconds:' % (self.explored_nodes, time() - self.tic),
-            print 'problem is infeasible.'
-
-        # optimal solution found
         else:
-            self.print_new_row('Solution found')
-            print '\nExplored %d nodes in %.3f seconds:' % (self.explored_nodes, time() - self.tic),
-            print 'solution found with objective %.3f.' % self.upper_bound
-            print 'Best lower bound is %.3f and lies within the tolerance of %.3f.' % (self.lower_bound, tol)
+        	self.print_new_row('Solution found')
+
+        # print nodes and time
+        print '\nExplored %d nodes in %.3f seconds:' % (self.explored_nodes, time() - self.tic),
+
+        # print bounds
+        if self.upper_bound == inf:
+            print 'problem is infeasible.'
+        else:
+            print 'feasible solution found with objective %.3f.' % self.upper_bound
+            print 'The best lower bound is %.3f (tolerance set to %.3f).' % (self.lower_bound, tol)
         
 
 def branch_and_bound(
@@ -226,9 +231,9 @@ def branch_and_bound(
 
     Returns
     ----------
-    solution : unpecified
-        Generic container of the info to keep from the solution of the incumbent node.
-        Is the solution output provided by solver function when applied to
+    extra_data : unpecified
+        Generic container of the data to keep from the solution of the incumbent node.
+        It is the solution output provided by solver function when applied to
         the incumbent node.
     solution_time : float
         Overall time spent to solve the combinatorial program.
@@ -237,12 +242,11 @@ def branch_and_bound(
     '''
 
     # initialization
-    candidate_nodes = [Node(None, {})]
+    root_node = Node(None, {})
+    candidate_nodes = [root_node]
     incumbent = None
     upper_bound = inf
     lower_bound = - inf
-    UPPER_BOUNDS = []
-    LOWER_BOUNDS = []
 
     # initialize printing
     if printing_period is not None:
@@ -284,15 +288,13 @@ def branch_and_bound(
                 candidate_nodes.append(Node(candidate_node, branch))
 
         # compute new lower bound (returns inf if candidate_nodes = [] and upper_bound = inf)
-        lower_bound = min([node.parent.objective for node in candidate_nodes if node.parent is not None] + [upper_bound])
+        leaves = [node.parent for node in candidate_nodes if node.parent is not None]
+        lower_bound = min([leaf.objective for leaf in leaves] + [upper_bound])
 
         # print status
         if printing_period is not None:
             printer.add_one_node()
-            printer.print_status(lower_bound, upper_bound)
-
-        UPPER_BOUNDS.append(upper_bound)
-        LOWER_BOUNDS.append(lower_bound)
+            printer.print_and_update(lower_bound, upper_bound)
 
     # return solution
     if printing_period is not None:
@@ -300,7 +302,7 @@ def branch_and_bound(
     if incumbent is None:
         return None
     else:
-        return incumbent.solution, array(LOWER_BOUNDS), array(UPPER_BOUNDS)
+        return incumbent.extra_data
 
 
 def breadth_first(candidate_nodes, incumbent):

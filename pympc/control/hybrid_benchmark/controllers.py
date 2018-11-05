@@ -118,10 +118,10 @@ class HybridModelPredictiveController(object):
 
     def explore_most_ambiguous_node(self, node):
 
-        t = np.argmin([max(dt) - min(dt) for dt in node.solution['binaries']])
+        t = np.argmin([max(dt) - min(dt) for dt in node.extra_data['binaries']])
         free_bin_id = range(self.S.nm)
         [free_bin_id.remove(k[1]) for k in node.identifier.keys() if k[0] == t]
-        free_bin_val = [node.solution['binaries'][t][i] for i in free_bin_id]
+        free_bin_val = [node.extra_data['binaries'][t][i] for i in free_bin_id]
         free_bin_id_ordered = [free_bin_id[i] for i in np.argsort(free_bin_val)]
 
         n = len(free_bin_id)
@@ -139,7 +139,7 @@ class HybridModelPredictiveController(object):
 
     def explore_in_chronological_order(self, node):
         t = len(node.identifier)
-        branches = [{(t,mode): 1.} for mode in np.argsort(node.solution['binaries'][t])]
+        branches = [{(t,mode): 1.} for mode in np.argsort(node.extra_data['binaries'][t])]
         return branches
 
     def feedforward(self, x0):
