@@ -85,6 +85,20 @@ class Polyhedron(object):
         self.A = np.vstack((self.A, A.dot(S)))
         self.b = np.concatenate((self.b, b))
 
+    def add_symbolic_inequality(self, x, ineq):
+        """
+        Adds the inequality ineq(x) <= 0 to the existing polyhedron.
+
+        Arguments
+        ----------
+        x : sympy matrix filled with sympy symbols
+            Variables.
+        ineq : sympy matrix filled with sympy symbolic affine expressions
+            Left hand side of the inequality constraint.
+        """
+
+        self.add_inequality(*get_matrices_affine_expression(x, ineq))
+
     def add_equality(self, C, d, indices=None):
         """
         Adds the equality C x = d to the existing polyhedron.
@@ -109,6 +123,20 @@ class Polyhedron(object):
         S = self._selection_matrix(indices)
         self.C = np.vstack((self.C, C.dot(S)))
         self.d = np.concatenate((self.d, d))
+
+    def add_symbolic_equality(self, x, eq):
+        """
+        Adds the inequality eq(x) = 0 to the existing polyhedron.
+
+        Arguments
+        ----------
+        x : sympy matrix filled with sympy symbols
+            Variables.
+        eq : sympy matrix filled with sympy symbolic affine expressions
+            Left hand side of the equality constraint.
+        """
+
+        self.add_equality(*get_matrices_affine_expression(x, eq))
 
     def add_lower_bound(self, x_min, indices=None):
         """
@@ -304,6 +332,30 @@ class Polyhedron(object):
         b = np.zeros(0)
         p = Polyhedron(A, b)
         p.add_bounds(x_min, x_max, indices)
+
+        return p
+
+    @staticmethod
+    def from_symbolic(x, ineq, eq=None):
+        """
+        Instantiates a Polyhedron in the form expr(x) <= 0, eq(x) = 0.
+
+        Arguments
+        ----------
+        x : sympy matrix filled with sympy symbols
+            Variables.
+        ineq : sympy matrix filled with sympy symbolic affine expressions
+            Left hand side of the inequality constraint.
+        eq : sympy matrix filled with sympy symbolic affine expressions
+            Left hand side of the inequality constraint.
+        """
+
+        # get polyhedron only for the inequalities
+        p = Polyhedron(*get_matrices_affine_expression(x, ineq))
+
+        # in case add equalities
+        if eq is not None:
+            p.add_equality(*get_matrices_affine_expression(x, eq))
 
         return p
 
@@ -865,6 +917,26 @@ class Polyhedron(object):
         ax.autoscale_view()
 
         return
+
+def get_matrices_affine_expression(x, expr):
+    """
+    Extracts from the symbolic affine expression the matrices such that expr(x) = A x - b.
+    
+    Arguments
+    ----------
+    x : sympy matrix filled with sympy symbols
+        Variables.
+    expr : sympy matrix filled with sympy symbolic affine expressions
+        Left hand side of the inequality constraint.
+    """
+
+    # state transition matrices
+    A = np.array(expr.jacobian(x)).astype(np.float64)
+
+    # offset term
+    b = - np.array(expr.subs({xi:0 for xi in x})).astype(np.float64).flatten()
+    
+    return A, b
 
 def convex_hull_method(A, b, resiudal_dimensions):
     """

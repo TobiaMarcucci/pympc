@@ -1,6 +1,7 @@
 # external imports
 import unittest
 import numpy as np
+import sympy as sp
 from itertools import product
 from scipy.linalg import block_diag
 from copy import copy
@@ -101,6 +102,35 @@ class TestPolyhedron(unittest.TestCase):
         self.assertRaises(ValueError, p.add_upper_bound, x, indices)
         self.assertRaises(ValueError, p.add_bounds, x, x, indices)
 
+        # add symbolic
+        n = 5
+        m = 3
+        A = np.random.rand(m, n)
+        b = np.random.rand(m)
+        C = np.random.rand(m, n)
+        d = np.random.rand(m)
+        P = Polyhedron(A, b)
+        x = sp.Matrix([sp.Symbol('x'+str(i), real=True) for i in range(n)])
+        ineq = sp.Matrix(A)*x - sp.Matrix(b)
+        P.add_symbolic_inequality(x, ineq)
+        np.testing.assert_array_almost_equal(P.A, np.vstack((A, A)))
+        np.testing.assert_array_almost_equal(P.b, np.concatenate((b, b)))
+        eq = sp.Matrix(C)*x - sp.Matrix(d)
+        P.add_symbolic_equality(x, eq)
+        np.testing.assert_array_almost_equal(P.C, C)
+        np.testing.assert_array_almost_equal(P.d, d)
+
+        # throw some errors here
+        P = Polyhedron(A, b)
+        x = sp.Matrix([sp.Symbol('x'+str(i), real=True) for i in range(n+1)])
+        A1 = np.random.rand(m, n+1)
+        ineq = sp.Matrix(A1)*x - sp.Matrix(b)
+        self.assertRaises(ValueError, P.add_symbolic_inequality, x, ineq)
+        P = Polyhedron(A, b, C, d)
+        C1 = np.random.rand(m, n+1)
+        eq = sp.Matrix(C1)*x - sp.Matrix(b)
+        self.assertRaises(ValueError, P.add_symbolic_equality, x, eq)
+
     def test_from_functions(self):
 
         # row vector input
@@ -178,6 +208,25 @@ class TestPolyhedron(unittest.TestCase):
         self.assertRaises(ValueError, Polyhedron.from_lower_bound, x, indices, n)
         self.assertRaises(ValueError, Polyhedron.from_upper_bound, x, indices, n)
         self.assertRaises(ValueError, Polyhedron.from_bounds, x, x, indices, n)
+
+        # from symbolic
+        n = 5
+        m = 3
+        x = sp.Matrix([sp.Symbol('x'+str(i), real=True) for i in range(n)])
+        A = np.random.rand(m, n)
+        b = np.random.rand(m)
+        ineq = sp.Matrix(A)*x - sp.Matrix(b)
+        P = Polyhedron.from_symbolic(x, ineq)
+        np.testing.assert_array_almost_equal(P.A, A)
+        np.testing.assert_array_almost_equal(P.b, b)
+        C = np.random.rand(m, n)
+        d = np.random.rand(m)
+        eq = sp.Matrix(C)*x - sp.Matrix(d)
+        P = Polyhedron.from_symbolic(x, ineq, eq)
+        np.testing.assert_array_almost_equal(P.A, A)
+        np.testing.assert_array_almost_equal(P.b, b)
+        np.testing.assert_array_almost_equal(P.C, C)
+        np.testing.assert_array_almost_equal(P.d, d)
 
     def test_normalize(self):
 
