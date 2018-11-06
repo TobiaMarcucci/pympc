@@ -1,6 +1,8 @@
 from numpy import inf, argmin, array
 from time import time
-
+from pygraphviz import AGraph
+from subprocess import call
+from os import getcwd
 
 class Node(object):
     '''
@@ -26,6 +28,7 @@ class Node(object):
 
         # initialize node
         self.parent = parent
+        self.branch = branch
         self.feasible = None # bool
         self.objective = None # float
         self.integer_feasible = None # bool
@@ -152,6 +155,10 @@ class Printer(object):
         new_incumbent = upper_bound < self.upper_bound
         print_time = (time() - self.last_print_time) > self.printing_period
 
+        # update bounds (to be done before printing)
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+
         # continue only if print is required
         if any([root_node_solved, new_incumbent, print_time]):
 
@@ -166,10 +173,6 @@ class Printer(object):
             # print
             self.print_new_row(updates)
             self.last_print_time = time()
-
-        # update bounds
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
 
     def print_solution(self, tol):
         '''
@@ -198,6 +201,87 @@ class Printer(object):
             print 'feasible solution found with objective %.3f.' % self.upper_bound
             print 'The best lower bound is %.3f (tolerance set to %.3f).' % (self.lower_bound, tol)
         
+class Drawer(object):
+    '''
+    Drawer of the branch and bound tree.
+    '''
+
+    def __init__(self):
+
+        # initialize tree
+        self.graph = AGraph(directed=True, strict=True, filled=True,)
+        self.graph.graph_attr['label'] = 'Branch and bound tree'
+        self.graph.node_attr['style'] = 'filled'
+        self.graph.node_attr['fillcolor'] = 'white'
+
+    def draw_node(self, node, pruning_criteria):
+        '''
+        Adds a node to the tree.
+
+        Arguments
+        ----------
+        node : instance of Node
+            Leaf to be added to the tree.
+        pruning_criteria : string or None
+            Reason why the leaf has been pruned ('infeasibility', 'suboptimality', or 'new_incumbent').
+            None in case the leaf has not been pruned.
+        '''
+
+        # node color based on the pruning criteria
+        if pruning_criteria == 'infeasibility':
+            color = 'red'
+        elif pruning_criteria == 'suboptimality':
+            color = 'blue'
+        elif pruning_criteria == 'new_incumbent':
+            color = 'green'
+        else:
+            color = 'black'
+
+        # node label
+        label = 'Branch: ' + str(node.branch) + '\n'
+        if node.objective is not None:
+            label += 'Objective: %.3f' % node.objective + '\n'
+
+        # add node to the tree
+        self.graph.add_node(node.identifier, color=color, label=label)
+
+        # connect node to the parent
+        if node.parent is not None:
+            self.graph.add_edge(node.parent.identifier, node.identifier)
+
+    def draw_solution(self, node):
+        '''
+        Marks the leaf with the optimal solution.
+
+        Arguments
+        ----------
+        node : instance of Node
+            Leaf associated with the optimal solution.
+        '''
+
+        # fill node with green and make the border black again
+        self.graph.get_node(node.identifier).attr['color'] = 'black'
+        self.graph.get_node(node.identifier).attr['fillcolor'] = 'green'
+
+    def save_and_open(self, file_name='branch_and_bound_tree'):
+        '''
+        Saves the tree in a pdf file and opens it.
+
+        Arguments
+        ----------
+        file_name : string
+            Name of the pdf in which to save the drawing of the tree.
+        '''
+
+        # write pdf file
+        directory = getcwd() + '/' + file_name
+        self.graph.write(directory + '.dot')
+        self.graph = AGraph(directory + '.dot')
+        self.graph.layout(prog='dot')
+        self.graph.draw(directory + '.pdf')
+
+        # open pdf file
+        call(('open', directory + '.pdf'))
 
 def branch_and_bound(
         solver,
@@ -205,6 +289,7 @@ def branch_and_bound(
         branching_rule,
         tol=0.,
         printing_period=5.,
+        tree_file_name=None,
         **kwargs
         ):
     '''
@@ -253,6 +338,10 @@ def branch_and_bound(
         printer = Printer(printing_period, **kwargs)
         printer.print_first_row()
 
+    # initialize drawing
+    if tree_file_name is not None:
+        drawer = Drawer()
+
     # termination check (infeasibility also breaks the loop: upper_bound = lower_bound = inf)
     while upper_bound - lower_bound > tol:
 
@@ -265,27 +354,32 @@ def branch_and_bound(
 
         # pruning, infeasibility
         if not candidate_node.feasible:
+            pruning_criteria = 'infeasibility'
             pass
 
-        # pruning, optimality
+        # pruning, suboptimality
         elif candidate_node.objective >= upper_bound:
+            pruning_criteria = 'suboptimality'
             pass
 
-        # pruning, value dominance
+        # pruning, new incumbent
         elif candidate_node.integer_feasible:
             if candidate_node.objective < upper_bound:
+                pruning_criteria = 'new_incumbent'
 
                 # set new incumbent
                 upper_bound = candidate_node.objective
                 incumbent = candidate_node
 
-                # prune the branches that become suboptimal
+                # prune the branches that are now suboptimal
                 candidate_nodes = [node for node in candidate_nodes if node.parent.objective < upper_bound]
 
         # branching
         else:
+            pruning_criteria = None
             for branch in branching_rule(candidate_node):
-                candidate_nodes.append(Node(candidate_node, branch))
+                child = Node(candidate_node, branch)
+                candidate_nodes.append(child)
 
         # compute new lower bound (returns inf if candidate_nodes = [] and upper_bound = inf)
         leaves = [node.parent for node in candidate_nodes if node.parent is not None]
@@ -296,9 +390,21 @@ def branch_and_bound(
             printer.add_one_node()
             printer.print_and_update(lower_bound, upper_bound)
 
-    # return solution
+        # draw node
+        if tree_file_name is not None:
+            drawer.draw_node(candidate_node, pruning_criteria)
+
+    # print solution
     if printing_period is not None:
         printer.print_solution(tol)
+
+    # draw solution
+    if tree_file_name is not None:
+        if incumbent is not None:
+            drawer.draw_solution(incumbent)
+        drawer.save_and_open(tree_file_name)
+
+    # return solution
     if incumbent is None:
         return None
     else:
