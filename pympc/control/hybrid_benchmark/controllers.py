@@ -5,13 +5,6 @@ from scipy.linalg import block_diag
 from copy import copy
 
 # internal inputs
-from pympc.control.hybrid_benchmark.utils import (add_vars,
-                                                  add_linear_inequality,
-                                                  add_linear_equality,
-                                                  add_rotated_socc,
-                                                  add_stage_cost,
-                                                  add_terminal_cost
-                                                  )
 from pympc.optimization.programs import linear_program
 from build_mip_mld import bild_mip_mld
 from build_mip_bm import bild_mip_bm
@@ -20,7 +13,7 @@ from build_mip_pf import bild_mip_pf
 
 class HybridModelPredictiveController(object):
 
-    def __init__(self, S, N, Q, R, P, X_N, method='BM', norm='two'):
+    def __init__(self, S, N, Q, R, P, X_N, method='CH', norm='two'):
 
         # check that all the domains are in hrep (if not use two inequalities)
         assert max([D.d.size for D in S.domains]) == 0
@@ -139,6 +132,11 @@ class HybridModelPredictiveController(object):
 
     def explore_in_chronological_order(self, node):
         t = len(node.identifier)
+        branches = [{(t,mode): 1.} for mode in np.argsort(node.extra_data['binaries'][t])]
+        return branches
+
+    def explore_in_reverse_chronological_order(self, node):
+        t = self.N - len(node.identifier) - 1
         branches = [{(t,mode): 1.} for mode in np.argsort(node.extra_data['binaries'][t])]
         return branches
 

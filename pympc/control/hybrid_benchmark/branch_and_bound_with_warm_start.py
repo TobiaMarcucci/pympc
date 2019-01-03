@@ -3,13 +3,15 @@ from time import time
 from pygraphviz import AGraph
 from subprocess import call
 from os import getcwd
+from copy import deepcopy
+from collections import OrderedDict
 
 class Node(object):
     '''
     Node of the branch and bound tree.
     '''
 
-    def __init__(self, parent, branch):
+    def __init__(self, parent, branch, lower_bound=None):
         '''
         A node is uniquely identified by its identifier.
         The identifier is a dictionary (typically containing the binary assigment).
@@ -24,11 +26,15 @@ class Node(object):
         branch : dict
             Sub-identifier that merged with the identifier of the parent
             gives the identifier of the child.
+        lower_bound : float
+            Lower bound to the objective of the node provided by the user
+            (useful in case of warm start).
         '''
 
         # initialize node
         self.parent = parent
         self.branch = branch
+        self.lower_bound = lower_bound
         self.feasible = None # bool initialized to None
         self.objective = None # float initialized to None
         self.integer_feasible = None # bool initialized to None
@@ -41,33 +47,33 @@ class Node(object):
             self.identifier = parent.identifier.copy()
             self.identifier.update(branch)
         
-    def solve(self, solver, objective_cutoff):
+    def solve(self, solver):
         '''
         Solves the subproblem for this node.
 
         Arguments
         ----------
         solver : function
-            Function that given the identifier of the node and the cutoff for the
-            objective solves its subproblem.
+            Function that given the identifier of the node solves its subproblem.
             The solver must return:
             - feasible (bool): True if the subproblem is feasible, False otherwise.
             - objective (float or None): cost of the subproblem (None if infeasible).
             - integer_feasible (bool): True if the subproblem is a feasible
             solution for the original problem, False otherwise.
             - extra_data: container for all data we want to retrieve after the solution.
-        objective_cutoff : float
-            Cutoff value (float) for the objective, if the objective found is higher then
-            the cutoff the subproblem is suboptimal and can be considered unfeasible.
         '''
 
         # solve subproblem
-        solution = solver(self.identifier, objective_cutoff)
+        solution = solver(self.identifier)
         self.feasible = solution[0]
         self.objective = solution[1]
+        self.lower_bound = self.objective
         self.integer_feasible = solution[2]
         self.extra_data = solution[3]
 
+        # correct in case of numerical errors
+        if self.feasible and self.parent is not None:
+            self.objective = max(self.objective, self.parent.objective)
 
 class Printer(object):
     '''
@@ -101,6 +107,10 @@ class Printer(object):
         '''
 
         self.explored_nodes += 1
+
+    def print_warm_start(self, lower_bound):
+
+        print 'Warm start loaded with lower bound %.3f.' % lower_bound
 
     def print_first_row(self):
         '''
@@ -198,8 +208,7 @@ class Printer(object):
         if self.upper_bound == inf:
             print 'problem is infeasible.'
         else:
-            print 'feasible solution found with objective %.3f.' % self.upper_bound
-            print 'The best lower bound is %.3f (tolerance set to %.3f).' % (self.lower_bound, tol)
+            print 'optimal solution found with objective %.3f.' % self.upper_bound
         
 class Drawer(object):
     '''
@@ -230,15 +239,15 @@ class Drawer(object):
         # node color based on the pruning criteria
         if pruning_criteria == 'infeasibility':
             color = 'red'
-        elif pruning_criteria == 'suboptimality':
-            color = 'blue'
+        # elif pruning_criteria == 'suboptimality':
+        #     color = 'blue'
         elif pruning_criteria == 'new_incumbent':
             color = 'green'
         else:
             color = 'black'
 
         # node label
-        label = 'Branch: ' + str(node.branch) + '\n'
+        label = 'Branch: ' + self.break_identifier(node.branch) + '\n'
         if node.objective is not None:
             label += 'Objective: %.3f' % node.objective + '\n'
 
@@ -248,6 +257,16 @@ class Drawer(object):
         # connect node to the parent
         if node.parent is not None:
             self.graph.add_edge(node.parent.identifier, node.identifier)
+
+    def draw_warm_start(self, warm_start):
+        for node in warm_start:
+            label = 'Branch: ' + self.break_identifier(node.branch) + '\n'
+            label += 'Lower bound: %.3f' % node.lower_bound + '\n'
+            self.graph.add_node(node.identifier, color='blue', label=label)
+
+    def break_identifier(self, identifier):
+        broken_identifier = [str(k) + ', ' + str(v) for k, v in identifier.items()]
+        return '\n'.join(broken_identifier)
 
     def draw_solution(self, node):
         '''
@@ -290,6 +309,7 @@ def branch_and_bound(
         tol=0.,
         printing_period=5.,
         tree_file_name=None,
+        warm_start=None,
         **kwargs
         ):
     '''
@@ -313,6 +333,7 @@ def branch_and_bound(
         bound and the best upper bound.
     printing_period : float or None
         Period in seconds for printing the status of the solver.
+        Set it ot None to shut the log.
 
     Returns
     ----------
@@ -327,30 +348,39 @@ def branch_and_bound(
     '''
 
     # initialization
-    root_node = Node(None, {})
-    candidate_nodes = [root_node]
     incumbent = None
     upper_bound = inf
-    lower_bound = - inf
+    feasible_leaves = []
+    if warm_start is not None:
+        candidate_nodes = deepcopy(warm_start)
+        lower_bound = min([node.lower_bound for node in candidate_nodes])
+    else:
+        root_node = Node(None, OrderedDict())
+        candidate_nodes = [root_node]
+        lower_bound = - inf
 
     # initialize printing
     if printing_period is not None:
         printer = Printer(printing_period, **kwargs)
+        if warm_start is not None:
+            printer.print_warm_start(lower_bound)
         printer.print_first_row()
 
     # initialize drawing
     if tree_file_name is not None:
         drawer = Drawer()
+        if warm_start is not None:
+            drawer.draw_warm_start(warm_start)
 
     # termination check (infeasibility also breaks the loop: upper_bound = lower_bound = inf)
-    while upper_bound - lower_bound > tol:
+    while candidate_nodes:
 
         # selection of candidate node
         candidate_node = candidate_selection(candidate_nodes, incumbent)
         candidate_nodes.remove(candidate_node)
 
         # solution of candidate node
-        candidate_node.solve(solver, upper_bound)
+        candidate_node.solve(solver)
 
         # pruning, infeasibility
         if not candidate_node.feasible:
@@ -358,8 +388,9 @@ def branch_and_bound(
 
         # pruning, suboptimality
         elif candidate_node.objective >= upper_bound:
+            feasible_leaves.append(candidate_node)
             pruning_criteria = 'suboptimality'
-            
+
         # pruning, new incumbent
         elif candidate_node.integer_feasible:
             if candidate_node.objective < upper_bound:
@@ -369,8 +400,20 @@ def branch_and_bound(
                 upper_bound = candidate_node.objective
                 incumbent = candidate_node
 
+                # collect feasible leaf for the warm start
+                feasible_leaves.append(candidate_node)
+
                 # prune the branches that are now suboptimal
-                candidate_nodes = [node for node in candidate_nodes if node.parent.objective < upper_bound]
+                new_candidate_nodes = []
+                for node in candidate_nodes: 
+                    if node.lower_bound is not None and node.lower_bound > upper_bound:
+                        feasible_leaves.append(node)
+                    elif node.parent is not None and node.parent.objective > upper_bound:
+                        if not node.parent in feasible_leaves:
+                            feasible_leaves.append(node.parent)
+                    else:
+                        new_candidate_nodes.append(node)
+                candidate_nodes = new_candidate_nodes
 
         # branching
         else:
@@ -379,9 +422,8 @@ def branch_and_bound(
                 child = Node(candidate_node, branch)
                 candidate_nodes.append(child)
 
-        # compute new lower bound (returns inf if candidate_nodes = [] and upper_bound = inf)
-        leaves = [node.parent for node in candidate_nodes if node.parent is not None]
-        lower_bound = min([leaf.objective for leaf in leaves] + [upper_bound])
+        # compute new lower bound
+        lower_bound = get_lower_bound(candidate_nodes, upper_bound)
 
         # print status
         if printing_period is not None:
@@ -404,10 +446,21 @@ def branch_and_bound(
 
     # return solution
     if incumbent is None:
-        return None
+        return None, []
     else:
-        return incumbent.extra_data
+        return incumbent.extra_data, feasible_leaves
 
+def get_lower_bound(candidate_nodes, upper_bound):
+    '''
+    Returns inf if candidate_nodes is empty.
+    '''
+    lower_bound = inf
+    for node in candidate_nodes:
+        if node.lower_bound is not None:
+            lower_bound = min(lower_bound, node.lower_bound)
+        else:
+            lower_bound = min(lower_bound, node.parent.objective)
+    return min(lower_bound, upper_bound)
 
 def breadth_first(candidate_nodes, incumbent):
     '''
@@ -475,55 +528,12 @@ def best_first(candidate_nodes, incumbent):
     '''
 
     # best node
-    index_best_node = argmin([node.parent.objective if node.parent is not None else inf for node in candidate_nodes])
-    return candidate_nodes[index_best_node]
-
-def first_depth_then_breadth(candidate_nodes, incumbent):
-    '''
-    candidate_selection function for the branch and bound algorithm.
-    Uses the depth_first approach until a feasible solution is found, then
-    continues with the breadth first.
-    Should get the best of the two approaches.
-
-    Arguments
-    ----------
-    candidate_nodes : list of Node
-        List of the nodes among which we need to select the next subproblem to solve.
-    incumbent : Node
-        Incumbent node in the branch and bound algorithm.
-
-    Returns
-    ----------
-    candidate_node : Node
-        Node whose subproblem is the next to be solved.
-    '''
-
-    if incumbent is None:
-        return depth_first(candidate_nodes, incumbent)
-    else:
-        return breadth_first(candidate_nodes, incumbent)
-
-def first_depth_then_best(candidate_nodes, incumbent):
-    '''
-    candidate_selection function for the branch and bound algorithm.
-    Uses the depth_first approach until a feasible solution is found, then
-    continues with the best first.
-    Should get the best of the two approaches.
-
-    Arguments
-    ----------
-    candidate_nodes : list of Node
-        List of the nodes among which we need to select the next subproblem to solve.
-    incumbent : Node
-        Incumbent node in the branch and bound algorithm.
-
-    Returns
-    ----------
-    candidate_node : Node
-        Node whose subproblem is the next to be solved.
-    '''
-
-    if incumbent is None:
-        return depth_first(candidate_nodes, incumbent)
-    else:
-        return best_first(candidate_nodes, incumbent)
+    lower_bounds = []
+    for node in candidate_nodes:
+        if node.lower_bound is not None:
+            lower_bounds.append(node.lower_bound)
+        elif node.parent is not None:
+            lower_bounds.append(node.parent.objective)
+        else:
+            lower_bounds.append(inf)
+    return candidate_nodes[argmin(lower_bounds)]
