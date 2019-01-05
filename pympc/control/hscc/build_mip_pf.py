@@ -4,15 +4,11 @@ import gurobipy as grb
 from scipy.linalg import block_diag
 
 # internal inputs
-from pympc.geometry.polyhedron import Polyhedron
-from pympc.optimization.programs import linear_program
-from pympc.control.hybrid_benchmark.utils import (add_vars,
-                                                  add_linear_inequality,
-                                                  add_linear_equality,
-                                                  add_stage_cost,
-                                                  add_terminal_cost,
-                                                  add_rotated_socc
-                                                  )
+from pympc.control.hscc.utils import (add_vars,
+                                      add_linear_inequality,
+                                      add_linear_equality,
+                                      add_rotated_socc
+                                      )
 
 def bild_mip_pf(S, N, Q, R, P, X_N, norm):
 

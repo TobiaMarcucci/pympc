@@ -4,12 +4,12 @@ import gurobipy as grb
 
 # internal inputs
 from pympc.optimization.programs import linear_program
-from pympc.control.hybrid_benchmark.utils import (add_vars,
-                                                  add_linear_inequality,
-                                                  add_linear_equality,
-                                                  add_stage_cost,
-                                                  add_terminal_cost
-                                                  )
+from pympc.control.hscc.utils import (add_vars,
+                                      add_linear_inequality,
+                                      add_linear_equality,
+                                      add_stage_cost,
+                                      add_terminal_cost
+                                      )
 
 def bild_mip_mld(S, N, Q, R, P, X_N, norm):
 

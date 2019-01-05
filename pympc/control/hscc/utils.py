@@ -1,14 +1,11 @@
 # external imports
 import numpy as np
 import gurobipy as grb
-from scipy.linalg import ldl
 from itertools import product
 from scipy.linalg import block_diag
 
 # internal inputs
 from pympc.geometry.polyhedron import Polyhedron
-from pympc.optimization.programs import linear_program
-from pympc.geometry.utils import plane_through_points
 
 def add_vars(prog, n, lb=None, **kwargs):
     if lb is None:
@@ -105,76 +102,6 @@ def add_rotated_socc(prog, H, x, y, z, tol=1.e-8):
     cons = prog.addConstr(.5 * x_aux.dot(x_aux) <= y * z),
     return cons, x_aux
 
-def get_constraint_set(prog):
-    '''
-    Returns the linear constraints of prog in the form A x < = b.
-    '''
-    prog.update()
-    vs = prog.getVars()
-    v_id = {v: i for i, v in enumerate(vs)}
-    nv = len(vs)
-    P = Polyhedron(np.zeros((0, nv)), np.zeros(0))
-    print 'Getting constraint set:'
-    for i, v in enumerate(vs):
-        print('Variable %d on %d\r' % (i,nv)),
-        if v.getAttr(grb.GRB.Attr.LB) != -grb.GRB.INFINITY:
-            P.add_lower_bound(v.getAttr(grb.GRB.Attr.LB), [i])
-        if v.getAttr(grb.GRB.Attr.UB) != grb.GRB.INFINITY:
-            P.add_upper_bound(v.getAttr(grb.GRB.Attr.UB), [i])
-    cs = prog.getConstrs()
-    nc = len(cs)
-    for i, c in enumerate(cs):
-        print('Constraint %d on %d\r' % (i,nc)),
-        expr = prog.getRow(c)
-        Ai = np.zeros((1, nv))
-        for j in range(expr.size()):
-            Ai[0, v_id[expr.getVar(j)]] = expr.getCoeff(j)
-        bi = np.array([c.getAttr(grb.GRB.Attr.RHS)])
-        if c.getAttr(grb.GRB.Attr.Sense) in ['<', '=']:
-            P.add_inequality(Ai, bi)
-        if c.getAttr(grb.GRB.Attr.Sense) in ['>', '=']:
-            P.add_inequality(-Ai, -bi)
-    return P
-
-def remove_redundant_inequalities_fast(P, tol=1.e-7):
-
-    assert P.C.shape[0] == 0
-    assert P.d.shape[0] == 0
-    
-    # intialize program
-    prog = grb.Model()
-    x = add_vars(prog, P.A.shape[1])
-    prog.update()
-    cons = add_linear_inequality(prog, P.A.dot(x), P.b)
-    prog.update()
-    prog.setParam('OutputFlag', 0)
-    
-    # initialize list of non-redundant facets
-    minimal_facets = list(range(len(P.A)))
-    
-    # check each facet
-    for i in range(P.A.shape[0]):
-
-        # solve linear program
-        cons[i].RHS += 1.
-        prog.setObjective(P.A[i].dot(x), sense=grb.GRB.MAXIMIZE) # DO NOT PUT AN OFFSET TERM IN THE OBJECTIVE !!!
-        prog.optimize()
-
-        # remove redundant facets from the list
-        if  prog.objVal - P.b[i] < tol:
-            prog.remove(cons[i])
-            minimal_facets.remove(i)
-        else:
-            cons[i].RHS -= 1.
-
-    return Polyhedron(P.A[minimal_facets,:], P.b[minimal_facets,:])
-
-def is_included(l1, l2):
-    for i in range(len(l2)-len(l1)+1):
-        if l2[i:i+len(l1)] == l1:
-            return True
-    return False
-
 def feasible_mode_sequences(S, T, tol=1.e-7):
     '''
     For the piecewise affine system S returns the feasible and
@@ -199,3 +126,9 @@ def feasible_mode_sequences(S, T, tol=1.e-7):
                 elif t == T-1:
                     fmss.append((ms, fs.radius))
     return fmss, imss
+
+def is_included(l1, l2):
+    for i in range(len(l2)-len(l1)+1):
+        if l2[i:i+len(l1)] == l1:
+            return True
+    return False
