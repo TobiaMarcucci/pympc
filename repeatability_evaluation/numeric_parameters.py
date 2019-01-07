@@ -1,6 +1,9 @@
 # external imports
 import numpy as np
 
+# internal imports
+from pympc.geometry.polyhedron import Polyhedron
+
 # numeric parameters of the system
 m = 1. # mass
 r = .1 # radius
@@ -25,3 +28,23 @@ u_max = np.array([
     30., 30., # floor acceleration
 ])
 u_min = - u_max
+
+# controller parameters
+
+# time steps
+N = 20
+
+# weight matrices (*2 to cancel out the 1/2 in the controller code)
+Q = np.diag([
+    1., 1., .01,
+    1., 1.,
+    1., 1., .01,
+    1., 1.
+])*2.
+R = np.diag([
+    .01, .001
+])*2.
+P = np.zeros((10, 10))
+
+# terminal set
+X_N = Polyhedron.from_bounds(*[np.zeros(10)]*2)
