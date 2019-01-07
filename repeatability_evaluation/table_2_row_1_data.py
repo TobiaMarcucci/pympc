@@ -18,12 +18,6 @@ from pympc.control.hscc.controllers import HybridModelPredictiveController
 import numeric_parameters as params
 from pwa_dynamics import S
 
-# mixed-integer formulations
-methods = ['pf', 'ch', 'bm', 'mld']
-
-# norms of the objective
-norms = ['inf', 'one', 'two']
-
 # n_samples by n_samples grid in x1 and x3
 n_samples = 11
 xb_samples = np.linspace(0., params.x_max[0], n_samples)
@@ -35,6 +29,7 @@ gurobi_options = {'OutputFlag': 0}
 time_limit = 18000
 
 # for all the norms of the objective
+norms = ['inf', 'one', 'two']
 for norm in norms:
     print '\nnorm:', norm
     

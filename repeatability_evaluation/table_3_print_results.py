@@ -6,7 +6,7 @@ Alternatively one can consider to reduce the time limit_parameter as explained i
 '''
 
 # To solve the optimization problems uncomment the following (approx. 8 hours)
-# from table_3_data import solves
+from table_3_data import solves
 
 # To load the results uncomment the following
 # import numpy as np
