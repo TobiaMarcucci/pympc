@@ -211,3 +211,70 @@ def plot_output_trajectory(C, x, h, y_bounds=None):
                     loc=1
                     )
     plt.xlabel(r'$t$')
+
+
+def plot_partition_explicit_solution(explicit_solution, print_active_set=False, **kwargs):
+    """
+    Plots the state partition for the 2d solution of an explicit mpc problem.
+
+    Arguments
+    ----------
+    explicit_solution : instance of ExplicitSolution
+        Solution of a multiparametric quadratic program.
+    print_active_set : bool
+        If True it prints the active set of each critical region in its center.
+    """
+
+    # check that the required plot is 2d
+    if explicit_solution.critical_regions[0].polyhedron.A.shape[1] != 2:
+        raise ValueError('can plot only 2-dimensional partitions.')
+
+    # plot every critical region with random colors
+    for cr in explicit_solution.critical_regions:
+        cr.polyhedron.plot(facecolor=np.random.rand(3), **kwargs)
+
+        # if required print active sets
+        if print_active_set:
+            plt.text(cr.polyhedron.center[0], cr.polyhedron.center[1], str(cr.active_set))
+
+def plot_value_function_mpqp(mpqp, explicit_solution, resolution=100, **kwargs):
+    """
+    Plots the level sets of the optimal value function V*(x) of the explicit solution of an mpc problem.
+
+    Arguments
+    ----------
+    mpqp : instance of MultiParametricQuadraticProgram
+        Multiparametric quadratic program of which we want to plot the optimal value function.
+    explicit_solution : instance of ExplicitSolution
+        Solution of a multiparametric quadratic program.
+    resolution : float
+        Size of the grid for the contour plot.
+    """
+
+    # check dimension of the state
+    if explicit_solution.critical_regions[0].polyhedron.A.shape[1] != 2:
+        raise ValueError('can plot only 2-dimensional partitions.')
+
+    # get feasible set
+    feasible_set = mpqp.get_feasible_set()
+
+    # create box containing the feasible set
+    x_max = max([v[0] for v in feasible_set.vertices])
+    x_min = min([v[0] for v in feasible_set.vertices])
+    y_max = max([v[1] for v in feasible_set.vertices])
+    y_min = min([v[1] for v in feasible_set.vertices])
+
+    # create grid
+    x = np.linspace(x_min, x_max, resolution)
+    y = np.linspace(y_min, y_max, resolution)
+    X, Y = np.meshgrid(x, y)
+
+    # evaluate grid
+    zs = np.array([explicit_solution.V(np.array([x,y])) for x,y in zip(np.ravel(X), np.ravel(Y))])
+    Z = zs.reshape(X.shape)
+
+    # plot
+    feasible_set.plot(**kwargs)
+    cp = plt.contour(X, Y, Z)
+    plt.colorbar(cp)
+    plt.title(r'$V^*(x)$')

@@ -1,9 +1,11 @@
 # external imports
 import numpy as np
+import gurobipy as grb
 import matplotlib.pyplot as plt
 from scipy.linalg import block_diag
 
 # internal inputs
+from pympc.control.gurobi_utils import add_variables, add_linear_inequality, add_linear_equality
 from pympc.dynamics.discrete_time_systems import AffineSystem, PieceWiseAffineSystem
 from pympc.optimization.parametric_programs import MultiParametricQuadraticProgram, MultiParametricMixedIntegerQuadraticProgram
 from pympc.optimization.programs import linear_program
@@ -11,7 +13,7 @@ from pympc.optimization.programs import linear_program
 class ModelPredictiveController(object):
     """
     Model predictive controller for linear systems, it solves the optimal control problem
-    V*(x(0)) := min_{x(.), u(.)} 1/2 sum_{t=0}^{N-1} x'(t) Q x(t) + u'(t) R u(t) + \frac{1}{2} x'(N) P x(N)
+    V*(x(0)) := min_{x(.), u(.)} 1/2 sum_{t=0}^{N-1} x'(t) Q x(t) + u'(t) R u(t) + 1/2 x'(N) P x(N)
                s.t. x(t+1) = A x(t) + B u(t), t=0, ..., N-1,
                     (x(t), u(t)) in D, t=0, ..., N-1,
                     x(N) in X_N,
@@ -49,13 +51,180 @@ class ModelPredictiveController(object):
         self.D = D
         self.X_N = X_N
 
-        # initilize explicit solution
+        # gurobi model for the solution of the quadratic programs
+        self.model = self._build_quadratic_program()
+
+        # initilize the multiparametric quadratic program and the explicit solution
+        self._mpqp = None
         self.explicit_solution = None
 
-        # condense mpqp
-        self.mpqp = self._condense_program()
+    def _build_quadratic_program(self):
+        """
+        Generates and stores Gurobi model with the quadratic program.
 
-    def _condense_program(self):
+        Returns
+        ----------
+        model : instance of gurobi.Model
+            Model of the quadratic program.
+        """
+
+        # initialize program and objective function
+        model = grb.Model()
+        objective = 0.
+
+        # loop over the time horizon
+        for t in range(self.N):
+
+            # initial state left free now, see self._set_initial_conditions()
+            if t == 0:
+                x = add_variables(model, self.S.nx, name='x_0')
+
+            # stage variables
+            else:
+                x = x_next
+            x_next = add_variables(model, self.S.nx, name='x_%d'%(t+1))
+            u = add_variables(model, self.S.nu, name='u_%d'%t)
+
+            # enforce dynamics
+            add_linear_equality(model, x_next, self.S.A.dot(x) + self.S.B.dot(u))
+
+            # enforce state and input constraints
+            xu = np.concatenate((x, u))
+            add_linear_inequality(model, self.D.A.dot(xu), self.D.b)
+
+            # stage cost
+            objective += .5 * (x.dot(self.Q).dot(x) + u.dot(self.R).dot(u))
+
+        # terminal constraint
+        add_linear_inequality(model, self.X_N.A.dot(x_next), self.X_N.b)
+
+        # terminal cost
+        objective += .5 * x_next.dot(self.P).dot(x_next)
+
+        # set overall objective
+        model.setObjective(objective)
+
+        return model
+
+    def _set_initial_conditions(self, x0):
+        """
+        Sets the initial conditions to x0 in the quadratic program.
+
+        Arguments
+        ----------
+        x0 : numpy array
+            Initial conditions for the optimal control problem.
+        """
+
+        # loop through the state components and set coincident lower and upper bounds
+        for i in range(self.S.nx):
+            self.model.getVarByName('x_0[%d]'%i).LB = x0[i]
+            self.model.getVarByName('x_0[%d]'%i).UB = x0[i]
+
+        # update model to be sure that new variables are immediately visible
+        self.model.update()
+
+    def feedforward(self, x0, gurobi_parameters={}):
+        """
+        Given the current state x0 of the system, solves the quadratic program.
+
+        Arguments
+        ----------
+        x0 : numpy.ndarray
+            Current state of the system.
+
+        Returns
+        ----------
+        u : list of numpy.ndarray
+            Optimal control signals for t = 0, ..., N-1.
+        x : list of numpy.ndarray
+            Optimal state trajectory for t = 0, ..., N.
+        V : float
+            Optimal value function for the given state.
+        """
+
+        # set initial conditions
+        self._set_initial_conditions(x0)
+
+        # do not let gurobi print the solution status while solving, can be changed with gurobi_parameters
+        self.model.setParam('OutputFlag', 0)
+
+        # set gurobi parameters
+        for parameter, value in gurobi_parameters.items():
+            self.model.setParam(parameter, value)
+
+        # run the optimization
+        self.model.optimize()
+        u, x, V = self._organize_result()
+
+        return u, x, V
+
+    def feedback(self, x0, gurobi_parameters={}):
+        """
+        Returns the optimal feedback for the given state x0.
+
+        Arguments
+        ----------
+        x0 : numpy.ndarray
+            State of the system.
+
+        Returns
+        ----------
+        u0 : numpy.ndarray
+            Optimal feedback.
+        """
+
+        # get feedforward and check feasibility
+        u = self.feedforward(x0, gurobi_parameters)[0]
+        if u is None:
+            return None
+
+        return u[0]
+
+    def _organize_result(self):
+        """
+        Extracts and reorganizes the result of the quadratic program.
+
+        Returns
+        ----------
+        u : list of numpy.ndarray
+            Optimal control signals for t = 0, ..., N-1.
+        x : list of numpy.ndarray
+            Optimal state trajectory for t = 0, ..., N.
+        V : float
+            Optimal value function for the given state.
+        """
+
+        # initialize solution to None
+        u = None
+        x = None
+        V = None
+
+        # store result if model is optimal and a solution is present
+        if self.model.status == 2 and self.model.SolCount > 0:
+
+            # input sequence
+            u = [np.array([self.model.getVarByName('u_%d[%d]'%(t,i)).x for i in range(self.S.nu)]) for t in range(self.N)]
+
+            # state trajectyory
+            x = [np.array([self.model.getVarByName('x_%d[%d]'%(t,i)).x for i in range(self.S.nx)]) for t in range(self.N+1)]
+
+            # optimal value function
+            V = self.model.objVal
+
+        return u, x, V
+
+    def store_explicit_solution(self, **kwargs):
+        """
+        Solves the mpqp (condensed optimal control problem) explicitly.
+        Stores an instance of ExplicitSolution in self.explicit_solution.
+        """
+
+        # solve the mpqp explicitly
+        self.explicit_solution = self.mpqp.explicit_solve(**kwargs)
+
+    @property
+    def mpqp(self):
         """
         Generates and stores the optimal control problem in condensed form.
 
@@ -65,83 +234,28 @@ class ModelPredictiveController(object):
             Condensed mpQP.
         """
 
+        # check if the mpqp has been already stored
+        if self._mpqp is not None:
+            return self._mpqp
+
         # create fake PWA system and use PWA condenser
         c = np.zeros(self.S.nx)
         S = AffineSystem(self.S.A, self.S.B, c)
         S = PieceWiseAffineSystem([S], [self.D])
         mode_sequence = [0]*self.N
 
-        return condense_optimal_control_problem(S, self.Q, self.R, self.P, self.X_N, mode_sequence)
+        # get multiparametric quadratic program
+        self._mpqp = condense_optimal_control_problem(S, self.Q, self.R, self.P, self.X_N, mode_sequence)
 
-    def feedforward(self, x):
+        return self._mpqp
+
+    def feedforward_explicit(self, x0):
         """
-        Given the state x of the system, returns the optimal sequence of N inputs and the related cost.
+        Finds the critical region where the state x0 is and returns the optimal feedforward and the cost to go.
 
         Arguments
         ----------
-        x : numpy.ndarray
-            State of the system.
-
-        Returns
-        ----------
-        u_feedforward : list of numpy.ndarray
-            Optimal control signals for t = 0, ..., N-1.
-        V : float
-            Optimal value function for the given state.
-        """
-
-        # solve and check feasibility
-        sol = self.mpqp.solve(x)
-        if sol['min'] is None:
-            return None, None
-
-        # from vector to list of vectors
-        u_feedforward = [sol['argmin'][self.S.nu*i : self.S.nu*(i+1)] for i in range(self.N)]
-        V = sol['min']
-
-        return u_feedforward, V
-
-    def feedback(self, x):
-        """
-        Returns the optimal feedback for the given state x.
-
-        Arguments
-        ----------
-        x : numpy.ndarray
-            State of the system.
-
-        Returns
-        ----------
-        u_feedback : numpy.ndarray
-            Optimal feedback.
-        """
-
-        # get feedforward and extract first input
-        u_feedforward = self.feedforward(x)[0]
-        if u_feedforward is None:
-            return None
-
-        return u_feedforward[0]
-
-    def store_explicit_solution(self, **kwargs):
-        """
-        Solves the mpqp (condensed optimal control problem) explicitly.
-
-        Returns
-        ----------
-        instance of ExplicitSolution
-            Explicit solution of the underlying mpqp problem.
-        """
-
-        self.explicit_solution = self.mpqp.explicit_solve(**kwargs)
-
-    def feedforward_explicit(self, x):
-        """
-        Finds the critical region where the state x is and returns the optimal feedforward and the cost to go.
-
-        Arguments
-        ----------
-        x : numpy.ndarray
+        x0 : numpy.ndarray
             State of the system.
 
         Returns
@@ -157,97 +271,33 @@ class ModelPredictiveController(object):
             raise ValueError('explicit solution not stored.')
 
         # evaluate lookup table
-        u = self.explicit_solution.u(x)
+        u = self.explicit_solution.u(x0)
         if u is not None:
             u = [u[t*self.S.nu:(t+1)*self.S.nu] for t in range(self.N)]
 
-        return u, self.explicit_solution.V(x)
+        return u, self.explicit_solution.V(x0)
 
-    def feedback_explicit(self, x):
+    def feedback_explicit(self, x0):
         """
-        Finds the critical region where the state x is and returns the optimal feedback for the given state x.
+        Finds the critical region where the state x0 is and returns the optimal feedback for the given state x.
 
         Arguments
         ----------
-        x : numpy.ndarray
+        x0 : numpy.ndarray
             State of the system.
 
         Returns
         ----------
-        u_feedback : numpy.ndarray
+        u0 : numpy.ndarray
             Optimal feedback.
         """
 
-        # get feedforward and extract first input
-        u_feedforward = self.feedforward_explicit(x)[0]
-        if u_feedforward is None:
+        # get feedforward and check feasibility
+        u = self.feedforward_explicit(x0)[0]
+        if u is None:
             return None
 
-        return u_feedforward[0]
-
-    def plot_state_space_partition(self, print_active_set=False, **kwargs):
-        """
-        Finds the critical region where the state x is, and returns the PWA feedforward.
-
-        Arguments
-        ----------
-        print_active_set : bool
-            If True it prints the active set of each critical region in its center.
-        """
-
-        # check that the required plot is 2d and that the solution is available
-        if self.S.nx != 2:
-            raise ValueError('can plot only 2-dimensional partitions.')
-        if self.explicit_solution is None:
-            raise ValueError('explicit solution not stored.')
-
-        # plot every critical region with random colors
-        for cr in self.explicit_solution.critical_regions:
-            cr.polyhedron.plot(facecolor=np.random.rand(3), **kwargs)
-
-            # if required print active sets
-            if print_active_set:
-                plt.text(cr.polyhedron.center[0], cr.polyhedron.center[1], str(cr.active_set))
-
-    def plot_optimal_value_function(self, resolution=100, **kwargs):
-        """
-        Plots the level sets of the optimal value function V*(x).
-
-        Arguments
-        ----------
-        resolution : float
-            Size of the grid for the contour plot.
-        """
-
-        # check dimension of the state
-        if self.S.nx != 2:
-            raise ValueError('can plot only 2-dimensional value functions.')
-        if self.explicit_solution is None:
-            raise ValueError('explicit solution not stored.')
-
-        # get feasible set
-        feasible_set = self.mpqp.get_feasible_set()
-
-        # create box containing the feasible set
-        x_max = max([v[0] for v in feasible_set.vertices])
-        x_min = min([v[0] for v in feasible_set.vertices])
-        y_max = max([v[1] for v in feasible_set.vertices])
-        y_min = min([v[1] for v in feasible_set.vertices])
-
-        # create grid
-        x = np.linspace(x_min, x_max, resolution)
-        y = np.linspace(y_min, y_max, resolution)
-        X, Y = np.meshgrid(x, y)
-
-        # evaluate grid
-        zs = np.array([self.explicit_solution.V(np.array([x,y])) for x,y in zip(np.ravel(X), np.ravel(Y))])
-        Z = zs.reshape(X.shape)
-
-        # plot
-        feasible_set.plot(**kwargs)
-        cp = plt.contour(X, Y, Z)
-        plt.colorbar(cp)
-        plt.title(r'$V^*(x)$')
+        return u[0]
 
 class HybridModelPredictiveController(object):
 

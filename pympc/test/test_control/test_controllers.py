@@ -10,23 +10,23 @@ from pympc.control.controllers import ModelPredictiveController, HybridModelPred
 
 class testModelPredictiveController(unittest.TestCase):
 
-    def test_implicit_solution(self):
+    def test_implicit_solution_vs_lqr(self):
         np.random.seed(1)
 
         # random linear system
         for i in range(100):
 
-            # ensure controllability
+            # ensure controllability of the random system
             n = np.random.randint(2, 5)
             m = np.random.randint(1, n)
             controllable = False
             while not controllable:
-                A = np.random.rand(n,n)/10.
-                B = np.random.rand(n,m)/10.
+                A = np.random.rand(n,n)
+                B = np.random.rand(n,m)
                 S = LinearSystem(A, B)
                 controllable = S.controllable
 
-            # stage constraints
+            # random stage constraints
             x_min = -np.random.rand(n)
             x_max = np.random.rand(n)
             u_min = -np.random.rand(m)
@@ -35,78 +35,101 @@ class testModelPredictiveController(unittest.TestCase):
             U = Polyhedron.from_bounds(u_min, u_max)
             D = X.cartesian_product(U)
 
-            # assemble controller
-            N = np.random.randint(5, 10)
-            Q = np.eye(n)
-            R = np.eye(m)
+            # weights cost function
+            Q = np.random.rand(n,n)
+            Q = Q.dot(Q.T)
+            R = np.random.rand(m,m)
+            R = R.dot(R.T)
             P, K = S.solve_dare(Q, R)
+
+            # terminal constraint (mcais)
             X_N = S.mcais(K, D)
+
+            # assemble mpc controller with random horizon
+            N = np.random.randint(5, 10)
             controller = ModelPredictiveController(S, N, Q, R, P, D, X_N)
 
-            # simulate
+            # test mpc vs lqr for several random initial conditions
             for j in range(10):
 
-                # intial state
+                # random intial state
                 x = np.multiply(np.random.rand(n), x_max - x_min) + x_min
 
-                # mpc
-                u_mpc, V_mpc = controller.feedforward(x)
+                # mpc solution
+                u_mpc, x_mpc, V_mpc = controller.feedforward(x)
 
-                # lqr
+                # lqr solution
                 V_lqr = .5*x.dot(P).dot(x)
                 u_lqr = []
-                x_next = x
+                x_lqr = [x]
                 for t in range(N):
-                    u_lqr.append(K.dot(x_next))
-                    x_next = (A + B.dot(K)).dot(x_next)
+                    u_lqr.append(K.dot(x_lqr[-1]))
+                    x_lqr.append((A + B.dot(K)).dot(x_lqr[-1]))
 
-                # constraint set (not condensed)
-                constraints = copy(D)
-                C = np.hstack((np.eye(n), np.zeros((n,m))))
-                constraints.add_equality(C, x)
-                for t in range(N-1):
-                    constraints = constraints.cartesian_product(D)
-                    C = np.zeros((n, constraints.A.shape[1]))
-                    C[:, -2*(n+m):] = np.hstack((A, B, -np.eye(n), np.zeros((n,m))))
-                    d = np.zeros(n)
-                    constraints.add_equality(C, d)
-                constraints = constraints.cartesian_product(X_N)
-
-                # if x is inside mcais lqr = mpc
+                # if x in mcais then we must have lqr = mpc
                 if X_N.contains(x):
-                    self.assertAlmostEqual(V_mpc, V_lqr)
+
+                    # check optimal values
                     for t in range(N):
-                        np.testing.assert_array_almost_equal(u_mpc[t], u_lqr[t])
+                        np.testing.assert_array_almost_equal(u_mpc[t], u_lqr[t], decimal=4)
+                    for t in range(N+1):
+                        np.testing.assert_array_almost_equal(x_mpc[t], x_lqr[t], decimal=4)
+                    self.assertAlmostEqual(V_mpc, V_lqr)
 
-                # if x is outside mcais lqr > mpc
-                elif V_mpc is not None:
-                    self.assertTrue(V_mpc > V_lqr)
-                    np.testing.assert_array_almost_equal(u_mpc[0], controller.feedback(x))
-
-                    # simulate the open loop control
-                    x_mpc = S.simulate(x, u_mpc)
+                    # check constraints
                     for t in range(N):
                         self.assertTrue(X.contains(x_mpc[t]))
                         self.assertTrue(U.contains(u_mpc[t]))
                     self.assertTrue(X_N.contains(x_mpc[N]))
 
-                    # check feasibility
-                    xu_mpc = np.concatenate([np.concatenate((x_mpc[t], u_mpc[t])) for t in range(N)])
-                    xu_mpc = np.concatenate((xu_mpc, x_mpc[N]))
-                    self.assertTrue(constraints.contains(xu_mpc))
 
-                # else certify empyness of the constraint set
-                else:
+                # if x is not in mcais then we must have cost lqr > cost mpc
+                elif V_mpc is not None:
+
+                    # check optimal values
+                    self.assertTrue(V_mpc > V_lqr)
+
+                    # check constraint validity
+                    for t in range(N):
+                        self.assertTrue(X.contains(x_mpc[t]))
+                        self.assertTrue(U.contains(u_mpc[t]))
+                    self.assertTrue(X_N.contains(x_mpc[N]))
+
+                # certify infeasibility
+                if V_mpc is None:
+
+                    # check that state and inputs trajectories
+                    self.assertTrue(u_mpc is None)
+                    self.assertTrue(x_mpc is None)
+
+                    # check the feedback extraction
                     self.assertTrue(controller.feedback(x) is None)
-                    self.assertTrue(constraints.empty)
 
-    def test_explicit_solution(self):
+                    # verify infeasibility                    
+                    constraint_set = Polyhedron(controller.mpqp.A['u'], controller.mpqp.b - controller.mpqp.A['x'].dot(x))
+                    self.assertTrue(constraint_set.empty)
+
+                # certify feasibility
+                else:
+
+                    # check that state and inputs trajectories
+                    self.assertTrue(u_mpc is not None)
+                    self.assertTrue(x_mpc is not None)
+
+                    # check the feedback extraction
+                    np.testing.assert_array_almost_equal(u_mpc[0], controller.feedback(x))
+
+                    # verify infeasibility                    
+                    constraint_set = Polyhedron(controller.mpqp.A['u'], controller.mpqp.b - controller.mpqp.A['x'].dot(x))
+                    self.assertFalse(constraint_set.empty)
+
+    def test_explicit_vs_implicit_solution(self):
         np.random.seed(1)
 
         # random linear system
         for i in range(10):
 
-            # ensure controllability
+            # ensure controllability random system
             n = np.random.randint(2, 3)
             m = np.random.randint(1, 2)
             controllable = False
@@ -116,7 +139,7 @@ class testModelPredictiveController(unittest.TestCase):
                 S = LinearSystem(A, B)
                 controllable = S.controllable
 
-            # stage constraints
+            # random stage constraints
             x_min = -np.random.rand(n)
             x_max = np.random.rand(n)
             u_min = -np.random.rand(m)
@@ -125,35 +148,42 @@ class testModelPredictiveController(unittest.TestCase):
             U = Polyhedron.from_bounds(u_min, u_max)
             D = X.cartesian_product(U)
 
-            # assemble controller
-            N = 10
-            Q = np.eye(n)
-            R = np.eye(m)
+            # random weights cost function
+            Q = np.random.rand(n,n)
+            Q = Q.dot(Q.T)
+            R = np.random.rand(m,m)
+            R = R.dot(R.T)
             P, K = S.solve_dare(Q, R)
+
+            # terminal constraint (mcais)
             X_N = S.mcais(K, D)
+
+            # assemble controller with random horizon
+            N = np.random.randint(5, 10)
             controller = ModelPredictiveController(S, N, Q, R, P, D, X_N)
 
             # store explicit solution
             controller.store_explicit_solution()
 
-            # simulate
+            # test explicit mpc vs implicit mpc for several random initial conditions
             for j in range(10):
 
                 # intial state
                 x = np.multiply(np.random.rand(n), x_max - x_min) + x_min
 
                 # implicit vs explicit mpc
-                u_implicit, V_implicit = controller.feedforward(x)
+                u_implicit, x_implicit, V_implicit = controller.feedforward(x)
                 u_explicit, V_explicit = controller.feedforward_explicit(x)
 
                 # if feasible
                 if V_implicit is not None:
                     self.assertAlmostEqual(V_implicit, V_explicit)
                     for t in range(N):
-                        np.testing.assert_array_almost_equal(u_implicit[t], u_explicit[t])
+                        np.testing.assert_array_almost_equal(u_implicit[t], u_explicit[t], decimal=4)
                     np.testing.assert_array_almost_equal(
                         controller.feedback(x),
-                        controller.feedback_explicit(x)
+                        controller.feedback_explicit(x),
+                        decimal=4
                         )
 
                 # if unfeasible
@@ -252,7 +282,7 @@ class testHybridModelPredictiveController(unittest.TestCase):
         x0 = np.array([.0,.8])
         self.assertFalse(X_N.contains(x0))
         linear_controller = ModelPredictiveController(S1, N, Q, R, P, D1, X_N)
-        u_lmpc, V_lmpc = linear_controller.feedforward(x0)
+        u_lmpc, x_lmpc, V_lmpc = linear_controller.feedforward(x0)
         x_lmpc = S1.simulate(x0, u_lmpc)
         u_hmpc, x_hmpc, ms_hmpc, V_hmpc = controller.feedforward(x0)
         np.testing.assert_array_almost_equal(

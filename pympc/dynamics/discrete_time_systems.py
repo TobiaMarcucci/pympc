@@ -1,6 +1,6 @@
 # external imports
 import numpy as np
-from scipy.linalg import block_diag, solve_discrete_are
+from scipy.linalg import solve_discrete_are
 from copy import copy
 
 # internal imports
@@ -581,195 +581,44 @@ class PieceWiseAffineSystem(object):
 
         return True
 
-def mcais(A, X, verbose=False):
+class MixedLogicalDynamicalSystem(object):
     """
-    Returns the maximal constraint-admissible (positive) invariant set O_inf for the system x(t+1) = A x(t) subject to the constraint x in X.
-    O_inf is also known as maximum output admissible set.
-    It holds that x(0) in O_inf <=> x(t) in X for all t >= 0.
-    (Implementation of Algorithm 3.2 from: Gilbert, Tan - Linear Systems with State and Control Constraints, The Theory and Application of Maximal Output Admissible Sets.)
-    Sufficient conditions for this set to be finitely determined (i.e. defined by a finite number of facets) are: A stable, X bounded and containing the origin.
-
-    Math
-    ----------
-    At each time step t, we want to verify if at the next time step t+1 the system will go outside X.
-    Let's consider X := {x | D_i x <= e_i, i = 1,...,n} and t = 0.
-    In order to ensure that x(1) = A x(0) is inside X, we need to consider one by one all the constraints and for each of them, the worst-case x(0).
-    We can do this solvin an LP
-    V(t=0, i) = max_{x in X} D_i A x - e_i for i = 1,...,n
-    if all these LPs has V < 0 there is no x(0) such that x(1) is outside X.
-    The previous implies that all the time-evolution x(t) will lie in X (see Gilbert and Tan).
-    In case one of the LPs gives a V > 0, we iterate and consider
-    V(t=1, i) = max_{x in X, x in A X} D_i A^2 x - e_i for i = 1,...,n
-    where A X := {x | D A x <= e}.
-    If now all V < 0, then O_inf = X U AX, otherwise we iterate until convergence
-    V(t, i) = max_{x in X, x in A X, ..., x in A^t X} D_i A^(t+1) x - e_i for i = 1,...,n
-    Once at convergence O_Inf = X U A X U ... U A^t X.
-
-    Arguments
-    ----------
-    A : numpy.ndarray
-        State transition matrix.
-    X : instance of Polyhedron
-        State-space domain of the dynamical system.
-    verbose : bool
-        If True prints at each iteration the convergence parameters.
-
-    Returns:
-    ----------
-    O_inf : instance of Polyhedron
-        Maximal constraint-admissible (positive) ivariant.
-    t : int
-        Determinedness index.
+    Hybrid dynamical system in the form
+    |x_c_+| = |A_cc A_cb| |x_c| + |B_cc B_cb| |u_c| + |C_cc C_cb| |s_c| + |d_c|,
+    |x_b_+|   |A_bc A_bb| |x_b|   |B_bc B_bb| |u_b|   |C_bc C_bb| |s_b|   |d_b|
+    subj. to  |F_ec F_eb| |x_c| + |G_ec G_eb| |u_c| + |H_ec H_eb| |s_c| <= |l_e|.
+              |F_ic F_ib| |x_b|   |G_ic G_ib| |u_b|   |H_ic H_ib| |s_b|  = |l_i|
+    Here x is the continuous and binary state, u is the input, s are the auxiliary variables.
     """
 
-    # ensure convergence of the algorithm
-    eig_max = np.max(np.absolute(np.linalg.eig(A)[0]))
-    if eig_max > 1.:
-        raise ValueError('unstable system, cannot derive maximal constraint-admissible set.')
-    [nc, nx] = X.A.shape
-    if not X.contains(np.zeros((nx, 1))):
-        raise ValueError('the origin is not contained in the constraint set, cannot derive maximal constraint-admissible set.')
-    if not X.bounded:
-        raise ValueError('unbounded constraint set, cannot derive maximal constraint-admissible set.')
+    def __init__(self, A, B, F, G, g):
+        """
+        Initializes the mixed logical dynamical system.
 
-    # initialize mcais
-    O_inf = copy(X)
+        Arguments
+        ----------
+        A : dict of 2d numpy arrays
+            State transition matrices, keys: 'cc', 'cb', 'bc', 'bb'.
+        B : dict of 2d numpy arrays
+            Input matrices, keys: 'cc', 'cb', 'bc', 'bb'.
+        C : dict of 2d numpy arrays
+            Auxiliary variable matrices, keys: 'cc', 'cb', 'bc', 'bb'.
+        d : dict of 1d numpy arrays
+            Offset terms in the dynamics, keys: 'c', 'b'.
+        F : dict of 2d numpy arrays
+            State constraint matrices, keys: 'ec', 'eb', 'ic', 'ib'.
+        G : dict of 2d numpy arrays
+            Input constraint matrices, keys: 'ec', 'eb', 'ic', 'ib'.
+        H : dict of 2d numpy arrays
+            Auxiliary variable constraint matrices, keys: 'e', 'i'.
+        l : 1d numpy array
+            Right hand side of the constraints.
+        """
 
-    # loop over time
-    t = 1
-    convergence = False
-    while not convergence:
-
-        # solve one LP per facet
-        J = X.A.dot(np.linalg.matrix_power(A,t))
-        residuals = []
-        for i in range(X.A.shape[0]):
-            sol = linear_program(- J[i], O_inf.A, O_inf.b)
-            residuals.append(- sol['min'] - X.b[i])
-
-        # print status of the algorithm
-        if verbose:
-            print('Time horizon: ' + str(t) + '.'),
-            print('Convergence index: ' + str(max(residuals)) + '.'),
-            print('Number of facets: ' + str(O_inf.A.shape[0]) + '.   \r'),
-
-        # convergence check
-        new_facets = [i for i, r in enumerate(residuals) if r > 0.]
-        if len(new_facets) == 0:
-            convergence = True
-        else:
-
-            # add (only non-redundant!) facets
-            O_inf.add_inequality(J[new_facets], X.b[new_facets])
-            t += 1
-
-    # remove redundant facets
-    if verbose:
-        print('\nMaximal constraint-admissible invariant set found.')
-        print('Removing redundant facets ...'),
-    O_inf.remove_redundant_inequalities()
-    if verbose:
-        print('minimal facets are ' + str(O_inf.A.shape[0]) + '.')
-
-    return O_inf
-
-def condense_pwa_system(affine_systems, mode_sequence):
-    """
-    For the PWA system
-    x(t+1) = A_i x(t) + B_i u(t) + c_i    if    (x(t), u(t)) in D_i,
-    given the mode sequence z = (z(0), ... , z(N-1)), returns the matrices A_bar, B_bar, c_bar such that
-    x_bar = A_bar x(0) + B_bar u_bar + c_bar
-    with x_bar = (x(0), ... , x(N)) and u_bar = (u(0), ... , u(N-1)).
-
-    Arguments
-    ----------
-    affine_systems : list of instances of AffineSystem
-        State transition matrix (assumed to be invertible).
-    mode_sequence : list of int
-        Sequence of the modes that the PWA system is in for time t = 0, 1, ..., N-1.
-
-    Returns
-    ----------
-    A_bar : numpy.ndarray
-        Condensed free evolution matrix.
-    B_bar : numpy.ndarray
-        Condensed input to state matrix.
-    c_bar : numpy.ndarray
-        Condensed offset term matrix.
-    """
-
-    # system dimensions
-    nx = affine_systems[0].nx
-    nu = affine_systems[0].nu
-    N = len(mode_sequence)
-
-    # matrix sequence
-    A_sequence = [affine_systems[mode_sequence[i]].A for i in range(N)]
-    B_sequence = [affine_systems[mode_sequence[i]].B for i in range(N)]
-    c_sequence = [affine_systems[mode_sequence[i]].c for i in range(N)]
-
-    # free evolution of the system
-    A_bar = np.vstack([productory(A_sequence[i::-1]) for i in range(N)])
-    A_bar = np.vstack((np.eye(nx), A_bar))
-
-    # forced evolution of the system
-    B_bar = np.zeros((nx*N,nu*N))
-    for i in range(N):
-        for j in range(i):
-            B_bar[nx*i:nx*(i+1), nu*j:nu*(j+1)] = productory(A_sequence[i:j:-1]).dot(B_sequence[j])
-        B_bar[nx*i:nx*(i+1), nu*i:nu*(i+1)] = B_sequence[i]
-    B_bar = np.vstack((np.zeros((nx, nu*N)), B_bar))
-
-    # evolution related to the offset term
-    c_bar = np.concatenate((np.zeros(nx), c_sequence[0]))
-    for i in range(1, N):
-        offset_i = sum([productory(A_sequence[i:j:-1]).dot(c_sequence[j]) for j in range(i)]) + c_sequence[i]
-        c_bar = np.concatenate((c_bar, offset_i))
-
-    return A_bar, B_bar, c_bar
-
-def productory(matrix_list):
-    """
-    Multiplies from lest to right the matrices in the list matrix_list.
-
-    Arguments
-    ----------
-    matrix_list : list of numpy.ndarray
-        List of matrices to be multiplied.
-
-    Returns
-    ----------
-    M : numpy.ndarray
-        Product of the matrices in matrix_list.
-    """
-
-    # start wiht the first elment and multy all the others
-    A = matrix_list[0]
-    for B in matrix_list[1:]:
-        A = A.dot(B)
-
-    return A
-
-def get_state_transition_matrices(x, u, x_next):
-    """
-    Extracts from the symbolic expression of the state at the next time step the matrices A, B, and c.
-    Arguments
-    ----------
-    x : sympy matrix filled with sympy symbols
-        Symbolic state of the system.
-    u : sympy matrix filled with sympy symbols
-        Symbolic input of the system.
-    x_next : sympy matrix filled with sympy symbolic linear expressions
-        Symbolic value of the state update.
-    """
-
-    # state transition matrices
-    A = np.array(x_next.jacobian(x)).astype(np.float64)
-    B = np.array(x_next.jacobian(u)).astype(np.float64)
-
-    # offset term
-    origin = {xi:0 for xi in x}
-    origin.update({ui:0 for ui in u})
-    c = np.array(x_next.subs(origin)).astype(np.float64).flatten()
-    
-    return A, B, c
+        # store data
+        self.A = A
+        self.B = B
+        self.b = b
+        self.F = F
+        self.G = G
+        self.g = g
