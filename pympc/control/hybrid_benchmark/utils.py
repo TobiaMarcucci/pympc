@@ -17,13 +17,27 @@ def add_vars(prog, n, lb=None, **kwargs):
     prog.update()
     return np.array([xi for xi in x.values()])
 
-def add_linear_inequality(prog, x, y):
-    assert x.size == y.size
-    return [prog.addConstr(x[k] - y[k] <= 0.) for k in range(x.size)] # sometimes x is a vector of floats: gurobi raises errors if variables are not in the lhs
+def add_linear_inequality(prog, x, y, direction='<=', name=None):
+    assert len(x) == len(y)
+    if name is not None:
+        names = [name + '[%d]'%k for k in range(len(x))]
+    else:
+        names = ['']*len(x)
+    if direction == '<=':
+        # sometimes x is a vector of floats: gurobi raises errors if variables are not in the lhs
+        return [prog.addConstr(x[k] - y[k] <= 0., name=names[k]) for k in range(len(x))]
+    elif direction == '>=':
+        # sometimes x is a vector of floats: gurobi raises errors if variables are not in the lhs
+        return [prog.addConstr(x[k] - y[k] >= 0., name=names[k]) for k in range(len(x))] 
 
-def add_linear_equality(prog, x, y):
-    assert x.size == y.size
-    return [prog.addConstr(x[k] - y[k] == 0.) for k in range(x.size)] # sometimes x is a vector of floats: gurobi raises errors if variables are not in the lhs
+def add_linear_equality(prog, x, y, name=None):
+    assert len(x) == len(y)
+    if name is not None:
+        names = [name + '[%d]'%k for k in range(len(x))]
+    else:
+        names = ['']*len(x)
+    # sometimes x is a vector of floats: gurobi raises errors if variables are not in the lhs
+    return [prog.addConstr(x[k] - y[k] == 0., name=names[k]) for k in range(len(x))] 
 
 def add_stage_cost(prog, Q, R, x, u, norm):
 

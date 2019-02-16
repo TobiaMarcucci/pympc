@@ -78,6 +78,9 @@ class HybridModelPredictiveController(object):
             # stage cost
             obj += .5 * (x.dot(self.Q).dot(x) + u.dot(self.R).dot(u))
 
+        # terminal cost
+        obj += .5 * x.dot(self.Q).dot(x)
+
         # set cost
         prog.setObjective(obj)
 

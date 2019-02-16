@@ -582,6 +582,85 @@ class PieceWiseAffineSystem(object):
 
         return True
 
+
+from pympc.geometry.polyhedron import get_matrices_affine_expression
+
+class MixedLogicalDynamicalSystem(object):
+
+    def __init__(self, A, Buc, Bub, Bsc, Bsb, b, F, Guc, Gub, Gsc, Gsb, g):
+
+        self.A = A
+        self.Buc = Buc
+        self.Bub = Bub
+        self.Bsc = Bsc
+        self.Bsb = Bsb
+        self.b = b
+        self.F = F
+        self.Guc = Guc
+        self.Gub = Gub
+        self.Gsc = Gsc
+        self.Gsb = Gsb
+        self.g = g
+
+        self.nx = A.shape[1]
+        self.nuc = Buc.shape[1]
+        self.nub = Bub.shape[1]
+        self.nsc = Bsc.shape[1]
+        self.nsb = Bsb.shape[1]
+
+        self.m = F.shape[0]
+
+        assert Buc.shape[0] == self.nx
+        assert Bub.shape[0] == self.nx
+        assert Bsc.shape[0] == self.nx
+        assert Bsb.shape[0] == self.nx
+        assert b.size == self.nx
+
+        assert F.shape[1] == self.nx
+        assert Guc.shape[1] == self.nuc
+        assert Gub.shape[1] == self.nub
+        assert Gsc.shape[1] == self.nsc
+        assert Gsb.shape[1] == self.nsb
+
+        assert Guc.shape[0] == self.m
+        assert Gub.shape[0] == self.m
+        assert Gsc.shape[0] == self.m
+        assert Gsc.shape[0] == self.m
+        assert g.size == self.m
+
+    @staticmethod
+    def from_symbolic(x, uc, ub, sc, sb, x_next, constraints):
+
+        # state transition matrices
+        us = uc.col_join(ub).col_join(sc).col_join(sb)
+        A, B, c = get_state_transition_matrices(x, us, x_next)
+        blocks = [i.shape[0] for i in [uc, ub, sc, sb]]
+        Buc, Bub, Bsc, Bsb = unpack_block_matrix(B, blocks, 'h')
+
+
+        # constraints
+        xus = x.col_join(us)
+        FG, h = get_matrices_affine_expression(xus, constraints)
+        blocks = [i.shape[0] for i in [x, uc, ub, sc, sb]]
+        F, Guc, Gub, Gsc, Gsb = unpack_block_matrix(FG, blocks, 'h')
+
+        return MixedLogicalDynamicalSystem(A, Buc, Bub, Bsc, Bsb, c, F, Guc, Gub, Gsc, Gsb, h)
+
+def unpack_block_matrix(A, indices, structure):
+    blocks = []
+    j = 0
+    for i in indices:
+        if structure == 'h':
+            blocks.append(A[:,j:j+i])
+        elif structure == 'v':
+            blocks.append(A[j:j+i,:])
+        else:
+            raise ValueError('unknown structure ' + structure)
+        j += i
+    return blocks
+
+        
+
 def mcais(A, X, verbose=False):
     """
     Returns the maximal constraint-admissible (positive) invariant set O_inf for the system x(t+1) = A x(t) subject to the constraint x in X.

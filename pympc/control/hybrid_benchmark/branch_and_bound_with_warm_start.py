@@ -335,6 +335,12 @@ def branch_and_bound(
         Period in seconds for printing the status of the solver.
         Set it ot None to shut the log.
 
+    tree_file_name :
+
+    warm_start :
+
+
+
     Returns
     ----------
     extra_data : unpecified
@@ -350,7 +356,7 @@ def branch_and_bound(
     # initialization
     incumbent = None
     upper_bound = inf
-    feasible_leaves = []
+    optimal_leaves = []
     if warm_start is not None:
         candidate_nodes = deepcopy(warm_start)
         lower_bound = min([node.lower_bound for node in candidate_nodes])
@@ -384,11 +390,12 @@ def branch_and_bound(
 
         # pruning, infeasibility
         if not candidate_node.feasible:
+            optimal_leaves.append(candidate_node)
             pruning_criteria = 'infeasibility'
 
         # pruning, suboptimality
         elif candidate_node.objective >= upper_bound:
-            feasible_leaves.append(candidate_node)
+            optimal_leaves.append(candidate_node)
             pruning_criteria = 'suboptimality'
 
         # pruning, new incumbent
@@ -401,16 +408,16 @@ def branch_and_bound(
                 incumbent = candidate_node
 
                 # collect feasible leaf for the warm start
-                feasible_leaves.append(candidate_node)
+                optimal_leaves.append(candidate_node)
 
                 # prune the branches that are now suboptimal
                 new_candidate_nodes = []
-                for node in candidate_nodes: 
+                for node in candidate_nodes:
                     if node.lower_bound is not None and node.lower_bound > upper_bound:
-                        feasible_leaves.append(node)
+                        optimal_leaves.append(node)
                     elif node.parent is not None and node.parent.objective > upper_bound:
-                        if not node.parent in feasible_leaves:
-                            feasible_leaves.append(node.parent)
+                        if not node.parent in optimal_leaves:
+                            optimal_leaves.append(node.parent)
                     else:
                         new_candidate_nodes.append(node)
                 candidate_nodes = new_candidate_nodes
@@ -448,7 +455,7 @@ def branch_and_bound(
     if incumbent is None:
         return None, []
     else:
-        return incumbent.extra_data, feasible_leaves
+        return incumbent.extra_data, optimal_leaves
 
 def get_lower_bound(candidate_nodes, upper_bound):
     '''
