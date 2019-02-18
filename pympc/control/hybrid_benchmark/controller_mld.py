@@ -1,22 +1,55 @@
 # external imports
 import numpy as np
 import gurobipy as grb
-from scipy.linalg import block_diag
-from copy import copy
-from collections import OrderedDict
+from copy import copy, deepcopy
+from operator import le, ge, eq
 
 # internal inputs
-from pympc.control.hybrid_benchmark.utils import (add_vars,
-                                                  add_linear_inequality,
-                                                  add_linear_equality
-                                                  )
 from pympc.control.hybrid_benchmark.branch_and_bound_with_warm_start import Node, branch_and_bound, best_first
-from pympc.optimization.programs import linear_program
+
+class GurobiModel(grb.Model):
+
+    def __init__(self, **kwargs):
+        super(GurobiModel, self).__init__(**kwargs)
+
+    def add_variables(self, n, lb=None, **kwargs):
+        if lb is None:
+            lb = [-grb.GRB.INFINITY]*n
+        x = self.addVars(n, lb=lb, **kwargs)
+        self.update()
+        return np.array([xi for xi in x.values()])
+
+    def get_variables(self, name):
+        v = []
+        for i in range(self.NumVars):
+            vi = self.getVarByName(name+'[%d]'%i)
+            if vi:
+                v.append(vi)
+            else:
+                break
+        return np.array(v)
+
+    def add_linear_constraints(self, x, operator, y, **kwargs):
+        assert len(x) == len(y)
+        c = self.addConstrs((operator(x[k],y[k]) for k in range(len(x))), **kwargs)
+        self.update()
+        return np.array([ci for ci in c.values()])
+
+    def get_constraints(self, name):
+        c = []
+        for i in range(self.NumConstrs):
+            ci = self.getConstrByName(name+'[%d]'%i)
+            if ci:
+                c.append(ci)
+            else:
+                break
+        return np.array(c)
 
 class HybridModelPredictiveController(object):
 
-    def __init__(self, MLD, N, P, Q, R, C=None, c=None, D=None, d=None, tol=1.e-5):
+    def __init__(self, MLD, N, P, Q, R, C=None, c=None, D=None, d=None):
 
+        # set default state and input selection
         if C is None:
             C = np.eye(MLD.nx)
         if c is None:
@@ -29,16 +62,17 @@ class HybridModelPredictiveController(object):
         # store inputs
         self.MLD = MLD
         self.N = N
-        self.P = P
-        self.Q = Q
-        self.R = R
-        self.C = C
-        self.c = c
-        self.D = D
-        self.d = d
+        [self.P, self.Q, self.R] = [P, Q, R]
+        [self.C, self.c] = [C, c]
+        [self.D, self.d] = [D, d]
 
-        # checks
+        # build mixed integer program
+        self.check_inputs()
+        self.model = self.build_mip()
 
+    def check_inputs(self, tol=1.e-5):
+
+        # weight matrices
         assert self.P.shape[0] == self.P.shape[1]
         assert self.Q.shape[0] == self.Q.shape[1]
         assert self.R.shape[0] == self.R.shape[1]
@@ -46,103 +80,90 @@ class HybridModelPredictiveController(object):
         assert np.all(np.linalg.eigvals(self.Q) > tol)
         assert np.all(np.linalg.eigvals(self.R) > tol)
 
+        # state selection matrix
         assert self.Q.shape[0] == self.C.shape[0]
         assert self.C.shape[1] == self.MLD.nx
         assert self.c.size == self.Q.shape[0]
 
+        # input selection matrix
         assert self.R.shape[0] == self.D.shape[0]
         assert self.D.shape[1] == self.MLD.nuc + self.MLD.nub
         assert self.d.size == self.R.shape[0]
 
-        # build mixed integer program
-        self.prog = self.bild_mip()
-
-    def bild_mip(self):
+    def build_mip(self):
 
         # initialize program
-        prog = grb.Model()
-        var = OrderedDict()
-        con = OrderedDict()
+        model = GurobiModel()
         obj = 0.
 
         # initial state (initialized to zero)
-        var['x_0'] = add_vars(prog, self.MLD.nx)
-        con['initial_conditions'] = add_linear_equality(prog, var['x_0'], [0.]*self.MLD.nx)
+        x_next = model.add_variables(self.MLD.nx, name='x_0')
+        model.add_linear_constraints(x_next, eq, [0.]*self.MLD.nx, name='alpha_0')
 
         # loop over the time horizon
         for t in range(self.N):
 
             # stage variables
-            var['uc_%d'%t] = add_vars(prog, self.MLD.nuc)
-            var['ub_%d'%t] = add_vars(prog, self.MLD.nub)
-            var['sc_%d'%t] = add_vars(prog, self.MLD.nsc)
-            var['sb_%d'%t] = add_vars(prog, self.MLD.nsb)
-            var['x_%d'%(t+1)] = add_vars(prog, self.MLD.nx)
+            x = x_next
+            uc = model.add_variables(self.MLD.nuc, name='uc_%d'%t)
+            ub = model.add_variables(self.MLD.nub, name='ub_%d'%t)
+            sc = model.add_variables(self.MLD.nsc, name='sc_%d'%t)
+            sb = model.add_variables(self.MLD.nsb, name='sb_%d'%t)
+            x_next = model.add_variables(self.MLD.nx, name='x_%d'%(t+1))
 
             # bounds on the binaries
-            con['lb_u_%d'%t] = add_linear_inequality(prog, [0.]*self.MLD.nub, var['ub_%d'%t])
-            con['lb_s_%d'%t] = add_linear_inequality(prog, [0.]*self.MLD.nsb, var['sb_%d'%t])
-            con['ub_u_%d'%t] = add_linear_inequality(prog, var['ub_%d'%t], [1.]*self.MLD.nub)
-            con['ub_s_%d'%t] = add_linear_inequality(prog, var['sb_%d'%t], [1.]*self.MLD.nsb)
+            # inequalities must be stated as expr <= num to get negative duals
+            # note that num <= expr would be modified to expr => num
+            # and would give positive duals
+            model.add_linear_constraints(-ub, le, [0.]*self.MLD.nub, name='lbu_%d'%t)
+            model.add_linear_constraints(-sb, le, [0.]*self.MLD.nsb, name='lbs_%d'%t)
+            model.add_linear_constraints(ub, le, [1.]*self.MLD.nub, name='ubu_%d'%t)
+            model.add_linear_constraints(sb, le, [1.]*self.MLD.nsb, name='ubs_%d'%t)
 
-            # dynamics
-            con['mld_dyn_%d'%t] = add_linear_equality(
-                prog,
-                var['x_%d'%(t+1)],
-                self.MLD.A.dot(var['x_%d'%t]) +
-                self.MLD.Buc.dot(var['uc_%d'%t]) + self.MLD.Bub.dot(var['ub_%d'%t]) +
-                self.MLD.Bsc.dot(var['sc_%d'%t]) + self.MLD.Bsb.dot(var['sb_%d'%t]) +
-                self.MLD.b
+            # mld dynamics
+            model.add_linear_constraints(
+                x_next,
+                eq,
+                self.MLD.A.dot(x) +
+                self.MLD.Buc.dot(uc) + self.MLD.Bub.dot(ub) +
+                self.MLD.Bsc.dot(sc) + self.MLD.Bsb.dot(sb) +
+                self.MLD.b,
+                name='alpha_%d'%(t+1)
                 )
 
-            # constraints
-            con['mld_ineq_%d'%t] = add_linear_inequality(
-                prog,
-                self.MLD.F.dot(var['x_%d'%t]) +
-                self.MLD.Guc.dot(var['uc_%d'%t]) + self.MLD.Gub.dot(var['ub_%d'%t]) +
-                self.MLD.Gsc.dot(var['sc_%d'%t]) + self.MLD.Gsb.dot(var['sb_%d'%t]),
-                self.MLD.g
+            # mld constraints
+            model.add_linear_constraints(
+                self.MLD.F.dot(x) +
+                self.MLD.Guc.dot(uc) + self.MLD.Gub.dot(ub) +
+                self.MLD.Gsc.dot(sc) + self.MLD.Gsb.dot(sb),
+                le,
+                self.MLD.g,
+                name='beta_%d'%t
                 )
 
             # stage cost
-            u_t = np.concatenate((var['uc_%d'%t], var['ub_%d'%t]))
-            var['y_%d'%t] = add_vars(prog, self.C.shape[0])
-            con['y_%d'%t] = add_linear_equality(
-                prog,
-                var['y_%d'%t],
-                self.C.dot(var['x_%d'%t]) + self.c
-                )
-            var['v_%d'%t] = add_vars(prog, self.D.shape[0])
-            con['v_%d'%t] = add_linear_equality(
-                prog,
-                var['v_%d'%t],
-                self.D.dot(u_t) + self.d
-                )
-            obj += var['y_%d'%t].dot(self.Q).dot(var['y_%d'%t]) + var['v_%d'%t].dot(self.R).dot(var['v_%d'%t])
+            u = np.concatenate((uc, ub))
+            y = model.add_variables(self.C.shape[0], name='y_%d'%t)
+            v = model.add_variables(self.D.shape[0], name='v_%d'%t)
+            model.add_linear_constraints(y, eq, self.C.dot(x) + self.c, name='gamma_%d'%t)
+            model.add_linear_constraints(v, eq, self.D.dot(u) + self.d, name='delta_%d'%t)
+            obj += y.dot(self.Q).dot(y) + v.dot(self.R).dot(v)
 
         # terminal cost
-        var['y_%d'%self.N] = add_vars(prog, self.C.shape[0])
-        con['y_%d'%self.N] = add_linear_equality(
-            prog,
-            var['y_%d'%self.N],
-            self.C.dot(var['x_%d'%self.N]) + self.c
-            )
-        obj += var['y_%d'%self.N].dot(self.P).dot(var['y_%d'%self.N])
+        y = model.add_variables(self.C.shape[0], name='y_%d'%self.N)
+        model.add_linear_constraints(y, eq, self.C.dot(x_next) + self.c, name='gamma_%d'%self.N)
+        obj += y.dot(self.P).dot(y)
 
         # set cost
-        prog.setObjective(obj)
+        model.setObjective(obj)
 
-        # store variables and constraints
-        self.variables = var
-        self.constraints = con
-        self.objective = obj
-
-        return prog
+        return model
 
     def set_initial_condition(self, x0):
+        alpha_0 = self.model.get_constraints('alpha_0')
         for k, xk in enumerate(x0):
-            self.constraints['initial_conditions'][k].RHS = xk
-        self.prog.update()
+            alpha_0[k].RHS = xk
+        self.model.update()
 
     def set_bounds_binaries(self, identifier):
         '''
@@ -154,32 +175,39 @@ class HybridModelPredictiveController(object):
         '''
         self.reset_bounds_binaries()
         for k, v in identifier.items():
-            self.constraints['lb_%s_%d'%k[:2]][k[2]].RHS = - v # in the form -sb <= -lb
-            self.constraints['ub_%s_%d'%k[:2]][k[2]].RHS = v
-        self.prog.update()
+            # the minus is because constraints are stated as -u <= -lb
+            self.model.get_constraints('lb%s_%d'%k[:2])[k[2]].RHS = - v
+            self.model.get_constraints('ub%s_%d'%k[:2])[k[2]].RHS = v
+        self.model.update()
 
     def reset_bounds_binaries(self):
         for t in range(self.N):
+            lbu = self.model.get_constraints('lbu_%d'%t)
+            ubu = self.model.get_constraints('ubu_%d'%t)
+            lbs = self.model.get_constraints('lbs_%d'%t)
+            ubs = self.model.get_constraints('ubs_%d'%t)
             for k in range(self.MLD.nub):
-                self.constraints['lb_u_%d'%t][k].RHS = 0.
-                self.constraints['ub_u_%d'%t][k].RHS = 1.
+                lbu[k].RHS = 0.
+                ubu[k].RHS = 1.
             for k in range(self.MLD.nsb):
-                self.constraints['lb_s_%d'%t][k].RHS = 0.
-                self.constraints['ub_s_%d'%t][k].RHS = 1.
-        self.prog.update()
+                lbs[k].RHS = 0.
+                ubs[k].RHS = 1.
+        self.model.update()
 
-    def set_type_binaries(self, d_type):
+    def set_type_binaries(self, var_type):
         for t in range(self.N):
+            ub = self.model.get_variables('ub_%d'%t)
+            sb = self.model.get_variables('sb_%d'%t)
             for k in range(self.MLD.nub):
-                self.variables['ub_%d'%t][k].VType = d_type
+                ub[k].VType = var_type
             for k in range(self.MLD.nsb):
-                self.variables['sb_%d'%t][k].VType = d_type
-        self.prog.update()
+                sb[k].VType = var_type
+        self.model.update()
 
     def solve_relaxation(self, x0, identifier):
 
-        # reset program (gurobi does not try to use the last solve to warm start)
-        self.prog.reset()
+        # reset model (gurobi does not try to use the last solve to warm start)
+        self.model.reset()
 
         # set up miqp
         self.set_type_binaries('C')
@@ -187,15 +215,17 @@ class HybridModelPredictiveController(object):
         self.set_bounds_binaries(identifier)
 
         # parameters
-        self.prog.setParam('OutputFlag', 0)
+        self.model.setParam('OutputFlag', 0)
 
         # run the optimization
-        self.prog.optimize()
+        self.model.optimize()
         sol = self.organize_result()
 
         # integer feasibility
-        integer_feasible = sol['feasible'] and len(identifier) == self.N*(self.MLD.nub+self.MLD.nsb)
+        all_binaries_fixed = len(identifier) == self.N*(self.MLD.nub+self.MLD.nsb)
+        integer_feasible = sol['feasible'] and all_binaries_fixed
 
+        # check that duals have correct signs
         self.test_solution(x0, identifier, sol)
 
         return sol['feasible'], sol['objective'], integer_feasible, sol
@@ -205,47 +235,194 @@ class HybridModelPredictiveController(object):
         # initialize solution
         sol = {}
 
-        # optimal
-        if self.prog.status == 2:
+        # if optimal
+        if self.model.status == 2:
             sol['feasible'] = True
-            sol['objective'] = self.prog.objVal
-            sol['primal'] = OrderedDict()
-            for k, v in self.variables.items():
-                sol['primal'][k] = np.array([vk.x for vk in v])
-            sol['dual'] = OrderedDict()
-            for k, v in self.constraints.items():
-                sol['dual'][k] = - np.array([vk.Pi for vk in v])
+            sol['objective'] = self.model.objVal
+            sol['primal'] = self.organize_primal()
+            sol['dual'] = self.organize_dual(sol['feasible'])
 
-        #infeasible, infeasible_or_unbounded, or numeric_errors
-        elif self.prog.status in [3, 4, 12]:
+        # if infeasible, infeasible_or_unbounded, numeric_errors, suboptimal
+        elif self.model.status in [3, 4, 12, 13]:
+            self.do_farkas_proof()
             sol['feasible'] = False
             sol['objective'] = None
             sol['primal'] = None
-            sol['dual'] = self.get_farkas_proof()
+            sol['dual'] = self.organize_dual(sol['feasible'])
+        else:
+            raise ValueError('unknown model status %d.'%self.model.status)
 
         return sol
 
-    def get_farkas_proof(self):
+    def organize_primal(self):
 
-        # rerun the optimization
-        self.prog.setParam('InfUnbdInfo', 1)
-        self.prog.setObjective(0.)
-        self.prog.optimize()
+        # initialize primal solution
+        primal = {}
 
-        # be sure that the problem is actually infeasible
-        assert self.prog.status == 3
+        # primal stage variables
+        for l in ['x', 'uc', 'ub', 'sc', 'sb', 'y', 'v']:
+            primal[l] = []
+            for t in range(self.N):
+                v = self.model.get_variables('%s_%d'%(l,t))
+                primal[l].append(np.array([vi.x for vi in v]))
 
-        # retrieve the proof of infeasibility
-        farkas_proof = OrderedDict()
-        i = 0
-        for k, v in self.constraints.items():
-            farkas_proof[k] = np.array(self.prog.FarkasDual[i:i+len(v)])
-            i += len(v)
+        # primal terminal variables
+        for l in ['x', 'y']:
+            v = self.model.get_variables('%s_%d'%(l,self.N))
+            primal[l].append(np.array([vi.x for vi in v]))
+
+        return primal
+
+    def organize_dual(self, feasible):
+
+        # initialize dual solution
+        dual = {}
+
+        # dual stage variables
+        for l in ['alpha', 'beta', 'gamma', 'delta', 'lbu', 'ubu', 'lbs', 'ubs']:
+            dual[l] = []
+            for t in range(self.N):
+                c = self.model.get_constraints('%s_%d'%(l,t))
+                if feasible:
+                    # weird! gurobi gives negative multipliers and positive farkas duals
+                    dual[l].append(- np.array([ci.Pi for ci in c]))
+                else:
+                    dual[l].append(np.array([ci.FarkasDual for ci in c]))
+
+        # dual terminal variables
+        for l in ['alpha', 'gamma']:
+            c = self.model.get_constraints('%s_%d'%(l,self.N))
+            if feasible:
+                dual[l].append(- np.array([ci.Pi for ci in c]))
+            else:
+                dual[l].append(np.array([ci.FarkasDual for ci in c]))
+
+        return dual
+
+    def do_farkas_proof(self):
+
+        # copy objective
+        obj = self.model.getObjective()
+
+        # rerun the optimization with linear objective (only linear accepted for farkas proof)
+        self.model.setParam('InfUnbdInfo', 1)
+        self.model.setObjective(0.)
+        self.model.optimize()
+
+        # ensure new problem is actually infeasible
+        assert self.model.status == 3
 
         # reset objective
-        self.prog.setObjective(self.objective)
+        self.model.setObjective(obj)
 
-        return farkas_proof
+    def get_bounds_on_binaries(self, identifier):
+        w_lb = [np.zeros(self.MLD.nub+self.MLD.nsb) for t in range(self.N)]
+        w_ub = [np.ones(self.MLD.nub+self.MLD.nsb) for t in range(self.N)]
+        for key, val in identifier.items():
+            if key[0] == 'u':
+                w_lb[key[1]][key[2]] = val
+                w_ub[key[1]][key[2]] = val
+            elif key[0] == 's':
+                w_lb[key[1]][self.MLD.nub+key[2]] = val
+                w_ub[key[1]][self.MLD.nub+key[2]] = val
+        return w_lb, w_ub
+
+
+    def test_solution(self, x0, identifier, sol, tol=1.e-4):
+
+        # rename
+        MLD = self.MLD
+        alpha = sol['dual']['alpha']
+        beta = sol['dual']['beta']
+        gamma = sol['dual']['gamma']
+        delta = sol['dual']['delta']
+        pi_lb = [np.concatenate((sol['dual']['lbu'][t], sol['dual']['lbs'][t])) for t in range(self.N)]
+        pi_ub = [np.concatenate((sol['dual']['ubu'][t], sol['dual']['ubs'][t])) for t in range(self.N)]
+
+        # reorganize matrices
+        B = np.hstack((MLD.Buc, MLD.Bub, MLD.Bsc, MLD.Bsb))
+        G = np.hstack((MLD.Guc, MLD.Gub, MLD.Gsc, MLD.Gsb))
+        D = np.hstack((self.D, np.zeros((self.D.shape[0], MLD.nsc+MLD.nsb))))
+        W = np.vstack((
+            np.hstack((np.zeros((MLD.nub,MLD.nuc)), np.eye(MLD.nub), np.zeros((MLD.nub,MLD.nsc)), np.zeros((MLD.nub,MLD.nsb)))),
+            np.hstack((np.zeros((MLD.nsb,MLD.nuc)), np.zeros((MLD.nsb,MLD.nub)), np.zeros((MLD.nsb,MLD.nsc)), np.eye(MLD.nsb)))
+            ))
+
+        # check sign duals
+        assert np.min(np.vstack(beta)) > - tol
+        assert np.min(np.vstack(pi_lb)) > - tol
+        assert np.min(np.vstack(pi_ub)) > - tol
+
+        # test stationarity wrt x_t
+        for t in range(self.N):
+            res = alpha[t] - MLD.A.T.dot(alpha[t+1]) + MLD.F.T.dot(beta[t]) - self.C.T.dot(gamma[t])
+            assert np.linalg.norm(res) < tol
+
+        # test stationarity wrt x_N
+        res = alpha[self.N] - self.C.T.dot(gamma[self.N])
+        assert np.linalg.norm(res) < tol
+
+        # test stationarity wrt y_t
+        if sol['feasible']:
+            for t in range(self.N+1):
+                res = 2.*self.Q.dot(sol['primal']['y'][t]) + gamma[t]
+                assert np.linalg.norm(res) < tol
+
+        # test stationarity wrt u_t
+        for t in range(self.N):
+            res = -B.T.dot(alpha[t+1]) + G.T.dot(beta[t]) - D.T.dot(delta[t]) + W.T.dot(pi_ub[t]-pi_lb[t])
+            assert np.linalg.norm(res) < tol
+
+        # test stationarity wrt v_t
+        if sol['feasible']:
+            for t in range(self.N):
+                res = 2.*self.R.dot(sol['primal']['v'][t]) + delta[t]
+                assert np.linalg.norm(res) < tol
+
+        # test objective
+        obj = self.evaluate_dual_solution(identifier, sol['dual'], x0)
+        if sol['feasible']:
+            assert np.abs(sol['objective'] - obj) < tol
+        else:
+            assert np.linalg.norm(np.concatenate(gamma)) < tol
+            assert np.linalg.norm(np.concatenate(delta)) < tol
+            assert obj > - tol
+
+    def evaluate_dual_solution(self, identifier, dual, x0):
+
+        # quadratic terms
+        Qinv = np.linalg.inv(self.Q)
+        Rinv = np.linalg.inv(self.R)
+        Pinv = np.linalg.inv(self.P)
+        obj = - .25 * dual['gamma'][self.N].dot(Pinv).dot(dual['gamma'][self.N])
+        for t in range(self.N):
+            obj -= .25 * dual['gamma'][t].dot(Qinv).dot(dual['gamma'][t])
+            obj -= .25 * dual['delta'][t].dot(Rinv).dot(dual['delta'][t])
+
+        # linear terms
+        w_lb, w_ub = self.get_bounds_on_binaries(identifier)
+        obj -= x0.dot(dual['alpha'][0])
+        obj -= self.c.dot(dual['gamma'][self.N])
+        for t in range(self.N):
+            obj -= self.MLD.b.dot(dual['alpha'][t+1])
+            obj -= self.MLD.g.dot(dual['beta'][t])
+            obj -= self.c.dot(dual['gamma'][t])
+            obj -= self.d.dot(dual['delta'][t])
+            obj += w_lb[t].dot(np.concatenate((dual['lbu'][t], dual['lbs'][t])))
+            obj -= w_ub[t].dot(np.concatenate((dual['ubu'][t], dual['ubs'][t])))
+
+        return obj
+
+    def feedforward(self, x, **kwargs):
+        def solver(identifier):
+            return self.solve_relaxation(x, identifier)
+        sol, optimal_leaves = branch_and_bound(
+            solver,
+            best_first,
+            self.explore_in_chronological_order,
+            **kwargs
+        )
+        return sol, optimal_leaves
 
     def explore_in_chronological_order(self, node):
 
@@ -271,130 +448,95 @@ class HybridModelPredictiveController(object):
 
         return branches
 
-    def feedforward(self, x, **kwargs):
-        def solver(identifier):
-            return self.solve_relaxation(x, identifier)
-        sol, optimal_leaves = branch_and_bound(
-            solver,
-            best_first,
-            self.explore_in_chronological_order,
-            **kwargs
-        )
-        return sol, optimal_leaves
+    def generate_warm_start(self, leaves, x_0, uc_0, ub_0, sc_0, sb_0, e):
 
-    def test_solution(self, x0, identifier, sol, tol=1.e-5):
+        warm_start = []
+        u_0 = np.concatenate((uc_0, ub_0))
+        s_0 = np.concatenate((sc_0, sb_0))
 
-        # rename
-        primal = sol['primal']
-        dual = sol['dual']
+        for l in leaves:
+            if self.is_leaf_propagable(l.identifier, ub_0, sb_0):
+                new_dual = self.propagate_dual_solution(l.extra_data['dual'])
+                new_extra_data = {'dual': new_dual,'feasible':True, 'objective':None, 'primal':None}
+                new_identifier = self.get_new_identifier(l.identifier)
+                lams = self.get_lambdas(l.identifier, l.extra_data['dual'], x_0, u_0, s_0, e)
+                if l.feasible:
+                    new_lower_bound = l.lower_bound + sum(lams)
+                else:
+                    theta_0_lb = self.evaluate_dual_solution(l.identifier, l.extra_data['dual'], x_0)
+                    still_infeasible = e.dot(l.extra_data['dual']['alpha'][1]) < theta_0_lb + lams[2]
+                    if still_infeasible:
+                        new_lower_bound = np.inf
+                    else:
+                        new_lower_bound = - np.inf
+                warm_start.append(Node(None, new_identifier, new_lower_bound, new_extra_data))
 
-        # # reorganize primal variables
-        # x = [primal['x_%d'%t] for t in range(self.N+1)]
-        # uc = [primal['uc_%d'%t] for t in range(self.N)]
-        # ub = [primal['ub_%d'%t] for t in range(self.N)]
-        # sc = [primal['sc_%d'%t] for t in range(self.N)]
-        # sb = [primal['sb_%d'%t] for t in range(self.N)]
-        # u = [np.concatenate((uc[t], ub[t], sc[t], sb[t])) for t in range(self.N)]
-        # y = [primal['y_%d'%t] for t in range(self.N+1)]
-        # v = [primal['v_%d'%t] for t in range(self.N)]
+        return warm_start
 
-        # reorganize multipliers
-        alpha = [dual['initial_conditions']] + [dual['mld_dyn_%d'%t] for t in range(self.N)]
-        beta = [dual['mld_ineq_%d'%t] for t in range(self.N)]
-        gamma = [dual['y_%d'%t] for t in range(self.N+1)]
-        delta = [dual['v_%d'%t] for t in range(self.N)]
-        pi_lb = [np.concatenate((dual['lb_u_%d'%t], dual['lb_s_%d'%t])) for t in range(self.N)]
-        pi_ub = [np.concatenate((dual['ub_u_%d'%t], dual['ub_s_%d'%t])) for t in range(self.N)]
+    @staticmethod
+    def is_leaf_propagable(identifier, ub_0, sb_0):
+        propagable = True
+        for key, value in identifier.items():
+            if key[1] == 0:
+                if key[0] == 'u' and not np.isclose(value, ub_0[key[2]]):
+                    propagable = False
+                    break
+                if key[0] == 's' and not np.isclose(value, sb_0[key[2]]):
+                    propagable = False
+                    break
+        return propagable
 
-        # reorganize matrices
-        B = np.hstack((self.MLD.Buc, self.MLD.Bub, self.MLD.Bsc, self.MLD.Bsb))
-        G = np.hstack((self.MLD.Guc, self.MLD.Gub, self.MLD.Gsc, self.MLD.Gsb))
-        D = np.hstack((self.D, np.zeros((self.D.shape[0], self.MLD.nsc+self.MLD.nsb))))
-        W = np.vstack((
-            np.hstack((np.zeros((self.MLD.nub,self.MLD.nuc)), np.eye(self.MLD.nub), np.zeros((self.MLD.nub,self.MLD.nsc)), np.zeros((self.MLD.nub,self.MLD.nsb)))),
-            np.hstack((np.zeros((self.MLD.nsb,self.MLD.nuc)), np.zeros((self.MLD.nsb,self.MLD.nub)), np.zeros((self.MLD.nsb,self.MLD.nsc)), np.eye(self.MLD.nsb)))
-            ))
+    @staticmethod
+    def propagate_dual_solution(dual):
+        new_dual = deepcopy(dual)
+        for l in ['alpha', 'beta', 'gamma', 'delta', 'lbu', 'ubu', 'lbs', 'ubs']:
+            new_dual[l].append(0.*new_dual[l][0])
+            del new_dual[l][0]
+        return new_dual
 
-        # reorganize bounds
-        w_lb = [np.zeros(self.MLD.nub+self.MLD.nsb) for t in range(self.N)]
-        w_ub = [np.ones(self.MLD.nub+self.MLD.nsb) for t in range(self.N)]
-        for key, val in identifier.items():
-            if key[0] == 'u':
-                w_lb[key[1]][key[2]] = val
-                w_ub[key[1]][key[2]] = val
-            elif key[0] == 's':
-                w_lb[key[1]][self.MLD.nub+key[2]] = val
-                w_ub[key[1]][self.MLD.nub+key[2]] = val
+    def get_lambdas(self, identifier, dual, x_0, u_0, s_0, e, tol=1.e-5):
 
-        # # test primal
-        # assert np.linalg.norm(x[0] - x0) < tol
-        # assert np.linalg.norm(y[self.N] - self.C.dot(x[self.N]) - self.c) < tol
-        # for t in range(self.N):
-        #     assert np.linalg.norm(x[t+1] - self.MLD.A.dot(x[t]) - B.dot(u[t]) - self.c) < tol
-        #     assert np.linalg.norm(y[t] - self.C.dot(x[t]) - self.c) < tol
-        #     assert np.linalg.norm(v[t] - D.dot(u[t]) - self.d) < tol
-        #     assert np.max(self.MLD.F.dot(x[t]) + G.dot(u[t]) - self.MLD.g) < tol
-        #     assert np.max(w_lb[t] - W.dot(u[t])) < tol
-        #     assert np.max(W.dot(u[t]) - w_ub[t]) < tol
-
-        # # test complementarity
-        # print identifier
-        # for t in range(self.N):
-        #     assert np.abs(beta[t].dot(self.MLD.F.dot(x[t]) + G.dot(u[t]) - self.MLD.g)) < tol
-        #     assert np.abs(pi_lb[t].dot(w_lb[t] - W.dot(u[t]))) < tol
-        #     assert np.abs(pi_ub[t].dot(W.dot(u[t]) - w_ub[t])) < tol
-
-        # check sign duals
-        assert np.min(np.vstack(beta)) > -tol
-        assert np.min(np.vstack(pi_lb)) > -tol
-        assert np.min(np.vstack(pi_ub)) > -tol
-
-        # test stationarity wrt x_t
-        for t in range(self.N):
-            assert np.linalg.norm(alpha[t] - self.MLD.A.T.dot(alpha[t+1]) + self.MLD.F.T.dot(beta[t]) - self.C.T.dot(gamma[t])) < tol
-
-        # test stationarity wrt x_N
-        assert np.linalg.norm(alpha[self.N] - self.C.T.dot(gamma[self.N])) < tol
-
-        # test stationarity wrt y_t
-        if sol['feasible']:
-            for t in range(self.N+1):
-                assert np.linalg.norm(2.*self.Q.dot(primal['y_%d'%t]) + gamma[t]) < tol
-
-        # test stationarity wrt u_t
-        for t in range(self.N):
-            assert np.linalg.norm(- B.T.dot(alpha[t+1]) + G.T.dot(beta[t]) - D.T.dot(delta[t]) + W.T.dot(pi_ub[t] - pi_lb[t])) < tol
-
-        # test stationarity wrt v_t
-        if sol['feasible']:
-            for t in range(self.N):
-                assert np.linalg.norm(2.*self.R.dot(primal['v_%d'%t]) + delta[t]) < tol
-
-        # quadratic terms
+        # invers of the weights
+        Pinv = np.linalg.inv(self.P)
         Qinv = np.linalg.inv(self.Q)
         Rinv = np.linalg.inv(self.R)
-        Pinv = np.linalg.inv(self.P)
-        obj = - .25 * gamma[self.N].dot(Pinv).dot(gamma[self.N])
-        for t in range(self.N):
-            obj -= .25 * gamma[t].dot(Qinv).dot(gamma[t])
-            obj -= .25 * delta[t].dot(Rinv).dot(delta[t])
 
-        # linear terms
-        obj -= x0.dot(alpha[0])
-        obj -= self.c.dot(gamma[self.N])
-        for t in range(self.N):
-            obj -= self.MLD.b.dot(alpha[t+1])
-            obj -= self.MLD.g.dot(beta[t])
-            obj -= self.c.dot(gamma[t])
-            obj -= self.d.dot(delta[t])
-            obj += w_lb[t].dot(pi_lb[t])
-            obj -= w_ub[t].dot(pi_ub[t])
+        # lambda 1
+        y_0 = self.C.dot(x_0) + self.c
+        v_0 = self.D.dot(u_0) + self.d
+        lam1 = - y_0.dot(self.Q).dot(y_0) - v_0.dot(self.R).dot(v_0)
 
-        if sol['feasible']:
-            assert np.abs(sol['objective'] - obj) < tol
-        else:
-            assert obj > -tol
+        # lambda 2
+        gamma_N = dual['gamma'][self.N]
+        lam2 = .25*gamma_N.dot(Pinv - Qinv).dot(gamma_N)
 
+        # lambda 3
+        w_lb, w_ub = self.get_bounds_on_binaries(identifier)
+        us_0 = np.concatenate((u_0, s_0))
+        lbus_0 = np.concatenate((dual['lbu'][0], dual['lbs'][0]))
+        ubus_0 = np.concatenate((dual['ubu'][0], dual['ubs'][0]))
+        lam3 = -(self.MLD.F.dot(x_0) + self.MLD.G.dot(us_0) - self.MLD.g).dot(dual['beta'][0])
+        lam3 -= (w_lb[0] - self.MLD.W.dot(us_0)).dot(lbus_0)
+        lam3 -= (self.MLD.W.dot(us_0) - w_ub[0]).dot(ubus_0)
+        assert lam3 > -tol
+
+        # lambda 4
+        lam4_x = .5*dual['gamma'][0] + self.Q.dot(y_0)
+        lam4_u = .5*dual['delta'][0] + self.R.dot(v_0)
+        lam4 = lam4_x.dot(Qinv).dot(lam4_x) + lam4_u.dot(Rinv).dot(lam4_u)
+
+        # lambda 5
+        lam5 = - e.dot(dual['alpha'][1])
+
+        return lam1, lam2, lam3, lam4, lam5
+
+    @staticmethod
+    def get_new_identifier(identifier):
+        new_identifier = {}
+        for k, v in identifier.items():
+            if k[1] > 0:
+                new_identifier[(k[0],k[1]-1,k[2])] = v
+        return new_identifier
 
     # def feedforward_gurobi(self, x0):
 
@@ -474,3 +616,6 @@ class HybridModelPredictiveController(object):
     #                 else:
     #                     new_id[(t-1, i)] = new_id.pop((t, i))
     #     return new_id
+
+
+        

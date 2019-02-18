@@ -610,6 +610,12 @@ class MixedLogicalDynamicalSystem(object):
 
         self.m = F.shape[0]
 
+        self.G = np.hstack((Guc, Gub, Gsc, Gsb))
+        self.W = np.vstack((
+            np.hstack((np.zeros((self.nub,self.nuc)), np.eye(self.nub), np.zeros((self.nub,self.nsc)), np.zeros((self.nub,self.nsb)))),
+            np.hstack((np.zeros((self.nsb,self.nuc)), np.zeros((self.nsb,self.nub)), np.zeros((self.nsb,self.nsc)), np.eye(self.nsb)))
+            ))
+
         assert Buc.shape[0] == self.nx
         assert Bub.shape[0] == self.nx
         assert Bsc.shape[0] == self.nx

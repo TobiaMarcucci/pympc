@@ -4,14 +4,13 @@ from pygraphviz import AGraph
 from subprocess import call
 from os import getcwd
 from copy import deepcopy
-from collections import OrderedDict
 
 class Node(object):
     '''
     Node of the branch and bound tree.
     '''
 
-    def __init__(self, parent, branch, lower_bound=None):
+    def __init__(self, parent, branch, lower_bound=None, extra_data=None):
         '''
         A node is uniquely identified by its identifier.
         The identifier is a dictionary (typically containing the binary assigment).
@@ -29,6 +28,8 @@ class Node(object):
         lower_bound : float
             Lower bound to the objective of the node provided by the user
             (useful in case of warm start).
+        extra_data : dict
+            ???
         '''
 
         # initialize node
@@ -38,7 +39,7 @@ class Node(object):
         self.feasible = None # bool initialized to None
         self.objective = None # float initialized to None
         self.integer_feasible = None # bool initialized to None
-        self.extra_data = None # all data we want to retrieve after the solution
+        self.extra_data = extra_data # all data we want to retrieve after the solution
 
         # build identifier of the node
         if parent is None:
@@ -361,7 +362,7 @@ def branch_and_bound(
         candidate_nodes = deepcopy(warm_start)
         lower_bound = min([node.lower_bound for node in candidate_nodes])
     else:
-        root_node = Node(None, OrderedDict())
+        root_node = Node(None, {})
         candidate_nodes = [root_node]
         lower_bound = - inf
 
