@@ -177,7 +177,8 @@ def unpack_block_matrix(A, indices, direction):
     blocks = []
 
     # unpack
-    for i, j in enumerate(indices):
+    i = 0
+    for j in indices:
 
         # horizontally
         if direction == 'h':
@@ -190,5 +191,8 @@ def unpack_block_matrix(A, indices, direction):
         # raise error if uknown key
         else:
             raise ValueError('unknown direction ' + direction)
+
+        # increase index by j
+        i += j
 
     return blocks
