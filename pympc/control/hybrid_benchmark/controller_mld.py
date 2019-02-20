@@ -8,42 +8,152 @@ from operator import le, ge, eq
 from pympc.control.hybrid_benchmark.branch_and_bound_with_warm_start import Node, branch_and_bound, best_first
 
 class GurobiModel(grb.Model):
+    '''
+    Class which inherits from gurobi.Model.
+    It facilitates the process of adding (retrieving) multiple variables and
+    constraints to (from) the optimization problem.
+    '''
 
     def __init__(self, **kwargs):
+
+        # inherit from gurobi.Model
         super(GurobiModel, self).__init__(**kwargs)
 
     def add_variables(self, n, lb=None, **kwargs):
+        '''
+        Adds n optimization variables to the problem.
+        It stores the new variables in a numpy array so that they can be readily used for computations.
+
+        Arguments
+        ---------
+        n : int
+            Number of optimization variables to be added to the problem.
+        lb : list of floats
+            Lower bounds for the optimization variables.
+            This is set by default to -inf.
+            Note that Gurobi by default would set this to zero.
+
+        Returns
+        -------
+        x : np.array
+            Numpy array that collects the new optimization variables.
+        '''
+
+        # change the default lower bound to -inf
         if lb is None:
             lb = [-grb.GRB.INFINITY]*n
+
+        # add variables to the optimization problem
         x = self.addVars(n, lb=lb, **kwargs)
+
+        # update model to make the new variables visible
+        # this can inefficient but prevents headaches!
         self.update()
-        return np.array([xi for xi in x.values()])
+
+        # organize new variables in a numpy array
+        x = np.array(x.values())
+        
+        return x
 
     def get_variables(self, name):
-        v = []
+        '''
+        Gets a set of variables from the problem and returns them in a numpy array.
+
+        Arguments
+        ---------
+        name : string
+            Name of the family of variables we want to get from the problem.
+
+        Returns
+        -------
+        x : np.array
+            Numpy array that collects the asked variables.
+
+        '''
+
+        # initilize vector of variables
+        x = np.array([])
+
+        # there cannnot be more x than optimization variables
         for i in range(self.NumVars):
-            vi = self.getVarByName(name+'[%d]'%i)
-            if vi:
-                v.append(vi)
+
+            # get new element and append
+            xi = self.getVarByName(name+'[%d]'%i)
+            if xi:
+                x = np.append(x, xi)
+
+            # if no more elements are available break the for loop
             else:
                 break
-        return np.array(v)
+
+        return x
 
     def add_linear_constraints(self, x, operator, y, **kwargs):
+        '''
+        Adds a linear constraint of the form x (<=, ==, or >=) y to the optimization problem.
+
+        Arguments
+        ---------
+        x : np.array of floats, gurobi.Var, or gurobi.LinExpr
+            Left hand side of the constraint.
+        operator : python operator
+            Either le (less than or equal to), ge (greater than or equal to), or eq (equal to)
+        y : np.array of floats, gurobi.Var, or gurobi.LinExpr
+            Right hand side of the constraint.
+
+        Returns
+        -------
+        c : np.array of gurobi.Constr
+            Numpy array that collects the new constraints.
+        '''
+
+        # check that the size of the lhs and the rhs match
         assert len(x) == len(y)
-        c = self.addConstrs((operator(x[k],y[k]) for k in range(len(x))), **kwargs)
+
+        # add linear constraints to the problem
+        c = self.addConstrs((operator(x[k], y[k]) for k in range(len(x))), **kwargs)
+
+        # update model to make the new variables visible
+        # this can inefficient but prevents headaches!
         self.update()
-        return np.array([ci for ci in c.values()])
+
+        # organize the constraints in a numpy array
+        c = np.array(c.values())
+
+        return c
 
     def get_constraints(self, name):
-        c = []
+        '''
+        Gets a set of constraints from the problem and returns them in a numpy array.
+
+        Arguments
+        ---------
+        name : string
+            Name of the family of constraints we want to get from the problem.
+
+        Returns
+        -------
+        c : np.array
+            Numpy array that collects the asked constraints.
+
+        '''
+
+        # initilize vector of constraints
+        c = np.array([])
+
+        # there cannnot be more c than constraints in the problem
         for i in range(self.NumConstrs):
+
+            # get new constraint and append
             ci = self.getConstrByName(name+'[%d]'%i)
             if ci:
-                c.append(ci)
+                c = np.append(c, ci)
+
+            # if no more constraints are available break the for loop
             else:
                 break
-        return np.array(c)
+
+        return c
 
 class HybridModelPredictiveController(object):
 
@@ -125,8 +235,8 @@ class HybridModelPredictiveController(object):
                 x_next,
                 eq,
                 self.MLD.A.dot(x) +
-                self.MLD.Buc.dot(uc) + self.MLD.Bub.dot(ub) +
-                self.MLD.Bsc.dot(sc) + self.MLD.Bsb.dot(sb) +
+                self.MLD.B['uc'].dot(uc) + self.MLD.B['ub'].dot(ub) +
+                self.MLD.B['sc'].dot(sc) + self.MLD.B['sb'].dot(sb) +
                 self.MLD.b,
                 name='alpha_%d'%(t+1)
                 )
@@ -134,8 +244,8 @@ class HybridModelPredictiveController(object):
             # mld constraints
             model.add_linear_constraints(
                 self.MLD.F.dot(x) +
-                self.MLD.Guc.dot(uc) + self.MLD.Gub.dot(ub) +
-                self.MLD.Gsc.dot(sc) + self.MLD.Gsb.dot(sb),
+                self.MLD.G['uc'].dot(uc) + self.MLD.G['ub'].dot(ub) +
+                self.MLD.G['sc'].dot(sc) + self.MLD.G['sb'].dot(sb),
                 le,
                 self.MLD.g,
                 name='beta_%d'%t
@@ -340,13 +450,7 @@ class HybridModelPredictiveController(object):
         pi_ub = [np.concatenate((sol['dual']['ubu'][t], sol['dual']['ubs'][t])) for t in range(self.N)]
 
         # reorganize matrices
-        B = np.hstack((MLD.Buc, MLD.Bub, MLD.Bsc, MLD.Bsb))
-        G = np.hstack((MLD.Guc, MLD.Gub, MLD.Gsc, MLD.Gsb))
         D = np.hstack((self.D, np.zeros((self.D.shape[0], MLD.nsc+MLD.nsb))))
-        W = np.vstack((
-            np.hstack((np.zeros((MLD.nub,MLD.nuc)), np.eye(MLD.nub), np.zeros((MLD.nub,MLD.nsc)), np.zeros((MLD.nub,MLD.nsb)))),
-            np.hstack((np.zeros((MLD.nsb,MLD.nuc)), np.zeros((MLD.nsb,MLD.nub)), np.zeros((MLD.nsb,MLD.nsc)), np.eye(MLD.nsb)))
-            ))
 
         # check sign duals
         assert np.min(np.vstack(beta)) > - tol
@@ -370,7 +474,7 @@ class HybridModelPredictiveController(object):
 
         # test stationarity wrt u_t
         for t in range(self.N):
-            res = -B.T.dot(alpha[t+1]) + G.T.dot(beta[t]) - D.T.dot(delta[t]) + W.T.dot(pi_ub[t]-pi_lb[t])
+            res = -MLD.B_stack.T.dot(alpha[t+1]) + MLD.G_stack.T.dot(beta[t]) - D.T.dot(delta[t]) + MLD.W.T.dot(pi_ub[t]-pi_lb[t])
             assert np.linalg.norm(res) < tol
 
         # test stationarity wrt v_t

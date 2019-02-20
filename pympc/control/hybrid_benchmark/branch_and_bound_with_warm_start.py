@@ -1,4 +1,4 @@
-from numpy import inf, argmin, array
+from numpy import isinf, inf, argmin, array
 from time import time
 from pygraphviz import AGraph
 from subprocess import call
@@ -220,7 +220,7 @@ class Drawer(object):
 
         # initialize tree
         self.graph = AGraph(directed=True, strict=True, filled=True,)
-        self.graph.graph_attr['label'] = 'Branch and bound tree'
+        # self.graph.graph_attr['label'] = 'Branch and bound tree'
         self.graph.node_attr['style'] = 'filled'
         self.graph.node_attr['fillcolor'] = 'white'
 
@@ -263,7 +263,11 @@ class Drawer(object):
         for node in warm_start:
             label = 'Branch: ' + self.break_identifier(node.branch) + '\n'
             label += 'Lower bound: %.3f' % node.lower_bound + '\n'
-            self.graph.add_node(node.identifier, color='blue', label=label)
+            if isinf(node.lower_bound):
+                color = 'red'
+            else:
+                color = 'blue'
+            self.graph.add_node(node.identifier, color=color, label=label)
 
     def break_identifier(self, identifier):
         broken_identifier = [str(k) + ', ' + str(v) for k, v in identifier.items()]
