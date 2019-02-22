@@ -39,12 +39,12 @@ class MixedLogicalDynamicalSystem(object):
 
         # store the data
         self.A = A
-        self.B = B
         self.b = b
         self.F = F
-        self.G = G
         self.g = g
-
+        [self.Buc, self.Bub, self.Bsc, self.Bsb] = [B['uc'], B['ub'], B['sc'], B['sb']]
+        [self.Guc, self.Gub, self.Gsc, self.Gsb] = [G['uc'], G['ub'], G['sc'], G['sb']]
+        
         # store sizes of the system
         self.nx = A.shape[0]
         self.nuc = B['uc'].shape[1]
@@ -54,12 +54,12 @@ class MixedLogicalDynamicalSystem(object):
         self.m = F.shape[0]
 
         # store also stacked matrices for convenience
-        self.B_stack = np.hstack((B['uc'], B['ub'], B['sc'], B['sb']))
-        self.G_stack = np.hstack((G['uc'], G['ub'], G['sc'], G['sb']))
-        self.W = np.block([
-            [np.zeros((self.nub,self.nuc)), np.eye(self.nub), np.zeros((self.nub,self.nsc)), np.zeros((self.nub,self.nsb))],
-            [np.zeros((self.nsb,self.nuc)), np.zeros((self.nsb,self.nub)), np.zeros((self.nsb,self.nsc)), np.eye(self.nsb)]
-            ])
+        self.Bu = np.hstack((B['uc'], B['ub']))
+        self.Bs = np.hstack((B['sc'], B['sb']))
+        self.Gu = np.hstack((G['uc'], G['ub']))
+        self.Gs = np.hstack((G['sc'], G['sb']))
+        self.Wu = np.hstack((np.zeros((self.nub,self.nuc)), np.eye(self.nub)))
+        self.Ws = np.hstack((np.zeros((self.nsb,self.nsc)), np.eye(self.nsb)))
 
         # check size of the input matrices
         self._check_input_sizes()
@@ -71,18 +71,18 @@ class MixedLogicalDynamicalSystem(object):
 
         # check dynamics
         assert self.A.shape[0] == self.A.shape[1]
-        assert self.B['uc'].shape[0] == self.nx
-        assert self.B['ub'].shape[0] == self.nx
-        assert self.B['sc'].shape[0] == self.nx
-        assert self.B['sb'].shape[0] == self.nx
+        assert self.Buc.shape[0] == self.nx
+        assert self.Bub.shape[0] == self.nx
+        assert self.Bsc.shape[0] == self.nx
+        assert self.Bsb.shape[0] == self.nx
         assert self.b.size == self.nx
 
         # check constraints
         assert self.F.shape[1] == self.nx
-        assert self.G['uc'].shape == (self.m, self.nuc)
-        assert self.G['ub'].shape == (self.m, self.nub)
-        assert self.G['sc'].shape == (self.m, self.nsc)
-        assert self.G['sb'].shape == (self.m, self.nsb)
+        assert self.Guc.shape == (self.m, self.nuc)
+        assert self.Gub.shape == (self.m, self.nub)
+        assert self.Gsc.shape == (self.m, self.nsc)
+        assert self.Gsb.shape == (self.m, self.nsb)
         assert self.g.size == self.m
 
     @staticmethod
