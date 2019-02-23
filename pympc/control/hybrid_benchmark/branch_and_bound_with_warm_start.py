@@ -10,7 +10,7 @@ class Node(object):
     Node of the branch and bound tree.
     '''
 
-    def __init__(self, parent, branch, objective=None, extra_data=None):
+    def __init__(self, parent, branch, feasible=None, objective=None, extra_data=None):
         '''
         A node is uniquely identified by its identifier.
         The identifier is a dictionary (typically containing the binary assigment).
@@ -35,10 +35,10 @@ class Node(object):
         # initialize node
         self.parent = parent
         self.branch = branch
-        self.feasible = None
-        self.integer_feasible = None
+        self.feasible = feasible
         self.objective = objective
         self.extra_data = extra_data
+        self.integer_feasible = None
 
         # build identifier of the node
         if parent is None:
@@ -456,9 +456,9 @@ def branch_and_bound(
 
     # return solution
     if incumbent is None:
-        return None, []
+        return None, None, []
     else:
-        return incumbent.extra_data, optimal_leaves
+        return upper_bound, incumbent.extra_data, optimal_leaves
 
 def get_lower_bound(candidate_nodes):
     '''

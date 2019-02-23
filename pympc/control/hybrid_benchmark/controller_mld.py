@@ -408,7 +408,7 @@ class HybridModelPredictiveController(object):
         # update gurobi model to be safe
         self.model.update()
 
-    def solve_subproblem(self, x0, identifier, tol=1.e-4):
+    def solve_subproblem(self, x0, identifier, tol=5.e-5):
         '''
         Solves the QP relaxation uniquely indentified by its identifier for the given initial state.
 
@@ -474,6 +474,10 @@ class HybridModelPredictiveController(object):
 
         # check that dual solution
         self._check_dual_solution(x0, identifier, feasible, objective, sol, tol)
+
+        # print identifier
+        # if feasible:
+        #     print sol['primal']['sb'][0]
 
         return feasible, integer_feasible, objective, sol
 
@@ -753,14 +757,14 @@ class HybridModelPredictiveController(object):
             return self.solve_subproblem(x0, identifier)
 
         # solve the mixed integer program using branch and bound
-        sol, optimal_leaves = branch_and_bound(
+        objective, sol, optimal_leaves = branch_and_bound(
             solver,
             best_first,
             self.explore_in_chronological_order,
             **kwargs
         )
 
-        return sol, optimal_leaves
+        return objective, sol, optimal_leaves
 
     def explore_in_chronological_order(self, identifier):
         '''
@@ -825,9 +829,10 @@ class HybridModelPredictiveController(object):
                 extra_data = {}
 
                 # propagate lower bounds if leaf is feasible
-                if l.feasible:
-                    lams = self._get_lambdas(l.identifier, l.extra_data['dual'], stage_variables)
-                    lower_bound = l.objective + sum(lams)
+                if l.feasible is None or l.feasible:
+                    feasible = None
+                    lam = self._get_lambdas(l.identifier, l.extra_data['dual'], stage_variables)
+                    lower_bound = l.objective + sum(lam)
                     extra_data['objective_dual'] = lower_bound
                     extra_data['dual'] = self._propagate_dual_solution(l.extra_data['dual'])
 
@@ -839,10 +844,11 @@ class HybridModelPredictiveController(object):
                 else:
 
                     # propagate infeasibility if leaf is still infeasible
-                    lams = self._get_lambdas(l.identifier, l.extra_data['farkas_proof'], stage_variables)
-                    if stage_variables['e_0'].dot(l.extra_data['farkas_proof']['alpha'][1]) < l.extra_data['farkas_objective'] + lams[2]:
+                    feasible = False
+                    lam = self._get_lambdas(l.identifier, l.extra_data['farkas_proof'], stage_variables)
+                    if stage_variables['e_0'].dot(l.extra_data['farkas_proof']['alpha'][1]) < l.extra_data['farkas_objective'] + lam[2]:
                         lower_bound = np.inf
-                        extra_data['farkas_objective'] = l.extra_data['farkas_objective'] + lams[2] + lams[4]
+                        extra_data['farkas_objective'] = l.extra_data['farkas_objective'] + lam[2] + lam[4]
                         extra_data['farkas_proof'] = self._propagate_dual_solution(l.extra_data['farkas_proof'])
 
                         # double check that the whole lambda thing is correct
@@ -856,7 +862,7 @@ class HybridModelPredictiveController(object):
                         lower_bound = - np.inf
 
                 # add new node to the list for the warm start
-                warm_start.append(Node(None, identifier, lower_bound, extra_data))
+                warm_start.append(Node(None, identifier, feasible, lower_bound, extra_data))
 
         return warm_start
 
