@@ -347,6 +347,7 @@ def branch_and_bound(
     incumbent = None
     upper_bound = inf
     optimal_leaves = []
+    explored_nodes = 0
 
     # parse warm start (list of candidate nodes)
     if warm_start is not None:
@@ -436,6 +437,7 @@ def branch_and_bound(
         lower_bound = min(lower_bound, upper_bound)
 
         # print status
+        explored_nodes += 1
         if printing_period is not None:
             printer.add_one_node()
             printer.print_and_update(lower_bound, upper_bound)
@@ -456,9 +458,9 @@ def branch_and_bound(
 
     # return solution
     if incumbent is None:
-        return None, None, []
+        return None, None, explored_nodes, []
     else:
-        return upper_bound, incumbent.extra_data, optimal_leaves
+        return upper_bound, incumbent.extra_data, explored_nodes, optimal_leaves
 
 def get_lower_bound(candidate_nodes):
     '''

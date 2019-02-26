@@ -408,7 +408,7 @@ class HybridModelPredictiveController(object):
         # update gurobi model to be safe
         self.model.update()
 
-    def solve_subproblem(self, x0, identifier, tol=5.e-5):
+    def solve_subproblem(self, x0, identifier, tol=5.e-4, tol_farkas_objective=1.e-6):
         '''
         Solves the QP relaxation uniquely indentified by its identifier for the given initial state.
 
@@ -473,11 +473,7 @@ class HybridModelPredictiveController(object):
         integer_feasible = feasible and len(identifier) == n_binaries
 
         # check that dual solution
-        self._check_dual_solution(x0, identifier, feasible, objective, sol, tol)
-
-        # print identifier
-        # if feasible:
-        #     print sol['primal']['sb'][0]
+        # self._check_dual_solution(x0, identifier, feasible, objective, sol, tol, tol_farkas_objective)
 
         return feasible, integer_feasible, objective, sol
 
@@ -566,7 +562,7 @@ class HybridModelPredictiveController(object):
         # reset quadratic objective
         self.model.setObjective(obj)
 
-    def _check_dual_solution(self, x0, identifier, feasible, objective, sol, tol):
+    def _check_dual_solution(self, x0, identifier, feasible, objective, sol, tol, tol_farkas_objective):
         '''
         Checks that the dual variables given by gurobi are correct.
         Mostly useful for debugging the signs of the multipliers.
@@ -588,12 +584,12 @@ class HybridModelPredictiveController(object):
         if feasible:
             self._check_dual_feasibility(sol['dual'], tol)
             dual_obj = self._evaluate_dual_solution(x0, identifier, sol['dual'])
-            assert np.abs(objective - dual_obj) < tol
+            assert np.isclose(objective, dual_obj)
 
         # if the optimization problem was primal infeasible
         else:
             self._check_dual_feasibility(sol['farkas_proof'], tol)
-            assert sol['farkas_objective'] > tol
+            assert sol['farkas_objective'] > tol_farkas_objective
             assert np.linalg.norm(np.concatenate(sol['farkas_proof']['gamma'])) < tol
             assert np.linalg.norm(np.concatenate(sol['farkas_proof']['delta'])) < tol
             
@@ -757,14 +753,12 @@ class HybridModelPredictiveController(object):
             return self.solve_subproblem(x0, identifier)
 
         # solve the mixed integer program using branch and bound
-        objective, sol, optimal_leaves = branch_and_bound(
+        return branch_and_bound(
             solver,
             best_first,
             self.explore_in_chronological_order,
             **kwargs
         )
-
-        return objective, sol, optimal_leaves
 
     def explore_in_chronological_order(self, identifier):
         '''
@@ -1031,4 +1025,3 @@ class HybridModelPredictiveController(object):
     #                 else:
     #                     new_id[(t-1, i)] = new_id.pop((t, i))
     #     return new_id
-        
