@@ -830,11 +830,11 @@ class HybridModelPredictiveController(object):
                     extra_data['objective_dual'] = lower_bound
                     extra_data['dual'] = self._propagate_dual_solution(l.extra_data['dual'])
 
-                    # double check that the whole lambda thing is correct
-                    assert np.isclose(
-                        extra_data['objective_dual'],
-                        self._evaluate_dual_solution(x_1, identifier, extra_data['dual'])
-                        )
+                    # # double check that the whole lambda thing is correct
+                    # assert np.isclose(
+                    #     extra_data['objective_dual'],
+                    #     self._evaluate_dual_solution(x_1, identifier, extra_data['dual'])
+                    #     )
                 else:
 
                     # propagate infeasibility if leaf is still infeasible
@@ -845,11 +845,11 @@ class HybridModelPredictiveController(object):
                         extra_data['farkas_objective'] = l.extra_data['farkas_objective'] + lam[2] + lam[4]
                         extra_data['farkas_proof'] = self._propagate_dual_solution(l.extra_data['farkas_proof'])
 
-                        # double check that the whole lambda thing is correct
-                        assert np.isclose(
-                            extra_data['farkas_objective'],
-                            self._evaluate_dual_solution(x_1, identifier, extra_data['farkas_proof'])
-                            )
+                        # # double check that the whole lambda thing is correct
+                        # assert np.isclose(
+                        #     extra_data['farkas_objective'],
+                        #     self._evaluate_dual_solution(x_1, identifier, extra_data['farkas_proof'])
+                        #     )
 
                     # if potentially feasible
                     else:
