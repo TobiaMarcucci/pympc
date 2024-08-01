@@ -15,7 +15,7 @@ setup(name='pympc',
       install_requires=[
           'six',
           'numpy',
-          'scipy',
+          'scipy<=1.11.4',
           'matplotlib',
           'gurobipy'
       ],
