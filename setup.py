@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(name='pympc',
       version='0.1',
@@ -7,7 +7,7 @@ setup(name='pympc',
       author='Tobia Marcucci',
       author_email='tobiam@mit.edu',
       license='MIT',
-      packages=['pympc'],
+      packages=find_packages(),
       keywords=[
           'model predictive control',
           'computational geometry'
@@ -15,7 +15,8 @@ setup(name='pympc',
       install_requires=[
           'six',
           'numpy',
-          'scipy',
-          'matplotlib'
+          'scipy<=1.11.4',
+          'matplotlib',
+          'gurobipy'
       ],
       zip_safe=False)
